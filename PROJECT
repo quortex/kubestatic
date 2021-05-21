@@ -1,0 +1,6 @@
+domain: kubestatic.quortex.io
+layout:
+- go.kubebuilder.io/v3
+projectName: kubestatic
+repo: quortex.io/kubestatic
+version: "3"
