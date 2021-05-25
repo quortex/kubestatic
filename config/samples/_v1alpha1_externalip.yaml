@@ -1,0 +1,7 @@
+apiVersion: kubestatic.quortex.io/v1alpha1
+kind: ExternalIP
+metadata:
+  name: externalip-sample
+spec:
+  # Add fields here
+  foo: bar
