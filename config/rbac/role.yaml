@@ -1,0 +1,44 @@
+
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  creationTimestamp: null
+  name: manager-role
+rules:
+- apiGroups:
+  - ""
+  resources:
+  - nodes
+  verbs:
+  - get
+  - list
+  - patch
+  - update
+  - watch
+- apiGroups:
+  - kubestatic.quortex.io
+  resources:
+  - externalips
+  verbs:
+  - create
+  - delete
+  - get
+  - list
+  - patch
+  - update
+  - watch
+- apiGroups:
+  - kubestatic.quortex.io
+  resources:
+  - externalips/finalizers
+  verbs:
+  - update
+- apiGroups:
+  - kubestatic.quortex.io
+  resources:
+  - externalips/status
+  verbs:
+  - get
+  - patch
+  - update

@@ -3,5 +3,4 @@ kind: ExternalIP
 metadata:
   name: externalip-sample
 spec:
-  # Add fields here
-  foo: bar
+  nodeName: ip-10-136-35-84.eu-west-1.compute.internal

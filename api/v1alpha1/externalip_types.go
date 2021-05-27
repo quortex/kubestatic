@@ -20,26 +20,43 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 )
 
-// EDIT THIS FILE!  THIS IS SCAFFOLDING FOR YOU TO OWN!
-// NOTE: json tags are required.  Any new fields you add must have json tags for the fields to be serialized.
-
 // ExternalIPSpec defines the desired state of ExternalIP
 type ExternalIPSpec struct {
-	// INSERT ADDITIONAL SPEC FIELDS - desired state of cluster
-	// Important: Run "make" to regenerate code after modifying this file
-
-	// Foo is an example field of ExternalIP. Edit externalip_types.go to remove/update
-	Foo string `json:"foo,omitempty"`
+	// NodeName is the node's instance on which the address must be attached
+	// +optional
+	NodeName *string `json:"nodeName,omitempty"`
 }
+
+// ExternalIPState describes the ExternalIP state.
+type ExternalIPState string
+
+// All defined ExternalIPStates
+const (
+	ExternalIPStateNone       ExternalIPState = ""
+	ExternalIPStateReserved   ExternalIPState = "Reserved"
+	ExternalIPStateAssociated ExternalIPState = "Associated"
+)
 
 // ExternalIPStatus defines the observed state of ExternalIP
 type ExternalIPStatus struct {
-	// INSERT ADDITIONAL STATUS FIELD - define observed state of cluster
-	// Important: Run "make" to regenerate code after modifying this file
+	// The current state of the ExternalIP
+	State ExternalIPState `json:"state,omitempty"`
+
+	// The address dientifier
+	AddressID *string `json:"addressID,omitempty"`
+
+	// The address public IP
+	PublicIPAddress *string `json:"publicIPAddress,omitempty"`
+
+	// The instance identifier
+	InstanceID *string `json:"instanceID,omitempty"`
 }
 
 //+kubebuilder:object:root=true
 //+kubebuilder:subresource:status
+//+kubebuilder:resource:scope=Cluster
+//+kubebuilder:printcolumn:name="State",type=string,JSONPath=`.status.state`
+//+kubebuilder:printcolumn:name="Public IP",type=string,JSONPath=`.status.publicIPAddress`
 
 // ExternalIP is the Schema for the externalips API
 type ExternalIP struct {
