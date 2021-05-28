@@ -1,0 +1,24 @@
+# permissions for end users to edit externalips.
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: externalip-editor-role
+rules:
+- apiGroups:
+  - kubestatic.quortex.io
+  resources:
+  - externalips
+  verbs:
+  - create
+  - delete
+  - get
+  - list
+  - patch
+  - update
+  - watch
+- apiGroups:
+  - kubestatic.quortex.io
+  resources:
+  - externalips/status
+  verbs:
+  - get

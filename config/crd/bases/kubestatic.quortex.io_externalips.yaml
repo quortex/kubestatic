@@ -1,0 +1,80 @@
+
+---
+apiVersion: apiextensions.k8s.io/v1
+kind: CustomResourceDefinition
+metadata:
+  annotations:
+    controller-gen.kubebuilder.io/version: v0.4.1
+  creationTimestamp: null
+  name: externalips.kubestatic.quortex.io
+spec:
+  group: kubestatic.quortex.io
+  names:
+    kind: ExternalIP
+    listKind: ExternalIPList
+    plural: externalips
+    singular: externalip
+  scope: Cluster
+  versions:
+  - additionalPrinterColumns:
+    - jsonPath: .status.state
+      name: State
+      type: string
+    - jsonPath: .status.publicIPAddress
+      name: Public IP
+      type: string
+    - jsonPath: .spec.nodeName
+      name: Node
+      type: string
+    name: v1alpha1
+    schema:
+      openAPIV3Schema:
+        description: ExternalIP is the Schema for the externalips API
+        properties:
+          apiVersion:
+            description: 'APIVersion defines the versioned schema of this representation
+              of an object. Servers should convert recognized schemas to the latest
+              internal value, and may reject unrecognized values. More info: https://git.k8s.io/community/contributors/devel/sig-architecture/api-conventions.md#resources'
+            type: string
+          kind:
+            description: 'Kind is a string value representing the REST resource this
+              object represents. Servers may infer this from the endpoint the client
+              submits requests to. Cannot be updated. In CamelCase. More info: https://git.k8s.io/community/contributors/devel/sig-architecture/api-conventions.md#types-kinds'
+            type: string
+          metadata:
+            type: object
+          spec:
+            description: ExternalIPSpec defines the desired state of ExternalIP
+            properties:
+              nodeName:
+                description: NodeName is the node's instance on which the address
+                  must be attached
+                type: string
+            type: object
+          status:
+            description: ExternalIPStatus defines the observed state of ExternalIP
+            properties:
+              addressID:
+                description: The address dientifier
+                type: string
+              instanceID:
+                description: The instance identifier
+                type: string
+              publicIPAddress:
+                description: The address public IP
+                type: string
+              state:
+                description: The current state of the ExternalIP
+                type: string
+            type: object
+        type: object
+    served: true
+    storage: true
+    subresources:
+      status: {}
+status:
+  acceptedNames:
+    kind: ""
+    plural: ""
+  conditions: []
+  storedVersions: []

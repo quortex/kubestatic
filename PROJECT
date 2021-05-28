@@ -3,4 +3,17 @@ layout:
 - go.kubebuilder.io/v3
 projectName: kubestatic
 repo: quortex.io/kubestatic
+resources:
+- api:
+    crdVersion: v1
+    namespaced: true
+  controller: true
+  domain: kubestatic.quortex.io
+  kind: ExternalIP
+  path: quortex.io/kubestatic/api/v1alpha1
+  version: v1alpha1
+- controller: true
+  domain: kubestatic.quortex.io
+  kind: Node
+  version: v1alpha1
 version: "3"
