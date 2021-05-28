@@ -16,7 +16,6 @@ type Provider interface {
 // Client describe the cloud provider client.
 type Client interface {
 	GetInstance(ctx context.Context, instanceID string) (*Instance, error)
-
 	GetAddress(ctx context.Context, addressID string) (*Address, error)
 	CreateAddress(ctx context.Context) (*Address, error)
 	DeleteAddress(ctx context.Context, addressID string) error

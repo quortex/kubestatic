@@ -38,6 +38,7 @@ type Address struct {
 type AssociateAddressRequest struct {
 	// The ID of the address.
 	AddressID string
+
 	// The ID of the network interface that the address is associated with.
 	NetworkInterfaceID string
 }

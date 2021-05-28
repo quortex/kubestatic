@@ -18,6 +18,7 @@ package controllers
 
 import (
 	"context"
+	"fmt"
 
 	"github.com/go-logr/logr"
 	"github.com/google/uuid"
@@ -85,7 +86,6 @@ func (r *ExternalIPReconciler) Reconcile(ctx context.Context, req ctrl.Request) 
 }
 
 func (r *ExternalIPReconciler) reconcileExternalIP(ctx context.Context, log logr.Logger, externalIP *v1alpha1.ExternalIP) (ctrl.Result, error) {
-
 	// 1st STEP
 	//
 	// Add finalizer
@@ -107,7 +107,7 @@ func (r *ExternalIPReconciler) reconcileExternalIP(ctx context.Context, log logr
 		}
 		log.Info("Created address", "id", res.AddressID, "publicIP", res.PublicIP)
 
-		// Update status and finalizer
+		// Update status
 		externalIP.Status.State = v1alpha1.ExternalIPStateReserved
 		externalIP.Status.AddressID = &res.AddressID
 		externalIP.Status.PublicIPAddress = &res.PublicIP
@@ -144,7 +144,8 @@ func (r *ExternalIPReconciler) reconcileExternalIP(ctx context.Context, log logr
 			}
 
 			if len(res.NetworkInterfaces) == 0 {
-				log.Error(err, "No network interface for instance", "id", instanceID)
+				err := fmt.Errorf("no network interface for instance %s", instanceID)
+				log.Error(err, "Cannot associate an address with this instance", "instanceID", instanceID)
 				return ctrl.Result{}, err
 			}
 			networkInterface := res.NetworkInterfaces[0]
@@ -205,11 +206,9 @@ func (r *ExternalIPReconciler) reconcileExternalIP(ctx context.Context, log logr
 }
 
 func (r *ExternalIPReconciler) reconcileExternalIPDeletion(ctx context.Context, log logr.Logger, externalIP *v1alpha1.ExternalIP) (ctrl.Result, error) {
-
 	// 1st STEP
 	//
-	// Reconciliation of a possible external IP associated
-	// with the instance.
+	// Reconciliation of a possible external IP associated with the instance.
 	// If an IP is associated with the instance, disassociate it.
 	if externalIP.Status.State == v1alpha1.ExternalIPStateAssociated {
 		return disassociateAddress(ctx, r.Provider, r.Status(), log, externalIP)

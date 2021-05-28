@@ -61,10 +61,12 @@ func (r *NodeReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.
 	// List auto assigned ExternalIPs for reconciled node
 	log.V(1).Info("List all ExternalIPs for node")
 	externalIPs := &v1alpha1.ExternalIPList{}
-	if err := r.Client.List(ctx,
+	if err := r.Client.List(
+		ctx,
 		externalIPs,
 		client.MatchingFields{externalIPNodeNameField: req.Name},
-		client.MatchingLabels{externalIPAutoAssignLabel: "true"}); err != nil {
+		client.MatchingLabels{externalIPAutoAssignLabel: "true"},
+	); err != nil {
 		log.Error(err, "Unable to list ExternalIP resources", "nodeName", req.Name)
 		return ctrl.Result{}, err
 	}
@@ -77,10 +79,12 @@ func (r *NodeReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.
 
 	// List orphaned auto assigned ExternalIPs to reuse it
 	log.V(1).Info("Listing orphaned auto assigned ExternalIPs")
-	if err := r.Client.List(ctx,
+	if err := r.Client.List(
+		ctx,
 		externalIPs,
 		client.MatchingFields{externalIPNodeNameField: ""},
-		client.MatchingLabels{externalIPAutoAssignLabel: "true"}); err != nil {
+		client.MatchingLabels{externalIPAutoAssignLabel: "true"},
+	); err != nil {
 		log.Error(err, "Unable to list ExternalIP resources", "nodeName", "")
 		return ctrl.Result{}, err
 	}
