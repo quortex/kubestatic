@@ -57,6 +57,7 @@ type ExternalIPStatus struct {
 //+kubebuilder:resource:scope=Cluster
 //+kubebuilder:printcolumn:name="State",type=string,JSONPath=`.status.state`
 //+kubebuilder:printcolumn:name="Public IP",type=string,JSONPath=`.status.publicIPAddress`
+//+kubebuilder:printcolumn:name="Node",type=string,JSONPath=`.spec.nodeName`
 
 // ExternalIP is the Schema for the externalips API
 type ExternalIP struct {

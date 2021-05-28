@@ -23,6 +23,9 @@ spec:
     - jsonPath: .status.publicIPAddress
       name: Public IP
       type: string
+    - jsonPath: .spec.nodeName
+      name: Node
+      type: string
     name: v1alpha1
     schema:
       openAPIV3Schema:
@@ -44,18 +47,21 @@ spec:
             description: ExternalIPSpec defines the desired state of ExternalIP
             properties:
               nodeName:
-                description: NodeName is a request to attach this IP on a specific
-                  node instance.
+                description: NodeName is the node's instance on which the address
+                  must be attached
                 type: string
             type: object
           status:
             description: ExternalIPStatus defines the observed state of ExternalIP
             properties:
               addressID:
+                description: The address dientifier
                 type: string
               instanceID:
+                description: The instance identifier
                 type: string
               publicIPAddress:
+                description: The address public IP
                 type: string
               state:
                 description: The current state of the ExternalIP

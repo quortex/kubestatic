@@ -27,6 +27,9 @@ import (
 	"k8s.io/apimachinery/pkg/types"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
+	"sigs.k8s.io/controller-runtime/pkg/handler"
+	"sigs.k8s.io/controller-runtime/pkg/reconcile"
+	"sigs.k8s.io/controller-runtime/pkg/source"
 
 	"quortex.io/kubestatic/api/v1alpha1"
 	"quortex.io/kubestatic/pkg/helper"
@@ -122,7 +125,6 @@ func (r *ExternalIPReconciler) reconcileExternalIP(ctx context.Context, log logr
 			var node corev1.Node
 			if err := r.Get(ctx, types.NamespacedName{Name: *externalIP.Spec.NodeName}, &node); err != nil {
 				if errors.IsNotFound(err) {
-					// TODO: is it really that we want ?
 					// Invalid nodeName, remove ExternalIP nodeName attribute.
 					log.Info("Node not found. Removing it from ExternalIP spec", "nodeName", externalIP.Spec.NodeName)
 					externalIP.Spec.NodeName = nil
@@ -169,6 +171,36 @@ func (r *ExternalIPReconciler) reconcileExternalIP(ctx context.Context, log logr
 		return ctrl.Result{}, nil
 	}
 
+	// ExternalIP reliability check
+	//
+	// Check if the associated node still exists and disassociate it if it does not.
+	// No nodeName or no living node, set state back to "Reserved"
+	if externalIP.Status.State == v1alpha1.ExternalIPStateAssociated {
+		if externalIP.Spec.NodeName != nil {
+			// Get node from ExternalIP spec
+			var node corev1.Node
+			if err := r.Get(ctx, types.NamespacedName{Name: *externalIP.Spec.NodeName}, &node); err != nil {
+				if errors.IsNotFound(err) {
+					// Invalid nodeName, remove ExternalIP nodeName attribute.
+					log.Info("Node not found. Removing it from ExternalIP spec", "nodeName", externalIP.Spec.NodeName)
+					externalIP.Spec.NodeName = nil
+					return ctrl.Result{}, r.Update(ctx, externalIP)
+				}
+				// Error reading the object - requeue the request.
+				log.Error(err, "Failed to get Node")
+				return ctrl.Result{}, err
+			}
+
+			// Node not being deleted, reconciliation done
+			if node.ObjectMeta.DeletionTimestamp.IsZero() {
+				return ctrl.Result{}, nil
+			}
+		}
+
+		// Set state back to "Reserved", disassociate address and end reconciliation
+		return disassociateAddress(ctx, r.Provider, r.Status(), log, externalIP)
+	}
+
 	return ctrl.Result{}, nil
 }
 
@@ -179,28 +211,8 @@ func (r *ExternalIPReconciler) reconcileExternalIPDeletion(ctx context.Context, 
 	// Reconciliation of a possible external IP associated
 	// with the instance.
 	// If an IP is associated with the instance, disassociate it.
-	if externalIP.Status.State == v1alpha1.ExternalIPStateAssociated && externalIP.Status.AddressID != nil {
-		res, err := r.Provider.GetAddress(ctx, *externalIP.Status.AddressID)
-		if err != nil {
-			log.Error(err, "Failed to retrieve address", "addressID", *externalIP.Status.AddressID)
-			return ctrl.Result{}, err
-		}
-
-		if res.AssociationID != nil {
-			if err := r.Provider.DisassociateAddress(ctx, provider.DisassociateAddressRequest{
-				AssociationID: *res.AssociationID,
-			}); err != nil {
-				log.Error(err, "Failed to disassociate address", "addressID", *externalIP.Status.AddressID, "instanceID", *externalIP.Status.InstanceID)
-				return ctrl.Result{}, err
-			}
-			log.Info("Disassociated address", "addressID", *externalIP.Status.AddressID, "instanceID", *externalIP.Status.InstanceID)
-		}
-
-		// Update status
-		externalIP.Status.State = v1alpha1.ExternalIPStateReserved
-		externalIP.Status.InstanceID = nil
-		log.V(1).Info("Updating ExternalIP", "state", externalIP.Status.State)
-		return ctrl.Result{}, r.Status().Update(ctx, externalIP)
+	if externalIP.Status.State == v1alpha1.ExternalIPStateAssociated {
+		return disassociateAddress(ctx, r.Provider, r.Status(), log, externalIP)
 	}
 
 	// 2nd STEP
@@ -231,15 +243,65 @@ func (r *ExternalIPReconciler) reconcileExternalIPDeletion(ctx context.Context, 
 			externalIP.Finalizers = helper.RemoveString(externalIP.Finalizers, externalIPFinalizer)
 			return ctrl.Result{}, r.Update(ctx, externalIP)
 		}
-		return ctrl.Result{}, nil
 	}
 
 	return ctrl.Result{}, nil
+}
+
+// disassociateAddress performs address disassociation tasks
+func disassociateAddress(ctx context.Context, pvd provider.Provider, stWriter client.StatusWriter, log logr.Logger, externalIP *v1alpha1.ExternalIP) (ctrl.Result, error) {
+	// Get address and disassociate it
+	if externalIP.Status.AddressID != nil {
+		res, err := pvd.GetAddress(ctx, *externalIP.Status.AddressID)
+		if err != nil {
+			log.Error(err, "Failed to retrieve address", "addressID", *externalIP.Status.AddressID)
+			return ctrl.Result{}, err
+		}
+
+		if res.AssociationID != nil {
+			if err := pvd.DisassociateAddress(ctx, provider.DisassociateAddressRequest{
+				AssociationID: *res.AssociationID,
+			}); err != nil {
+				log.Error(err, "Failed to disassociate address", "addressID", *externalIP.Status.AddressID, "instanceID", *externalIP.Status.InstanceID)
+				return ctrl.Result{}, err
+			}
+			log.Info("Disassociated address", "addressID", *externalIP.Status.AddressID, "instanceID", *externalIP.Status.InstanceID)
+		}
+	}
+
+	// Update status
+	externalIP.Status.State = v1alpha1.ExternalIPStateReserved
+	externalIP.Status.InstanceID = nil
+	log.V(1).Info("Updating ExternalIP", "state", externalIP.Status.State)
+	return ctrl.Result{}, stWriter.Update(ctx, externalIP)
 }
 
 // SetupWithManager sets up the controller with the Manager.
 func (r *ExternalIPReconciler) SetupWithManager(mgr ctrl.Manager) error {
 	return ctrl.NewControllerManagedBy(mgr).
 		For(&v1alpha1.ExternalIP{}).
+		Watches(
+			&source.Kind{Type: &corev1.Node{}},
+			handler.EnqueueRequestsFromMapFunc(func(o client.Object) []reconcile.Request {
+				ctx := context.Background()
+				log := r.Log.WithName("nodemapper")
+				node := o.(*corev1.Node)
+
+				// List ExternalIPs that matches node name
+				log.V(1).Info("List all ExternalIP for node")
+				externalIPs := &v1alpha1.ExternalIPList{}
+				if err := r.Client.List(ctx, externalIPs, client.MatchingFields{externalIPNodeNameField: node.Name}); err != nil {
+					log.Error(err, "Unable to list ExternalIP resources", "nodeName", node.Name)
+					return []reconcile.Request{}
+				}
+
+				// Reconcile each matching ExternalIP
+				res := make([]reconcile.Request, len(externalIPs.Items))
+				for i, e := range externalIPs.Items {
+					res[i] = reconcile.Request{NamespacedName: types.NamespacedName{Name: e.Name}}
+				}
+				return res
+			}),
+		).
 		Complete(r)
 }
