@@ -21,4 +21,9 @@ type Client interface {
 	DeleteAddress(ctx context.Context, addressID string) error
 	AssociateAddress(ctx context.Context, req AssociateAddressRequest) error
 	DisassociateAddress(ctx context.Context, req DisassociateAddressRequest) error
+	GetFirewallRule(ctx context.Context, firewallRuleID string) (*FirewallRule, error)
+	CreateFirewallRule(ctx context.Context, req CreateFirewallRuleRequest) (*FirewallRule, error)
+	DeleteFirewallRule(ctx context.Context, firewallRuleID string) error
+	AssociateFirewallRule(ctx context.Context, req AssociateFirewallRuleRequest) error
+	DisassociateFirewallRule(ctx context.Context, req AssociateFirewallRuleRequest) error
 }

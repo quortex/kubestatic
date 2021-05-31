@@ -16,11 +16,12 @@ import (
 )
 
 type awsProvider struct {
-	ec2 *ec2.EC2
+	ec2   *ec2.EC2
+	vpcID string
 }
 
 // NewProvider instantiate a Provider implementation for AWS
-func NewProvider() provider.Provider {
+func NewProvider(vpcID string) provider.Provider {
 	// By default NewSession loads credentials from the shared credentials file (~/.aws/credentials)
 	//
 	// The Session will attempt to load configuration and credentials from the environment,
@@ -35,7 +36,8 @@ func NewProvider() provider.Provider {
 	}
 
 	return &awsProvider{
-		ec2: ec2.New(session),
+		ec2:   ec2.New(session),
+		vpcID: vpcID,
 	}
 }
 
@@ -137,4 +139,184 @@ func (p *awsProvider) DisassociateAddress(ctx context.Context, req provider.Disa
 	}
 
 	return nil
+}
+
+func (p *awsProvider) GetFirewallRule(ctx context.Context, firewallRuleID string) (*provider.FirewallRule, error) {
+	res, err := p.ec2.DescribeSecurityGroups(&ec2.DescribeSecurityGroupsInput{
+		GroupIds: aws.StringSlice([]string{firewallRuleID}),
+	})
+
+	if err != nil {
+		return nil, converter.DecodeEC2Error("failed to get security group", err)
+	}
+
+	if len(res.SecurityGroups) == 0 {
+		return nil, &provider.Error{
+			Code: provider.NotFoundError,
+			Msg:  fmt.Sprintf("failed to get security group: security group with group-id %s not found", firewallRuleID),
+		}
+	}
+
+	return converter.DecodeSecurityGroup(res.SecurityGroups[0]), nil
+}
+
+func (p *awsProvider) CreateFirewallRule(ctx context.Context, req provider.CreateFirewallRuleRequest) (*provider.FirewallRule, error) {
+	res, err := p.ec2.CreateSecurityGroup(&ec2.CreateSecurityGroupInput{
+		Description: aws.String(req.Description),
+		GroupName:   aws.String(req.Name),
+		VpcId:       aws.String(p.vpcID),
+	})
+
+	if err != nil {
+		return nil, converter.DecodeEC2Error("failed to create security group", err)
+	}
+
+	if res.GroupId != nil && req.IPPermission != nil {
+		switch req.Direction {
+		case provider.DirectionIngress:
+			return p.authorizeSecurityGroupIngress(ctx, *res.GroupId, *req.IPPermission)
+		case provider.DirectionEgress:
+			return p.authorizeSecurityGroupEgress(ctx, *res.GroupId, *req.IPPermission)
+		}
+	}
+
+	return p.GetFirewallRule(ctx, aws.StringValue(res.GroupId))
+}
+
+func (p *awsProvider) DeleteFirewallRule(ctx context.Context, firewallRuleID string) error {
+	_, err := p.ec2.DeleteSecurityGroup(&ec2.DeleteSecurityGroupInput{
+		GroupId: aws.String(firewallRuleID),
+	})
+
+	if err != nil {
+		return converter.DecodeEC2Error("failed to delete security group", err)
+	}
+
+	return nil
+}
+
+func (p *awsProvider) authorizeSecurityGroupIngress(ctx context.Context, firewallRuleID string, req provider.IPPermission) (*provider.FirewallRule, error) {
+	toto := &ec2.AuthorizeSecurityGroupIngressInput{
+		GroupId: aws.String(firewallRuleID),
+		IpPermissions: []*ec2.IpPermission{
+			converter.EncodeIPPermission(req),
+		},
+	}
+	_, err := p.ec2.AuthorizeSecurityGroupIngress(toto)
+
+	if err != nil {
+		return nil, converter.DecodeEC2Error("failed to authorize security group ingress permission", err)
+	}
+
+	return p.GetFirewallRule(ctx, firewallRuleID)
+}
+
+func (p *awsProvider) revokeSecurityGroupIngress(ctx context.Context, firewallRuleID string, req provider.IPPermission) error {
+	_, err := p.ec2.RevokeSecurityGroupIngress(&ec2.RevokeSecurityGroupIngressInput{
+		GroupId: aws.String(firewallRuleID),
+		IpPermissions: []*ec2.IpPermission{
+			converter.EncodeIPPermission(req),
+		},
+	})
+
+	if err != nil {
+		return converter.DecodeEC2Error("failed to revoke security group ingress permission", err)
+	}
+
+	return nil
+}
+
+func (p *awsProvider) authorizeSecurityGroupEgress(ctx context.Context, firewallRuleID string, req provider.IPPermission) (*provider.FirewallRule, error) {
+	_, err := p.ec2.AuthorizeSecurityGroupEgress(&ec2.AuthorizeSecurityGroupEgressInput{
+		GroupId: aws.String(firewallRuleID),
+		IpPermissions: []*ec2.IpPermission{
+			converter.EncodeIPPermission(req),
+		},
+	})
+
+	if err != nil {
+		return nil, converter.DecodeEC2Error("failed to authorize security group egress permission", err)
+	}
+
+	return p.GetFirewallRule(ctx, firewallRuleID)
+}
+
+func (p *awsProvider) revokeSecurityGroupEgress(ctx context.Context, firewallRuleID string, req provider.IPPermission) error {
+	_, err := p.ec2.RevokeSecurityGroupEgress(&ec2.RevokeSecurityGroupEgressInput{
+		GroupId: aws.String(firewallRuleID),
+		IpPermissions: []*ec2.IpPermission{
+			converter.EncodeIPPermission(req),
+		},
+	})
+
+	if err != nil {
+		return converter.DecodeEC2Error("failed to revoke security group egress permission", err)
+	}
+
+	return nil
+}
+
+func (p *awsProvider) AssociateFirewallRule(ctx context.Context, req provider.AssociateFirewallRuleRequest) error {
+	res, err := p.ec2.DescribeNetworkInterfaces(&ec2.DescribeNetworkInterfacesInput{
+		NetworkInterfaceIds: aws.StringSlice([]string{req.NetworkInterfaceID}),
+	})
+
+	if err != nil {
+		return err
+	}
+
+	if len(res.NetworkInterfaces) == 0 {
+		return &provider.Error{
+			Code: provider.NotFoundError,
+			Msg:  fmt.Sprintf("failed to associate security group: network interface with id %s not found", req.NetworkInterfaceID),
+		}
+	}
+
+	networkInterface := res.NetworkInterfaces[0]
+	groups := []*string{}
+	for _, e := range networkInterface.Groups {
+		if req.FirewallRuleID != *e.GroupId {
+			groups = append(groups, e.GroupId)
+		}
+	}
+	groups = append(groups, aws.String(req.FirewallRuleID))
+
+	_, err = p.ec2.ModifyNetworkInterfaceAttribute(&ec2.ModifyNetworkInterfaceAttributeInput{
+		Groups:             groups,
+		NetworkInterfaceId: aws.String(req.NetworkInterfaceID),
+	})
+
+	return err
+}
+
+func (p *awsProvider) DisassociateFirewallRule(ctx context.Context, req provider.AssociateFirewallRuleRequest) error {
+	res, err := p.ec2.DescribeNetworkInterfaces(&ec2.DescribeNetworkInterfacesInput{
+		NetworkInterfaceIds: aws.StringSlice([]string{req.NetworkInterfaceID}),
+	})
+
+	if err != nil {
+		return err
+	}
+
+	if len(res.NetworkInterfaces) == 0 {
+		return &provider.Error{
+			Code: provider.NotFoundError,
+			Msg:  fmt.Sprintf("failed to disassociate security group: network interface with id %s not found", req.NetworkInterfaceID),
+		}
+	}
+
+	networkInterface := res.NetworkInterfaces[0]
+	groups := []*string{}
+	for _, e := range networkInterface.Groups {
+		if req.FirewallRuleID != aws.StringValue(e.GroupId) {
+			groups = append(groups, e.GroupId)
+		}
+	}
+
+	_, err = p.ec2.ModifyNetworkInterfaceAttribute(&ec2.ModifyNetworkInterfaceAttributeInput{
+		Groups:             groups,
+		NetworkInterfaceId: aws.String(req.NetworkInterfaceID),
+	})
+
+	return err
 }
