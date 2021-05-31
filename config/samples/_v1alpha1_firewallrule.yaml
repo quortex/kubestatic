@@ -1,0 +1,7 @@
+apiVersion: kubestatic.quortex.io/v1alpha1
+kind: FirewallRule
+metadata:
+  name: firewallrule-sample
+spec:
+  # Add fields here
+  foo: bar
