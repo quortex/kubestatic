@@ -42,3 +42,29 @@ rules:
   - get
   - patch
   - update
+- apiGroups:
+  - kubestatic.quortex.io
+  resources:
+  - firewallrules
+  verbs:
+  - create
+  - delete
+  - get
+  - list
+  - patch
+  - update
+  - watch
+- apiGroups:
+  - kubestatic.quortex.io
+  resources:
+  - firewallrules/finalizers
+  verbs:
+  - update
+- apiGroups:
+  - kubestatic.quortex.io
+  resources:
+  - firewallrules/status
+  verbs:
+  - get
+  - patch
+  - update

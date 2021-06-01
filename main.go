@@ -66,6 +66,7 @@ func main() {
 		fEnableLeaderElection bool
 		fProbeAddr            string
 		fCloudProvider        string
+		fVPC                  string
 	)
 	flag.StringVar(&fMetricsAddr, "metrics-bind-address", ":8080", "The address the metric endpoint binds to.")
 	flag.StringVar(&fProbeAddr, "health-probe-bind-address", ":8081", "The address the probe endpoint binds to.")
@@ -73,6 +74,7 @@ func main() {
 		"Enable leader election for controller manager. "+
 			"Enabling this will ensure there is only one active controller manager.")
 	flag.StringVar(&fCloudProvider, "cloud-provider", "aws", "Cloud provider type. Available values: ["+strings.Join(availableProviders, ",")+"]")
+	flag.StringVar(&fVPC, "vpc", "", "The VPC identifier in which the cluster resides.")
 	opts := zap.Options{
 		Development: true,
 	}
@@ -85,7 +87,7 @@ func main() {
 	var pvd provider.Provider
 	switch fCloudProvider {
 	case providerAWS:
-		pvd = aws.NewProvider()
+		pvd = aws.NewProvider(fVPC)
 	default:
 		setupLog.Error(fmt.Errorf("Invalid cloud-provider: %s", fCloudProvider), "unable to init cloud provider implementation")
 		os.Exit(1)
@@ -119,6 +121,15 @@ func main() {
 		Scheme: mgr.GetScheme(),
 	}).SetupWithManager(mgr); err != nil {
 		setupLog.Error(err, "unable to create controller", "controller", "Node")
+		os.Exit(1)
+	}
+	if err = (&controllers.FirewallRuleReconciler{
+		Client:   mgr.GetClient(),
+		Log:      ctrl.Log.WithName("controllers").WithName("FirewallRule"),
+		Scheme:   mgr.GetScheme(),
+		Provider: pvd,
+	}).SetupWithManager(mgr); err != nil {
+		setupLog.Error(err, "unable to create controller", "controller", "FirewallRule")
 		os.Exit(1)
 	}
 	//+kubebuilder:scaffold:builder

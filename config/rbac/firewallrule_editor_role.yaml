@@ -1,0 +1,24 @@
+# permissions for end users to edit firewallrules.
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: firewallrule-editor-role
+rules:
+- apiGroups:
+  - kubestatic.quortex.io
+  resources:
+  - firewallrules
+  verbs:
+  - create
+  - delete
+  - get
+  - list
+  - patch
+  - update
+  - watch
+- apiGroups:
+  - kubestatic.quortex.io
+  resources:
+  - firewallrules/status
+  verbs:
+  - get

@@ -1,0 +1,14 @@
+apiVersion: kubestatic.quortex.io/v1alpha1
+kind: FirewallRule
+metadata:
+  name: firewallrule-sample
+spec:
+  nodeName: ip-10-136-0-108.eu-west-1.compute.internal
+  description: An amazing firewall rule !
+  direction: Ingress
+  protocol: tcp
+  fromPort: 5678
+  toPort: 5678
+  ipRanges:
+    - description: an authorized ingress ip
+      cidr: 91.165.195.82/32
