@@ -17,11 +17,26 @@ func StringValue(s *string) string {
 	return ""
 }
 
+// BoolPointer returns a pointer on given bool
+func BoolPointer(b bool) *bool {
+	return &b
+}
+
+// Int32Pointer returns a pointer on given int32
+func Int32Pointer(i int32) *int32 {
+	return &i
+}
+
 // Int64PointerOrNil returns a pointer on given int or nil if zero
 func Int64PointerOrNil(i int64) *int64 {
 	if i == 0 {
 		return nil
 	}
+	return Int64Pointer(i)
+}
+
+// Int64Pointer returns a pointer on given int64
+func Int64Pointer(i int64) *int64 {
 	return &i
 }
 

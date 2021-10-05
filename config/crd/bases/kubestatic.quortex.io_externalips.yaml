@@ -55,7 +55,7 @@ spec:
             description: ExternalIPStatus defines the observed state of ExternalIP
             properties:
               addressID:
-                description: The address dientifier
+                description: The address identifier
                 type: string
               instanceID:
                 description: The instance identifier

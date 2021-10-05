@@ -21,6 +21,9 @@ func EncodeIPPermission(req provider.IPPermission) *ec2.IpPermission {
 	if helper.ContainsString([]string{"udp", "tcp", "UDP", "TCP"}, req.Protocol) {
 		res.FromPort = aws.Int64(req.FromPort)
 		res.ToPort = req.ToPort
+		if res.ToPort == nil {
+			res.ToPort = aws.Int64(req.FromPort)
+		}
 	} else {
 		res.FromPort = helper.Int64PointerOrNil(req.FromPort)
 		res.ToPort = req.ToPort

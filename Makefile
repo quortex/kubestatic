@@ -49,6 +49,9 @@ fmt: ## Run go fmt against code.
 vet: ## Run go vet against code.
 	go vet ./...
 
+lint: ## Run the linter used in CI against code.
+	$(GOLANG_CI_LINT) run -v
+
 ENVTEST_ASSETS_DIR=$(shell pwd)/testbin
 test: manifests generate fmt vet ## Run tests.
 	mkdir -p ${ENVTEST_ASSETS_DIR}
@@ -88,6 +91,10 @@ undeploy: ## Undeploy controller from the K8s cluster specified in ~/.kube/confi
 CONTROLLER_GEN = $(shell pwd)/bin/controller-gen
 controller-gen: ## Download controller-gen locally if necessary.
 	$(call go-get-tool,$(CONTROLLER_GEN),sigs.k8s.io/controller-tools/cmd/controller-gen@v0.4.1)
+
+GOLANG_CI_LINT = $(shell which golangci-lint)
+golangci-lint: ## Download golangci-lint locally if necessary.
+	$(call go-get-tool,$(CRD_REF_DOCS),github.com/golangci/golangci-lint/cmd/golangci-lint@v1.42.1)
 
 KUSTOMIZE = $(shell pwd)/bin/kustomize
 kustomize: ## Download kustomize locally if necessary.

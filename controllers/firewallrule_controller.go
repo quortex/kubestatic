@@ -115,7 +115,7 @@ func (r *FirewallRuleReconciler) reconcileFirewallRule(ctx context.Context, log 
 	// 3rd STEP
 	//
 	// Finally associate firewall rule to instance network interface.
-	if rule.Status.State == v1alpha1.FirewallRuleStateReserved {
+	if rule.IsReserved() {
 		if rule.Spec.NodeName != nil {
 			// Get node from FirewallRule spec
 			var node corev1.Node
@@ -173,7 +173,7 @@ func (r *FirewallRuleReconciler) reconcileFirewallRule(ctx context.Context, log 
 	//
 	// Check if the associated node still exists and disassociate it if it does not.
 	// No nodeName or no living node, set state back to "Reserved"
-	if rule.Status.State == v1alpha1.FirewallRuleStateAssociated {
+	if rule.IsAssociated() {
 		if rule.Spec.NodeName != nil {
 			// Get node from FirewallRule spec
 			var node corev1.Node
@@ -207,14 +207,14 @@ func (r *FirewallRuleReconciler) reconcileFirewallRuleDeletion(ctx context.Conte
 	//
 	// Reconciliation of a possible firewall rule associated with the instance.
 	// If a rule is associated with the instance, disassociate it.
-	if rule.Status.State == v1alpha1.FirewallRuleStateAssociated {
+	if rule.IsAssociated() {
 		return disassociateFirewallRule(ctx, r.Provider, r.Status(), log, rule)
 	}
 
 	// 2nd STEP
 	//
 	// Release unassociated firewall rule.
-	if rule.Status.State == v1alpha1.FirewallRuleStateReserved {
+	if rule.IsReserved() {
 		if err := r.Provider.DeleteFirewallRule(ctx, *rule.Status.FirewallRuleID); err != nil {
 			if !errors.IsNotFound(err) {
 				log.Error(err, "Failed to delete FirewallRule", "firewallRuleID", *rule.Status.FirewallRuleID)

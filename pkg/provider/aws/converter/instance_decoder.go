@@ -16,6 +16,7 @@ func DecodeInstance(data *ec2.Instance) *provider.Instance {
 	return &provider.Instance{
 		InstanceID:        aws.StringValue(data.InstanceId),
 		NetworkInterfaces: DecodeNetworkInterfaces(data.NetworkInterfaces),
+		VpcID:             aws.StringValue(data.VpcId),
 	}
 }
 

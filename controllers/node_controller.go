@@ -93,7 +93,7 @@ func (r *NodeReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.
 	if len(externalIPs.Items) > 0 {
 		// We reuse the first one arbitrarly
 		externalIP := &externalIPs.Items[0]
-		externalIP.Spec.NodeName = &req.Name
+		externalIP.Spec.NodeName = req.Name
 		log.V(1).Info("Associating ExternalIP to node", "externalIP", externalIP.Name)
 		return ctrl.Result{}, r.Update(ctx, externalIP)
 	}
@@ -106,7 +106,7 @@ func (r *NodeReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.
 			Labels:       map[string]string{externalIPAutoAssignLabel: "true"},
 		},
 		Spec: v1alpha1.ExternalIPSpec{
-			NodeName: &req.Name,
+			NodeName: req.Name,
 		},
 	}
 	if err := r.Create(ctx, externalIP); err != nil {
@@ -120,9 +120,9 @@ func (r *NodeReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.
 // SetupWithManager sets up the controller with the Manager.
 func (r *NodeReconciler) SetupWithManager(mgr ctrl.Manager) error {
 	// Index ExternalIP NodeName to list only ExternalIPs assigned to Node.
-	mgr.GetCache().IndexField(context.TODO(), &v1alpha1.ExternalIP{}, externalIPNodeNameField, func(o client.Object) []string {
+	_ = mgr.GetCache().IndexField(context.TODO(), &v1alpha1.ExternalIP{}, externalIPNodeNameField, func(o client.Object) []string {
 		externalIP := o.(*v1alpha1.ExternalIP)
-		return []string{string(helper.StringValue(externalIP.Spec.NodeName))}
+		return []string{externalIP.Spec.NodeName}
 	})
 
 	return ctrl.NewControllerManagedBy(mgr).

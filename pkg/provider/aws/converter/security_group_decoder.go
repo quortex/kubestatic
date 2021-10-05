@@ -28,8 +28,8 @@ func DecodeSecurityGroup(data *ec2.SecurityGroup) *provider.FirewallRule {
 		FirewallRuleID: aws.StringValue(data.GroupId),
 		VpcID:          aws.StringValue(data.VpcId),
 		FirewallRuleSpec: provider.FirewallRuleSpec{
-			Name:         *data.GroupName,
-			Description:  *data.Description,
+			Name:         aws.StringValue(data.GroupName),
+			Description:  aws.StringValue(data.Description),
 			Direction:    direction,
 			IPPermission: permission,
 		},
