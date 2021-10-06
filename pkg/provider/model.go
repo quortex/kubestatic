@@ -122,6 +122,14 @@ type CreateFirewallRuleRequest struct {
 	FirewallRuleSpec
 }
 
+// UpdateFirewallRuleRequest wraps parameters required to update a firewall rule.
+type UpdateFirewallRuleRequest struct {
+	FirewallRuleSpec
+
+	// The ID of the firewall rule.
+	FirewallRuleID string
+}
+
 // AssociateFirewallRuleRequest wraps parameters required to associate a firewall rule to a Network interface.
 type AssociateFirewallRuleRequest struct {
 	// The ID of the firewall rule.

@@ -85,6 +85,9 @@ type FirewallRuleStatus struct {
 	// The current state of the FirewallRule
 	State FirewallRuleState `json:"state,omitempty"`
 
+	// The latest FirewallRule specification applied, used to make API requests to cloud providers only if the resource has been changed to avoid throttling issues.
+	LastApplied *string `json:"lastApplied,omitempty"`
+
 	// The firewall rule dientifier
 	FirewallRuleID *string `json:"firewallRuleID,omitempty"`
 

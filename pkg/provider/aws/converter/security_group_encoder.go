@@ -40,7 +40,7 @@ func EncodeIpRange(data *provider.IPRange) *ec2.IpRange {
 
 	return &ec2.IpRange{
 		CidrIp:      aws.String(data.CIDR),
-		Description: aws.String(data.Description),
+		Description: helper.StringPointerOrNil(data.Description),
 	}
 }
 

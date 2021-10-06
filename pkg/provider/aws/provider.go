@@ -193,7 +193,7 @@ func (p *awsProvider) DisassociateAddress(ctx context.Context, req provider.Disa
 	return nil
 }
 
-func (p *awsProvider) GetFirewallRule(ctx context.Context, firewallRuleID string) (*provider.FirewallRule, error) {
+func (p *awsProvider) getSecurityGroup(ctx context.Context, firewallRuleID string) (*ec2.SecurityGroup, error) {
 	res, err := p.ec2.DescribeSecurityGroups(&ec2.DescribeSecurityGroupsInput{
 		GroupIds: aws.StringSlice([]string{firewallRuleID}),
 	})
@@ -209,7 +209,16 @@ func (p *awsProvider) GetFirewallRule(ctx context.Context, firewallRuleID string
 		}
 	}
 
-	return converter.DecodeSecurityGroup(res.SecurityGroups[0]), nil
+	return res.SecurityGroups[0], nil
+}
+
+func (p *awsProvider) GetFirewallRule(ctx context.Context, firewallRuleID string) (*provider.FirewallRule, error) {
+	sg, err := p.getSecurityGroup(ctx, firewallRuleID)
+	if err != nil {
+		return nil, err
+	}
+
+	return converter.DecodeSecurityGroup(sg), nil
 }
 
 func (p *awsProvider) CreateFirewallRule(ctx context.Context, req provider.CreateFirewallRuleRequest) (*provider.FirewallRule, error) {
@@ -223,16 +232,42 @@ func (p *awsProvider) CreateFirewallRule(ctx context.Context, req provider.Creat
 		return nil, converter.DecodeEC2Error("failed to create security group", err)
 	}
 
-	if res.GroupId != nil && req.IPPermission != nil {
-		switch req.Direction {
-		case provider.DirectionIngress:
-			return p.authorizeSecurityGroupIngress(ctx, *res.GroupId, *req.IPPermission)
-		case provider.DirectionEgress:
-			return p.authorizeSecurityGroupEgress(ctx, *res.GroupId, *req.IPPermission)
+	return p.UpdateFirewallRule(ctx, provider.UpdateFirewallRuleRequest{
+		FirewallRuleID:   *res.GroupId,
+		FirewallRuleSpec: req.FirewallRuleSpec,
+	})
+}
+
+func (p *awsProvider) UpdateFirewallRule(ctx context.Context, req provider.UpdateFirewallRuleRequest) (*provider.FirewallRule, error) {
+	sg, err := p.getSecurityGroup(ctx, req.FirewallRuleID)
+	if err != nil {
+		return nil, converter.DecodeEC2Error("failed to get security group", err)
+	}
+
+	switch req.Direction {
+	case provider.DirectionIngress:
+		// revoke all egress permissions
+		if err := provider.ReconcilePermissions(ctx, req.FirewallRuleID, p.authorizeSecurityGroupEgress, p.revokeSecurityGroupEgress, nil, converter.DecodeIpPermissions(sg.IpPermissionsEgress)); err != nil {
+			return nil, converter.DecodeEC2Error("failed to revoke security group egress permissions", err)
+		}
+		// Apply Ingress permissions reconciliation
+		if err := provider.ReconcilePermissions(ctx, req.FirewallRuleID, p.authorizeSecurityGroupIngress, p.revokeSecurityGroupIngress, []*provider.IPPermission{req.IPPermission}, converter.DecodeIpPermissions(sg.IpPermissions)); err != nil {
+			return nil, converter.DecodeEC2Error("failed to apply security group ingress permissions", err)
+		}
+
+	case provider.DirectionEgress:
+		// revoke all ingress permissions
+		if err := provider.ReconcilePermissions(ctx, req.FirewallRuleID, p.authorizeSecurityGroupIngress, p.revokeSecurityGroupIngress, nil, converter.DecodeIpPermissions(sg.IpPermissions)); err != nil {
+			return nil, converter.DecodeEC2Error("failed to revoke security group ingress permissions", err)
+		}
+
+		// Apply Ingress permissions reconciliation
+		if err := provider.ReconcilePermissions(ctx, req.FirewallRuleID, p.authorizeSecurityGroupEgress, p.revokeSecurityGroupEgress, []*provider.IPPermission{req.IPPermission}, converter.DecodeIpPermissions(sg.IpPermissionsEgress)); err != nil {
+			return nil, converter.DecodeEC2Error("failed to apply security group ingress permissions", err)
 		}
 	}
 
-	return p.GetFirewallRule(ctx, aws.StringValue(res.GroupId))
+	return p.GetFirewallRule(ctx, req.FirewallRuleID)
 }
 
 func (p *awsProvider) DeleteFirewallRule(ctx context.Context, firewallRuleID string) error {
@@ -247,7 +282,7 @@ func (p *awsProvider) DeleteFirewallRule(ctx context.Context, firewallRuleID str
 	return nil
 }
 
-func (p *awsProvider) authorizeSecurityGroupIngress(ctx context.Context, firewallRuleID string, req provider.IPPermission) (*provider.FirewallRule, error) {
+func (p *awsProvider) authorizeSecurityGroupIngress(ctx context.Context, firewallRuleID string, req provider.IPPermission) error {
 	_, err := p.ec2.AuthorizeSecurityGroupIngress(&ec2.AuthorizeSecurityGroupIngressInput{
 		GroupId: aws.String(firewallRuleID),
 		IpPermissions: []*ec2.IpPermission{
@@ -256,10 +291,10 @@ func (p *awsProvider) authorizeSecurityGroupIngress(ctx context.Context, firewal
 	})
 
 	if err != nil {
-		return nil, converter.DecodeEC2Error("failed to authorize security group ingress permission", err)
+		return converter.DecodeEC2Error("failed to authorize security group ingress permission", err)
 	}
 
-	return p.GetFirewallRule(ctx, firewallRuleID)
+	return nil
 }
 
 func (p *awsProvider) revokeSecurityGroupIngress(ctx context.Context, firewallRuleID string, req provider.IPPermission) error {
@@ -277,7 +312,7 @@ func (p *awsProvider) revokeSecurityGroupIngress(ctx context.Context, firewallRu
 	return nil
 }
 
-func (p *awsProvider) authorizeSecurityGroupEgress(ctx context.Context, firewallRuleID string, req provider.IPPermission) (*provider.FirewallRule, error) {
+func (p *awsProvider) authorizeSecurityGroupEgress(ctx context.Context, firewallRuleID string, req provider.IPPermission) error {
 	_, err := p.ec2.AuthorizeSecurityGroupEgress(&ec2.AuthorizeSecurityGroupEgressInput{
 		GroupId: aws.String(firewallRuleID),
 		IpPermissions: []*ec2.IpPermission{
@@ -286,10 +321,10 @@ func (p *awsProvider) authorizeSecurityGroupEgress(ctx context.Context, firewall
 	})
 
 	if err != nil {
-		return nil, converter.DecodeEC2Error("failed to authorize security group egress permission", err)
+		return converter.DecodeEC2Error("failed to authorize security group egress permission", err)
 	}
 
-	return p.GetFirewallRule(ctx, firewallRuleID)
+	return nil
 }
 
 func (p *awsProvider) revokeSecurityGroupEgress(ctx context.Context, firewallRuleID string, req provider.IPPermission) error {

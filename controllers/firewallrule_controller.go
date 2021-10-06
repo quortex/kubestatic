@@ -18,7 +18,9 @@ package controllers
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
+	"reflect"
 
 	"github.com/go-logr/logr"
 	"github.com/google/uuid"
@@ -108,8 +110,42 @@ func (r *FirewallRuleReconciler) reconcileFirewallRule(ctx context.Context, log 
 		// Update status
 		rule.Status.State = v1alpha1.FirewallRuleStateReserved
 		rule.Status.FirewallRuleID = &res.FirewallRuleID
+		lastApplied, err := json.Marshal(rule.Spec)
+		if err != nil {
+			return ctrl.Result{}, fmt.Errorf("Failed to marshal last applied firewallrule: %w", err)
+		}
+		rule.Status.LastApplied = helper.StringPointerOrNil(string(lastApplied))
 		log.V(1).Info("Updating FirewallRule", "state", rule.Status.State, "firewallRuleID", rule.Status.FirewallRuleID)
 		return ctrl.Result{}, r.Status().Update(ctx, rule)
+	} else {
+		lastApplied := &v1alpha1.FirewallRuleSpec{}
+		if err := json.Unmarshal([]byte(helper.StringValue(rule.Status.LastApplied)), lastApplied); err != nil {
+			return ctrl.Result{}, fmt.Errorf("Failed to unmarshal last applied firewallrule: %w", err)
+		}
+
+		// Firewall rule has changed, perform update
+		if !reflect.DeepEqual(rule.Spec, *lastApplied) {
+			// Update firewall rule
+			firewallRuleID := helper.StringValue(rule.Status.FirewallRuleID)
+			res, err := r.Provider.UpdateFirewallRule(ctx, provider.UpdateFirewallRuleRequest{
+				FirewallRuleID:   firewallRuleID,
+				FirewallRuleSpec: encodeFirewallRuleSpec(rule),
+			})
+			if err != nil {
+				log.Error(err, "Failed to update firewall rule", "id", firewallRuleID)
+				return ctrl.Result{}, err
+			}
+			log.Info("Updated firewall rule", "id", res.FirewallRuleID)
+
+			// Update status
+			lastApplied, err := json.Marshal(rule.Spec)
+			if err != nil {
+				return ctrl.Result{}, fmt.Errorf("Failed to marshal last applied firewallrule: %w", err)
+			}
+			rule.Status.LastApplied = helper.StringPointerOrNil(string(lastApplied))
+			log.V(1).Info("Updating FirewallRule", "state", rule.Status.State, "firewallRuleID", rule.Status.FirewallRuleID)
+			return ctrl.Result{}, r.Status().Update(ctx, rule)
+		}
 	}
 
 	// 3rd STEP
