@@ -1,0 +1,72 @@
+{{ template "chart.header" . }}
+{{ template "chart.deprecationWarning" . }}
+
+{{ template "chart.versionBadge" . }}{{ template "chart.typeBadge" . }}{{ template "chart.appVersionBadge" . }}
+
+{{ template "chart.description" . }}
+
+{{ template "chart.homepageLine" . }}
+
+{{ template "chart.sourcesSection" . }}
+
+{{ template "chart.requirementsSection" . }}
+
+## Overview
+This project is an operator that allows Kubernetes to automatically manage the lifecycle of public cloud providers resources needed to expose endpoints on public nodes.
+
+The standard use case for this tool is to provision external IPs on public nodes as well as firewall rules allowing to determine access permissions on these nodes.
+
+## Prerequisites
+
+### <a id="Prerequisites_AWS"></a>AWS
+To be used with AWS and interact with EC2 resources, an AWS account with the following permissions is required:
+```json
+{
+    "Version": "2012-10-17",
+    "Statement": [
+        {
+            "Sid": "AllObjectActions",
+            "Effect": "Allow",
+            "Action": [
+                "ec2:DescribeSecurityGroups",
+                "ec2:CreateSecurityGroup",
+                "ec2:DeleteSecurityGroup",
+                "ec2:AuthorizeSecurityGroupIngress",
+                "ec2:RevokeSecurityGroupIngress",
+                "ec2:AuthorizeSecurityGroupEgress",
+                "ec2:RevokeSecurityGroupEgress",
+                "ec2:DescribeAddresses",
+                "ec2:AllocateAddress",
+                "ec2:ReleaseAddress",
+                "ec2:AssociateAddress",
+                "ec2:DisassociateAddress",
+                "ec2:DescribeInstances",
+                "ec2:ModifyInstanceAttribute",
+                "ec2:DescribeNetworkInterfaces",
+                "ec2:ModifyNetworkInterfaceAttribute",
+                "ec2:CreateTags"
+            ],
+            "Resource": "*"
+        }
+    ]
+}
+```
+
+## Installation
+
+1. Add kubestatic helm repository
+
+```sh
+helm repo add kubestatic https://quortex.github.io/kubestatic
+```
+
+2. Deploy the appropriate release in desired namespace.
+
+```sh
+helm create namesapce kubestatic-system
+helm install kubestatic kubestatic/kubestatic -n kubestatic-system
+```
+
+{{ template "chart.valuesSection" . }}
+
+{{ template "chart.maintainersSection" . }}
