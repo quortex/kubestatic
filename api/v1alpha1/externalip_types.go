@@ -24,7 +24,7 @@ import (
 type ExternalIPSpec struct {
 	// NodeName is the node's instance on which the address must be attached
 	// +optional
-	NodeName string `json:"nodeName"`
+	NodeName string `json:"nodeName,omitempty"`
 }
 
 // ExternalIPState describes the ExternalIP state.

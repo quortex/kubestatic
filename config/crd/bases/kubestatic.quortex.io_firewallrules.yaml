@@ -110,6 +110,11 @@ spec:
               instanceID:
                 description: The instance identifier
                 type: string
+              lastApplied:
+                description: The latest FirewallRule specification applied, used to
+                  make API requests to cloud providers only if the resource has been
+                  changed to avoid throttling issues.
+                type: string
               networkInterfaceID:
                 description: The network interface identifier
                 type: string

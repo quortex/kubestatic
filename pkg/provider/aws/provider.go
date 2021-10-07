@@ -18,6 +18,8 @@ import (
 )
 
 const (
+	// Retrieve instance metadata for AWS EC2 instance
+	// https://docs.aws.amazon.com/AWSEC2/latest/UserGuide/instancedata-data-retrieval.html
 	instanceMetadataEndpoint = "http://169.254.169.254/latest/meta-data"
 )
 
@@ -32,7 +34,7 @@ type awsProvider struct {
 }
 
 // NewProvider instantiate a Provider implementation for AWS
-func NewProvider() provider.Provider {
+func NewProvider() (provider.Provider, error) {
 	// By default NewSession loads credentials from the shared credentials file (~/.aws/credentials)
 	//
 	// The Session will attempt to load configuration and credentials from the environment,
@@ -43,18 +45,18 @@ func NewProvider() provider.Provider {
 	// * EC2 Instance Metadata (credentials only)
 	session, err := session.NewSession()
 	if err != nil {
-		panic(err)
+		return nil, err
 	}
 
 	// Get vpc ID from the running instance
 	_, err = retrieveVPCID()
 	if err != nil {
-		panic(err)
+		return nil, err
 	}
 
 	return &awsProvider{
 		ec2: ec2.New(session),
-	}
+	}, nil
 }
 
 func retrieveInstanceNetworkInterfaceMacAddress() (string, error) {

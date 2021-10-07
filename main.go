@@ -85,7 +85,13 @@ func main() {
 	var pvd provider.Provider
 	switch fCloudProvider {
 	case providerAWS:
-		pvd = aws.NewProvider()
+		var err error
+		pvd, err = aws.NewProvider()
+		if err != nil {
+			setupLog.Error(err, "Failed to initialize provider")
+			os.Exit(1)
+		}
+
 	default:
 		setupLog.Error(fmt.Errorf("Invalid cloud-provider: %s", fCloudProvider), "unable to init cloud provider implementation")
 		os.Exit(1)
