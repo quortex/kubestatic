@@ -19,6 +19,11 @@ jobs:
       GCP_PROJECT_ID: quortex-registry-public
 
     steps:
+      - name: Set up Go 1.16
+        uses: actions/setup-go@v2
+        with:
+          go-version: 1.16
+
       # This step uses Github's checkout-action: https://github.com/actions/checkout
       - name: Check out code
         uses: actions/checkout@v2
