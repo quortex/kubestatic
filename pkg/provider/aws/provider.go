@@ -49,10 +49,11 @@ func NewProvider() (provider.Provider, error) {
 	}
 
 	// Get vpc ID from the running instance
-	_, err = retrieveVPCID()
+	id, err := retrieveVPCID()
 	if err != nil {
 		return nil, err
 	}
+	vpcID = id
 
 	return &awsProvider{
 		ec2: ec2.New(session),
