@@ -1,0 +1,47 @@
+# Checks are executed on each push
+name: Checks
+
+on: ["push"]
+
+jobs:
+  lint:
+    name: Lint
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v2
+
+      # Instead of using our own CI, we uses https://golangci-lint.run/
+      # It combines 48 linters and execute them in parallel
+      - name: Lint with golangci-lint
+        uses: golangci/golangci-lint-action@v2.5.2
+        with:
+          version: v1.32
+          args: --timeout 5m
+
+  test:
+    name: Test
+    runs-on: ubuntu-latest
+    steps:
+      - name: Set up Go 1.x
+        uses: actions/setup-go@v2
+        with:
+          go-version: ^1.16
+        id: go
+
+      - name: Check out code
+        uses: actions/checkout@v2
+
+      - name: Execute tests
+        run: make test
+        shell: bash
+
+      - name: Export coverage
+        if: github.event == 'pull_request'
+        run: go tool cover -html=cover.out -o=coverage.html
+
+      - name: Upload artifacts
+        if: github.event == 'pull_request'
+        uses: actions/upload-artifact@v2
+        with:
+          name: coverage
+          path: coverage.html

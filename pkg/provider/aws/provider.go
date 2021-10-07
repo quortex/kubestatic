@@ -4,6 +4,8 @@ package aws
 import (
 	"context"
 	"fmt"
+	"io"
+	"net/http"
 	"path"
 
 	"github.com/aws/aws-sdk-go/aws"
@@ -15,13 +17,24 @@ import (
 	"quortex.io/kubestatic/pkg/provider/aws/converter"
 )
 
+const (
+	// Retrieve instance metadata for AWS EC2 instance
+	// https://docs.aws.amazon.com/AWSEC2/latest/UserGuide/instancedata-data-retrieval.html
+	instanceMetadataEndpoint = "http://169.254.169.254/latest/meta-data"
+)
+
+// The VPC identifier
+// Automatically retrieved with GetVPCID function.
+// For run outside of the cluster, can be set through linker flag, e.g.
+// go build -ldflags "-X quortex.io/kubestatic/pkg/provider/aws.vpcID=$VPC_ID" -a -o manager main.go
+var vpcID string
+
 type awsProvider struct {
-	ec2   *ec2.EC2
-	vpcID string
+	ec2 *ec2.EC2
 }
 
 // NewProvider instantiate a Provider implementation for AWS
-func NewProvider(vpcID string) provider.Provider {
+func NewProvider() (provider.Provider, error) {
 	// By default NewSession loads credentials from the shared credentials file (~/.aws/credentials)
 	//
 	// The Session will attempt to load configuration and credentials from the environment,
@@ -32,13 +45,54 @@ func NewProvider(vpcID string) provider.Provider {
 	// * EC2 Instance Metadata (credentials only)
 	session, err := session.NewSession()
 	if err != nil {
-		panic(err)
+		return nil, err
+	}
+
+	// Get vpc ID from the running instance
+	_, err = retrieveVPCID()
+	if err != nil {
+		return nil, err
 	}
 
 	return &awsProvider{
-		ec2:   ec2.New(session),
-		vpcID: vpcID,
+		ec2: ec2.New(session),
+	}, nil
+}
+
+func retrieveInstanceNetworkInterfaceMacAddress() (string, error) {
+	res, err := http.Get(instanceMetadataEndpoint + "/mac")
+	if err != nil {
+		return "", err
 	}
+	defer res.Body.Close()
+	body, err := io.ReadAll(res.Body)
+	if err != nil {
+		return "", err
+	}
+
+	return string(body), nil
+}
+
+func retrieveVPCID() (string, error) {
+	if vpcID != "" {
+		return vpcID, nil
+	}
+	mac, err := retrieveInstanceNetworkInterfaceMacAddress()
+	if err != nil {
+		return "", err
+	}
+
+	res, err := http.Get(fmt.Sprintf(instanceMetadataEndpoint + "/network/interfaces/macs/" + mac + "/vpc-id"))
+	if err != nil {
+		return "", err
+	}
+	defer res.Body.Close()
+	body, err := io.ReadAll(res.Body)
+	if err != nil {
+		return "", err
+	}
+
+	return string(body), nil
 }
 
 func (p *awsProvider) GetInstanceID(node corev1.Node) string {
@@ -141,7 +195,7 @@ func (p *awsProvider) DisassociateAddress(ctx context.Context, req provider.Disa
 	return nil
 }
 
-func (p *awsProvider) GetFirewallRule(ctx context.Context, firewallRuleID string) (*provider.FirewallRule, error) {
+func (p *awsProvider) getSecurityGroup(ctx context.Context, firewallRuleID string) (*ec2.SecurityGroup, error) {
 	res, err := p.ec2.DescribeSecurityGroups(&ec2.DescribeSecurityGroupsInput{
 		GroupIds: aws.StringSlice([]string{firewallRuleID}),
 	})
@@ -157,30 +211,65 @@ func (p *awsProvider) GetFirewallRule(ctx context.Context, firewallRuleID string
 		}
 	}
 
-	return converter.DecodeSecurityGroup(res.SecurityGroups[0]), nil
+	return res.SecurityGroups[0], nil
+}
+
+func (p *awsProvider) GetFirewallRule(ctx context.Context, firewallRuleID string) (*provider.FirewallRule, error) {
+	sg, err := p.getSecurityGroup(ctx, firewallRuleID)
+	if err != nil {
+		return nil, err
+	}
+
+	return converter.DecodeSecurityGroup(sg), nil
 }
 
 func (p *awsProvider) CreateFirewallRule(ctx context.Context, req provider.CreateFirewallRuleRequest) (*provider.FirewallRule, error) {
 	res, err := p.ec2.CreateSecurityGroup(&ec2.CreateSecurityGroupInput{
 		Description: aws.String(req.Description),
 		GroupName:   aws.String(req.Name),
-		VpcId:       aws.String(p.vpcID),
+		VpcId:       aws.String(vpcID),
 	})
 
 	if err != nil {
 		return nil, converter.DecodeEC2Error("failed to create security group", err)
 	}
 
-	if res.GroupId != nil && req.IPPermission != nil {
-		switch req.Direction {
-		case provider.DirectionIngress:
-			return p.authorizeSecurityGroupIngress(ctx, *res.GroupId, *req.IPPermission)
-		case provider.DirectionEgress:
-			return p.authorizeSecurityGroupEgress(ctx, *res.GroupId, *req.IPPermission)
+	return p.UpdateFirewallRule(ctx, provider.UpdateFirewallRuleRequest{
+		FirewallRuleID:   *res.GroupId,
+		FirewallRuleSpec: req.FirewallRuleSpec,
+	})
+}
+
+func (p *awsProvider) UpdateFirewallRule(ctx context.Context, req provider.UpdateFirewallRuleRequest) (*provider.FirewallRule, error) {
+	sg, err := p.getSecurityGroup(ctx, req.FirewallRuleID)
+	if err != nil {
+		return nil, converter.DecodeEC2Error("failed to get security group", err)
+	}
+
+	switch req.Direction {
+	case provider.DirectionIngress:
+		// revoke all egress permissions
+		if err := provider.ReconcilePermissions(ctx, req.FirewallRuleID, p.authorizeSecurityGroupEgress, p.revokeSecurityGroupEgress, nil, converter.DecodeIpPermissions(sg.IpPermissionsEgress)); err != nil {
+			return nil, converter.DecodeEC2Error("failed to revoke security group egress permissions", err)
+		}
+		// Apply Ingress permissions reconciliation
+		if err := provider.ReconcilePermissions(ctx, req.FirewallRuleID, p.authorizeSecurityGroupIngress, p.revokeSecurityGroupIngress, []*provider.IPPermission{req.IPPermission}, converter.DecodeIpPermissions(sg.IpPermissions)); err != nil {
+			return nil, converter.DecodeEC2Error("failed to apply security group ingress permissions", err)
+		}
+
+	case provider.DirectionEgress:
+		// revoke all ingress permissions
+		if err := provider.ReconcilePermissions(ctx, req.FirewallRuleID, p.authorizeSecurityGroupIngress, p.revokeSecurityGroupIngress, nil, converter.DecodeIpPermissions(sg.IpPermissions)); err != nil {
+			return nil, converter.DecodeEC2Error("failed to revoke security group ingress permissions", err)
+		}
+
+		// Apply Ingress permissions reconciliation
+		if err := provider.ReconcilePermissions(ctx, req.FirewallRuleID, p.authorizeSecurityGroupEgress, p.revokeSecurityGroupEgress, []*provider.IPPermission{req.IPPermission}, converter.DecodeIpPermissions(sg.IpPermissionsEgress)); err != nil {
+			return nil, converter.DecodeEC2Error("failed to apply security group ingress permissions", err)
 		}
 	}
 
-	return p.GetFirewallRule(ctx, aws.StringValue(res.GroupId))
+	return p.GetFirewallRule(ctx, req.FirewallRuleID)
 }
 
 func (p *awsProvider) DeleteFirewallRule(ctx context.Context, firewallRuleID string) error {
@@ -195,20 +284,19 @@ func (p *awsProvider) DeleteFirewallRule(ctx context.Context, firewallRuleID str
 	return nil
 }
 
-func (p *awsProvider) authorizeSecurityGroupIngress(ctx context.Context, firewallRuleID string, req provider.IPPermission) (*provider.FirewallRule, error) {
-	toto := &ec2.AuthorizeSecurityGroupIngressInput{
+func (p *awsProvider) authorizeSecurityGroupIngress(ctx context.Context, firewallRuleID string, req provider.IPPermission) error {
+	_, err := p.ec2.AuthorizeSecurityGroupIngress(&ec2.AuthorizeSecurityGroupIngressInput{
 		GroupId: aws.String(firewallRuleID),
 		IpPermissions: []*ec2.IpPermission{
 			converter.EncodeIPPermission(req),
 		},
-	}
-	_, err := p.ec2.AuthorizeSecurityGroupIngress(toto)
+	})
 
 	if err != nil {
-		return nil, converter.DecodeEC2Error("failed to authorize security group ingress permission", err)
+		return converter.DecodeEC2Error("failed to authorize security group ingress permission", err)
 	}
 
-	return p.GetFirewallRule(ctx, firewallRuleID)
+	return nil
 }
 
 func (p *awsProvider) revokeSecurityGroupIngress(ctx context.Context, firewallRuleID string, req provider.IPPermission) error {
@@ -226,7 +314,7 @@ func (p *awsProvider) revokeSecurityGroupIngress(ctx context.Context, firewallRu
 	return nil
 }
 
-func (p *awsProvider) authorizeSecurityGroupEgress(ctx context.Context, firewallRuleID string, req provider.IPPermission) (*provider.FirewallRule, error) {
+func (p *awsProvider) authorizeSecurityGroupEgress(ctx context.Context, firewallRuleID string, req provider.IPPermission) error {
 	_, err := p.ec2.AuthorizeSecurityGroupEgress(&ec2.AuthorizeSecurityGroupEgressInput{
 		GroupId: aws.String(firewallRuleID),
 		IpPermissions: []*ec2.IpPermission{
@@ -235,10 +323,10 @@ func (p *awsProvider) authorizeSecurityGroupEgress(ctx context.Context, firewall
 	})
 
 	if err != nil {
-		return nil, converter.DecodeEC2Error("failed to authorize security group egress permission", err)
+		return converter.DecodeEC2Error("failed to authorize security group egress permission", err)
 	}
 
-	return p.GetFirewallRule(ctx, firewallRuleID)
+	return nil
 }
 
 func (p *awsProvider) revokeSecurityGroupEgress(ctx context.Context, firewallRuleID string, req provider.IPPermission) error {

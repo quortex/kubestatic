@@ -17,7 +17,7 @@ endif
 SHELL = /usr/bin/env bash -o pipefail
 .SHELLFLAGS = -ec
 
-all: build
+all: build manifests doc
 
 ##@ General
 
@@ -49,11 +49,21 @@ fmt: ## Run go fmt against code.
 vet: ## Run go vet against code.
 	go vet ./...
 
+lint: ## Run the linter used in CI against code.
+	$(GOLANG_CI_LINT) run -v
+
 ENVTEST_ASSETS_DIR=$(shell pwd)/testbin
 test: manifests generate fmt vet ## Run tests.
 	mkdir -p ${ENVTEST_ASSETS_DIR}
 	test -f ${ENVTEST_ASSETS_DIR}/setup-envtest.sh || curl -sSLo ${ENVTEST_ASSETS_DIR}/setup-envtest.sh https://raw.githubusercontent.com/kubernetes-sigs/controller-runtime/v0.7.2/hack/setup-envtest.sh
 	source ${ENVTEST_ASSETS_DIR}/setup-envtest.sh; fetch_envtest_tools $(ENVTEST_ASSETS_DIR); setup_envtest_env $(ENVTEST_ASSETS_DIR); go test ./... -coverprofile cover.out
+
+doc: crd-ref-docs ## Build api documentation.
+	$(CRD_REF_DOCS) --source-path=api \
+					--renderer=asciidoctor \
+					--config=hack/doc-generation/config.yaml \
+					--templates-dir=hack/doc-generation/templates/asciidoctor \
+					--output-path=docs/api-docs.asciidoc
 
 ##@ Build
 
@@ -88,6 +98,14 @@ undeploy: ## Undeploy controller from the K8s cluster specified in ~/.kube/confi
 CONTROLLER_GEN = $(shell pwd)/bin/controller-gen
 controller-gen: ## Download controller-gen locally if necessary.
 	$(call go-get-tool,$(CONTROLLER_GEN),sigs.k8s.io/controller-tools/cmd/controller-gen@v0.4.1)
+
+CRD_REF_DOCS = $(shell which crd-ref-docs)
+crd-ref-docs: ## Download crd-ref-docs locally if necessary.
+	$(call go-get-tool,$(CRD_REF_DOCS),github.com/elastic/crd-ref-docs@v0.0.5)
+
+GOLANG_CI_LINT = $(shell which golangci-lint)
+golangci-lint: ## Download golangci-lint locally if necessary.
+	$(call go-get-tool,$(CRD_REF_DOCS),github.com/golangci/golangci-lint/cmd/golangci-lint@v1.42.1)
 
 KUSTOMIZE = $(shell pwd)/bin/kustomize
 kustomize: ## Download kustomize locally if necessary.

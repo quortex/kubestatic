@@ -18,7 +18,9 @@ package controllers
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
+	"reflect"
 
 	"github.com/go-logr/logr"
 	"github.com/google/uuid"
@@ -108,14 +110,48 @@ func (r *FirewallRuleReconciler) reconcileFirewallRule(ctx context.Context, log 
 		// Update status
 		rule.Status.State = v1alpha1.FirewallRuleStateReserved
 		rule.Status.FirewallRuleID = &res.FirewallRuleID
+		lastApplied, err := json.Marshal(rule.Spec)
+		if err != nil {
+			return ctrl.Result{}, fmt.Errorf("Failed to marshal last applied firewallrule: %w", err)
+		}
+		rule.Status.LastApplied = helper.StringPointerOrNil(string(lastApplied))
 		log.V(1).Info("Updating FirewallRule", "state", rule.Status.State, "firewallRuleID", rule.Status.FirewallRuleID)
 		return ctrl.Result{}, r.Status().Update(ctx, rule)
+	} else {
+		lastApplied := &v1alpha1.FirewallRuleSpec{}
+		if err := json.Unmarshal([]byte(helper.StringValue(rule.Status.LastApplied)), lastApplied); err != nil {
+			return ctrl.Result{}, fmt.Errorf("Failed to unmarshal last applied firewallrule: %w", err)
+		}
+
+		// Firewall rule has changed, perform update
+		if !reflect.DeepEqual(rule.Spec, *lastApplied) {
+			// Update firewall rule
+			firewallRuleID := helper.StringValue(rule.Status.FirewallRuleID)
+			res, err := r.Provider.UpdateFirewallRule(ctx, provider.UpdateFirewallRuleRequest{
+				FirewallRuleID:   firewallRuleID,
+				FirewallRuleSpec: encodeFirewallRuleSpec(rule),
+			})
+			if err != nil {
+				log.Error(err, "Failed to update firewall rule", "id", firewallRuleID)
+				return ctrl.Result{}, err
+			}
+			log.Info("Updated firewall rule", "id", res.FirewallRuleID)
+
+			// Update status
+			lastApplied, err := json.Marshal(rule.Spec)
+			if err != nil {
+				return ctrl.Result{}, fmt.Errorf("Failed to marshal last applied firewallrule: %w", err)
+			}
+			rule.Status.LastApplied = helper.StringPointerOrNil(string(lastApplied))
+			log.V(1).Info("Updating FirewallRule", "state", rule.Status.State, "firewallRuleID", rule.Status.FirewallRuleID)
+			return ctrl.Result{}, r.Status().Update(ctx, rule)
+		}
 	}
 
 	// 3rd STEP
 	//
 	// Finally associate firewall rule to instance network interface.
-	if rule.Status.State == v1alpha1.FirewallRuleStateReserved {
+	if rule.IsReserved() {
 		if rule.Spec.NodeName != nil {
 			// Get node from FirewallRule spec
 			var node corev1.Node
@@ -173,7 +209,7 @@ func (r *FirewallRuleReconciler) reconcileFirewallRule(ctx context.Context, log 
 	//
 	// Check if the associated node still exists and disassociate it if it does not.
 	// No nodeName or no living node, set state back to "Reserved"
-	if rule.Status.State == v1alpha1.FirewallRuleStateAssociated {
+	if rule.IsAssociated() {
 		if rule.Spec.NodeName != nil {
 			// Get node from FirewallRule spec
 			var node corev1.Node
@@ -207,14 +243,14 @@ func (r *FirewallRuleReconciler) reconcileFirewallRuleDeletion(ctx context.Conte
 	//
 	// Reconciliation of a possible firewall rule associated with the instance.
 	// If a rule is associated with the instance, disassociate it.
-	if rule.Status.State == v1alpha1.FirewallRuleStateAssociated {
+	if rule.IsAssociated() {
 		return disassociateFirewallRule(ctx, r.Provider, r.Status(), log, rule)
 	}
 
 	// 2nd STEP
 	//
 	// Release unassociated firewall rule.
-	if rule.Status.State == v1alpha1.FirewallRuleStateReserved {
+	if rule.IsReserved() {
 		if err := r.Provider.DeleteFirewallRule(ctx, *rule.Status.FirewallRuleID); err != nil {
 			if !errors.IsNotFound(err) {
 				log.Error(err, "Failed to delete FirewallRule", "firewallRuleID", *rule.Status.FirewallRuleID)

@@ -28,8 +28,8 @@ func DecodeSecurityGroup(data *ec2.SecurityGroup) *provider.FirewallRule {
 		FirewallRuleID: aws.StringValue(data.GroupId),
 		VpcID:          aws.StringValue(data.VpcId),
 		FirewallRuleSpec: provider.FirewallRuleSpec{
-			Name:         *data.GroupName,
-			Description:  *data.Description,
+			Name:         aws.StringValue(data.GroupName),
+			Description:  aws.StringValue(data.Description),
 			Direction:    direction,
 			IPPermission: permission,
 		},
@@ -64,7 +64,7 @@ func DecodeIpPermission(data *ec2.IpPermission) *provider.IPPermission {
 }
 
 // DecodeIpPermissions converts an ec2 IpPermission slice to an IPPermission slice.
-func DecodeIpPermissions(data []*ec2.IpPermission, dir provider.Direction) []*provider.IPPermission {
+func DecodeIpPermissions(data []*ec2.IpPermission) []*provider.IPPermission {
 	if data == nil {
 		return make([]*provider.IPPermission, 0)
 	}

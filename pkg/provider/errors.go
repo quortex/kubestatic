@@ -1,7 +1,9 @@
 // Package provider contains the cloud providers related interfaces and models.
 package provider
 
-import "fmt"
+import (
+	"fmt"
+)
 
 // ErrorCode is an error code type
 type ErrorCode string
@@ -27,4 +29,44 @@ type Error struct {
 
 func (e *Error) Error() string {
 	return fmt.Sprintf("Error %s - %s", e.Code, e.Msg)
+}
+
+// IsErrBadRequest returns if error is kind BadRequestError
+func IsErrBadRequest(err error) bool {
+	if e, ok := err.(*Error); ok {
+		return e.Code == BadRequestError
+	}
+	return false
+}
+
+// IsErrForbidden returns if error is kind ForbiddenError
+func IsErrForbidden(err error) bool {
+	if e, ok := err.(*Error); ok {
+		return e.Code == ForbiddenError
+	}
+	return false
+}
+
+// IsErrNotFound returns if error is kind NotFoundError
+func IsErrNotFound(err error) bool {
+	if e, ok := err.(*Error); ok {
+		return e.Code == NotFoundError
+	}
+	return false
+}
+
+// IsErrConflict returns if error is kind ConflictError
+func IsErrConflict(err error) bool {
+	if e, ok := err.(*Error); ok {
+		return e.Code == ConflictError
+	}
+	return false
+}
+
+// IsErrInternal returns if error is kind InternalError
+func IsErrInternal(err error) bool {
+	if e, ok := err.(*Error); ok {
+		return e.Code == InternalError
+	}
+	return false
 }

@@ -119,15 +119,15 @@ func (r *ExternalIPReconciler) reconcileExternalIP(ctx context.Context, log logr
 	//
 	// Finally associate external ip to instance network interface.
 	// This must be the last step, since this exposes the instance on the outside.
-	if externalIP.Status.State == v1alpha1.ExternalIPStateReserved {
-		if externalIP.Spec.NodeName != nil {
+	if externalIP.IsReserved() {
+		if externalIP.Spec.NodeName != "" {
 			// Get node from ExternalIP spec
 			var node corev1.Node
-			if err := r.Get(ctx, types.NamespacedName{Name: *externalIP.Spec.NodeName}, &node); err != nil {
+			if err := r.Get(ctx, types.NamespacedName{Name: externalIP.Spec.NodeName}, &node); err != nil {
 				if errors.IsNotFound(err) {
 					// Invalid nodeName, remove ExternalIP nodeName attribute.
 					log.Info("Node not found. Removing it from ExternalIP spec", "nodeName", externalIP.Spec.NodeName)
-					externalIP.Spec.NodeName = nil
+					externalIP.Spec.NodeName = ""
 					return ctrl.Result{}, r.Update(ctx, externalIP)
 				}
 				// Error reading the object - requeue the request.
@@ -176,15 +176,15 @@ func (r *ExternalIPReconciler) reconcileExternalIP(ctx context.Context, log logr
 	//
 	// Check if the associated node still exists and disassociate it if it does not.
 	// No nodeName or no living node, set state back to "Reserved"
-	if externalIP.Status.State == v1alpha1.ExternalIPStateAssociated {
-		if externalIP.Spec.NodeName != nil {
+	if externalIP.IsAssociated() {
+		if externalIP.Spec.NodeName != "" {
 			// Get node from ExternalIP spec
 			var node corev1.Node
-			if err := r.Get(ctx, types.NamespacedName{Name: *externalIP.Spec.NodeName}, &node); err != nil {
+			if err := r.Get(ctx, types.NamespacedName{Name: externalIP.Spec.NodeName}, &node); err != nil {
 				if errors.IsNotFound(err) {
 					// Invalid nodeName, remove ExternalIP nodeName attribute.
 					log.Info("Node not found. Removing it from ExternalIP spec", "nodeName", externalIP.Spec.NodeName)
-					externalIP.Spec.NodeName = nil
+					externalIP.Spec.NodeName = ""
 					return ctrl.Result{}, r.Update(ctx, externalIP)
 				}
 				// Error reading the object - requeue the request.
@@ -210,14 +210,14 @@ func (r *ExternalIPReconciler) reconcileExternalIPDeletion(ctx context.Context, 
 	//
 	// Reconciliation of a possible external IP associated with the instance.
 	// If an IP is associated with the instance, disassociate it.
-	if externalIP.Status.State == v1alpha1.ExternalIPStateAssociated {
+	if externalIP.IsAssociated() {
 		return disassociateAddress(ctx, r.Provider, r.Status(), log, externalIP)
 	}
 
 	// 2nd STEP
 	//
 	// Release unassociated address.
-	if externalIP.Status.State == v1alpha1.ExternalIPStateReserved {
+	if externalIP.IsReserved() {
 		if err := r.Provider.DeleteAddress(ctx, *externalIP.Status.AddressID); err != nil {
 			if !errors.IsNotFound(err) {
 				log.Error(err, "Failed to delete Address", "addressID", *externalIP.Status.AddressID)

@@ -24,7 +24,7 @@ import (
 type ExternalIPSpec struct {
 	// NodeName is the node's instance on which the address must be attached
 	// +optional
-	NodeName *string `json:"nodeName,omitempty"`
+	NodeName string `json:"nodeName,omitempty"`
 }
 
 // ExternalIPState describes the ExternalIP state.
@@ -42,7 +42,7 @@ type ExternalIPStatus struct {
 	// The current state of the ExternalIP
 	State ExternalIPState `json:"state,omitempty"`
 
-	// The address dientifier
+	// The address identifier
 	AddressID *string `json:"addressID,omitempty"`
 
 	// The address public IP
@@ -66,6 +66,16 @@ type ExternalIP struct {
 
 	Spec   ExternalIPSpec   `json:"spec,omitempty"`
 	Status ExternalIPStatus `json:"status,omitempty"`
+}
+
+// IsReserved returns if externalIP is reserved
+func (e *ExternalIP) IsReserved() bool {
+	return e.Status.State == ExternalIPStateReserved
+}
+
+// IsAssociated returns if externalIP is associated
+func (e *ExternalIP) IsAssociated() bool {
+	return e.Status.State == ExternalIPStateAssociated
 }
 
 //+kubebuilder:object:root=true

@@ -85,6 +85,9 @@ type FirewallRuleStatus struct {
 	// The current state of the FirewallRule
 	State FirewallRuleState `json:"state,omitempty"`
 
+	// The latest FirewallRule specification applied, used to make API requests to cloud providers only if the resource has been changed to avoid throttling issues.
+	LastApplied *string `json:"lastApplied,omitempty"`
+
 	// The firewall rule dientifier
 	FirewallRuleID *string `json:"firewallRuleID,omitempty"`
 
@@ -100,6 +103,7 @@ type FirewallRuleStatus struct {
 //+kubebuilder:resource:scope=Cluster
 //+kubebuilder:printcolumn:name="Direction",type=string,JSONPath=`.spec.direction`
 //+kubebuilder:printcolumn:name="State",type=string,JSONPath=`.status.state`
+//+kubebuilder:printcolumn:name="Node",type=string,JSONPath=`.spec.nodeName`
 
 // FirewallRule is the Schema for the firewallrules API
 type FirewallRule struct {
@@ -108,6 +112,16 @@ type FirewallRule struct {
 
 	Spec   FirewallRuleSpec   `json:"spec,omitempty"`
 	Status FirewallRuleStatus `json:"status,omitempty"`
+}
+
+// IsReserved returns if firewallRule is reserved
+func (f *FirewallRule) IsReserved() bool {
+	return f.Status.State == FirewallRuleStateReserved
+}
+
+// IsAssociated returns if firewallRule is associated
+func (f *FirewallRule) IsAssociated() bool {
+	return f.Status.State == FirewallRuleStateAssociated
 }
 
 //+kubebuilder:object:root=true

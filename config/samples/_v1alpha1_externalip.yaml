@@ -3,4 +3,4 @@ kind: ExternalIP
 metadata:
   name: externalip-sample
 spec:
-  nodeName: ip-10-136-35-84.eu-west-1.compute.internal
+  nodeName: ip-10-231-6-214.eu-west-1.compute.internal
