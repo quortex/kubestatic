@@ -1,0 +1,101 @@
+{{- $fullName := include "kubestatic.fullname" . -}}
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ $fullName }}
+  labels:
+    {{- include "kubestatic.labels" . | nindent 4 }}
+spec:
+  replicas: {{ .Values.replicaCount }}
+  selector:
+    matchLabels:
+      {{- include "kubestatic.selectorLabels" . | nindent 6 }}
+  template:
+    metadata:
+      {{- with .Values.podAnnotations }}
+      annotations:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      labels:
+        {{- include "kubestatic.selectorLabels" . | nindent 8 }}
+    spec:
+      {{- with .Values.imagePullSecrets }}
+      imagePullSecrets:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      serviceAccountName: {{ $fullName }}-controller-manager
+      securityContext:
+        {{- toYaml .Values.podSecurityContext | nindent 8 }}
+      containers:
+      {{- with .Values.manager }}
+        - name: manager
+          securityContext:
+            {{- toYaml .securityContext | nindent 12 }}
+          image: "{{ .image.repository }}:{{ .image.tag | default $.Chart.AppVersion }}"
+          command:
+            - /manager
+          args:
+            - --metrics-bind-address={{ ternary "127.0.0.1:8080" "0.0.0.0:8080" $.Values.kubeRBACProxy.enabled }}
+            - --leader-elect
+            - --cloud-provider={{ required "A valid .Values.cloudProvider entry required!" $.Values.cloudProvider }}
+          env:
+          {{- if (eq $.Values.cloudProvider "aws") }}
+          {{- with $.Values.aws }}
+            {{- with .region }}
+            - name: AWS_REGION
+              value: {{ . }}
+            {{- end }}
+            {{- if .accessKeyID }}
+            - name: AWS_ACCESS_KEY_ID
+              valueFrom:
+                secretKeyRef:
+                  key: accessKeyId
+                  name: {{ template "kubestatic.fullname" $ }}
+            {{- end }}
+            {{- if .secretAccessKey }}
+            - name: AWS_SECRET_ACCESS_KEY
+              valueFrom:
+                secretKeyRef:
+                  key: secretAccessKey
+                  name: {{ template "kubestatic.fullname" $ }}
+            {{- end }}
+          {{- end }}
+          {{- end }}
+          imagePullPolicy: {{ .image.pullPolicy }}
+          {{- if not $.Values.kubeRBACProxy.enabled }}
+          ports:
+            - containerPort: 8080
+              name: metrics
+          {{- end }}
+          resources:
+            {{- toYaml .resources | nindent 12 }}
+      {{- end }}
+      {{- with .Values.kubeRBACProxy }}
+        {{- if .enabled }}
+        - name: kube-rbac-proxy
+          image: "{{ .image.repository }}:{{ .image.tag }}"
+          args:
+            - --secure-listen-address=0.0.0.0:8443
+            - --upstream=http://127.0.0.1:8080/
+            - --logtostderr=true
+            - --v=10
+          imagePullPolicy: {{ .image.pullPolicy }}
+          ports:
+            - containerPort: 8443
+              name: https
+          resources:
+            {{- toYaml .resources | nindent 12 }}
+        {{- end }}
+      {{- end }}
+      {{- with .Values.nodeSelector }}
+      nodeSelector:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.affinity }}
+      affinity:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.tolerations }}
+      tolerations:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}

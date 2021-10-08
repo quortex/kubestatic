@@ -1,0 +1,71 @@
+# Default values for kubestatic.
+# This is a YAML-formatted file.
+# Declare variables to be passed into your templates.
+
+# -- The desired cloud provider (only AWS at the moment).
+cloudProvider: aws
+
+aws:
+  # -- the region in which the cluster resides.
+  region: ""
+  # -- the access key id of a user with necessary permissions.
+  accessKeyID: ""
+  # -- the secret access key of a user with necessary permissions.
+  secretAccessKey: ""
+
+
+manager:
+  image:
+    # -- kubestatic manager image repository.
+    repository: eu.gcr.io/quortex-registry-public/kubestatic
+    # -- kubestatic manager image tag.
+    tag: ""
+    # -- kubestatic manager image pull policy.
+    pullPolicy: IfNotPresent
+
+  # --  kubestatic manager container required resources.
+  resources: {}
+
+  # -- kubestatic manager container security contexts
+  securityContext: {}
+
+kubeRBACProxy:
+  enabled: true
+  image:
+    # -- kube-rbac-proxy image repository.
+    repository: gcr.io/kubebuilder/kube-rbac-proxy
+    # -- kube-rbac-proxy image tag.
+    tag: v0.8.0
+    # -- kube-rbac-proxy image pull policy.
+    pullPolicy: IfNotPresent
+  # --  kube-rbac-proxy container required resources.
+  resources: {}
+
+# -- Number of desired pods.
+replicaCount: 1
+
+# -- Security contexts to set for all containers of the pod.
+podSecurityContext:
+  {}
+  # fsGroup: 2000
+
+# --  A list of secrets used to pull containers images.
+imagePullSecrets: []
+
+# --  Helm's name computing override.
+nameOverride: ""
+
+# --  Helm's fullname computing override.
+fullnameOverride: ""
+
+# --  Annotations to be added to pods.
+podAnnotations: {}
+
+# --  Node labels for Kubestitute pod assignment.
+nodeSelector: {}
+
+# --  Node tolerations for Kubestitute scheduling to nodes with taints.
+tolerations: []
+
+# --  Affinity for Kubestitute pod assignment.
+affinity: {}

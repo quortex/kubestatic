@@ -65,6 +65,16 @@ doc: crd-ref-docs ## Build api documentation.
 					--templates-dir=hack/doc-generation/templates/asciidoctor \
 					--output-path=docs/api-docs.asciidoc
 
+charts: yq kustomize ## Generate helm chart crds, rbac from kustomize files and doc from helm values.
+	@TMPFILE=$$(mktemp) && \
+	${YQ} -y '.metadata.name = ("PREFIX-" + .metadata.name)' config/rbac/role.yaml | \
+		sed "s/PREFIX/{{ include \"kubestatic.fullname\" . }}/" > helm/kubestatic/templates/manager_role.yaml && \
+	${KUSTOMIZE} build config/default/ > $${TMPFILE} && \
+	${YQ} -y 'select(.kind=="CustomResourceDefinition")' $${TMPFILE} > helm/kubestatic/crds/crds.yaml && \
+	rm -rf $${TMPFILE}
+	@docker run --rm --volume "$$(pwd)/helm/kubestatic:/helm-docs" jnorwood/helm-docs:latest -s file
+
+
 ##@ Build
 
 build: generate fmt vet ## Build manager binary.
@@ -110,6 +120,12 @@ golangci-lint: ## Download golangci-lint locally if necessary.
 KUSTOMIZE = $(shell pwd)/bin/kustomize
 kustomize: ## Download kustomize locally if necessary.
 	$(call go-get-tool,$(KUSTOMIZE),sigs.k8s.io/kustomize/kustomize/v3@v3.8.7)
+
+yq: ## Download yq if necessary.
+ifeq (, $(shell which yq))
+	@pip3 install yq
+endif
+YQ=$(shell which yq)
 
 # go-get-tool will 'go get' any package $2 and install it to $1.
 PROJECT_DIR := $(shell dirname $(abspath $(lastword $(MAKEFILE_LIST))))
