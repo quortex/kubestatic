@@ -6,7 +6,7 @@ import (
 
 	"github.com/aws/aws-sdk-go/aws/awserr"
 
-	"quortex.io/kubestatic/pkg/provider"
+	"github.com/quortex/kubestatic/pkg/provider"
 )
 
 // DecodeEC2Error converts an ec2 specific Error to a QXError.

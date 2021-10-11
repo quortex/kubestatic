@@ -25,10 +25,10 @@ import (
 
 	. "github.com/onsi/ginkgo"
 	. "github.com/onsi/gomega"
+	"github.com/quortex/kubestatic/api/v1alpha1"
+	"github.com/quortex/kubestatic/pkg/provider"
 	"k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/types"
-	"quortex.io/kubestatic/api/v1alpha1"
-	"quortex.io/kubestatic/pkg/provider"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 )
 

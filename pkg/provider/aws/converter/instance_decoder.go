@@ -4,7 +4,7 @@ package converter
 import (
 	"github.com/aws/aws-sdk-go/aws"
 	"github.com/aws/aws-sdk-go/service/ec2"
-	"quortex.io/kubestatic/pkg/provider"
+	"github.com/quortex/kubestatic/pkg/provider"
 )
 
 // DecodeInstance converts an ec2 Instance to an Instance.

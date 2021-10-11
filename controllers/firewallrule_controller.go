@@ -31,9 +31,9 @@ import (
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
-	"quortex.io/kubestatic/api/v1alpha1"
-	"quortex.io/kubestatic/pkg/helper"
-	"quortex.io/kubestatic/pkg/provider"
+	"github.com/quortex/kubestatic/api/v1alpha1"
+	"github.com/quortex/kubestatic/pkg/helper"
+	"github.com/quortex/kubestatic/pkg/provider"
 )
 
 const (

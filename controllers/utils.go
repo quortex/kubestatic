@@ -17,8 +17,8 @@ limitations under the License.
 package controllers
 
 import (
+	"github.com/quortex/kubestatic/api/v1alpha1"
 	corev1 "k8s.io/api/core/v1"
-	"quortex.io/kubestatic/api/v1alpha1"
 )
 
 // publicIPAddresses returns public IP addresses of the given ExternalIPs

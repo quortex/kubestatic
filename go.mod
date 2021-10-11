@@ -1,4 +1,4 @@
-module quortex.io/kubestatic
+module github.com/quortex/kubestatic
 
 go 1.15
 
