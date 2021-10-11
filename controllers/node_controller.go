@@ -18,14 +18,16 @@ package controllers
 
 import (
 	"context"
+	"fmt"
+	"strings"
 
 	"github.com/go-logr/logr"
 	"github.com/google/uuid"
+	"github.com/quortex/kubestatic/api/v1alpha1"
+	"github.com/quortex/kubestatic/pkg/helper"
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
-	"quortex.io/kubestatic/api/v1alpha1"
-	"quortex.io/kubestatic/pkg/helper"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/builder"
 	"sigs.k8s.io/controller-runtime/pkg/client"
@@ -34,8 +36,10 @@ import (
 )
 
 const (
-	// externalIPAutoAssignLabel is the key for auto externalIP assignement label
+	// externalIPAutoAssignLabel is the key for auto externalIP assignment label
 	externalIPAutoAssignLabel = "kubestatic.quortex.io/externalip-auto-assign"
+	// externalIPLabel is the key for auto externalIP label (the externalIP a pod should have)
+	externalIPLabel = "kubestatic.quortex.io/externalip"
 	// externalIPNodeNameField is the nodeName field in ExternalIP resource
 	externalIPNodeNameField = ".spec.nodeName"
 )
@@ -89,10 +93,27 @@ func (r *NodeReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.
 		return ctrl.Result{}, err
 	}
 
-	// Some orphaned auto assigned ExternalIPs, reuse one arbitrarly
+	// Some orphaned auto assigned ExternalIPs, check which one to reuse
 	if len(externalIPs.Items) > 0 {
-		// We reuse the first one arbitrarly
-		externalIP := &externalIPs.Items[0]
+		// List pods that should be scheduled on orphaned ExternalIPs
+		publicIPAddresses := publicIPAddresses(externalIPs.Items)
+		lblValue := fmt.Sprintf("in (%s)", strings.Join(publicIPAddresses, ","))
+		log.V(1).Info("List all Pods with labels", "key", externalIPLabel, "value", lblValue)
+		podList := &corev1.PodList{}
+		if err := r.Client.List(
+			ctx,
+			podList,
+			client.MatchingLabels{externalIPAutoAssignLabel: lblValue},
+		); err != nil {
+			log.Error(err, "List all Pods with labels", "key", externalIPLabel, "value", lblValue)
+			return ctrl.Result{}, err
+		}
+
+		// We get the most referenced ExternalIP ore reuse the first one arbitrarily
+		externalIP := getMostReferencedIP(podList.Items, externalIPs.Items)
+		if externalIP == nil {
+			externalIP = &externalIPs.Items[0]
+		}
 		externalIP.Spec.NodeName = req.Name
 		log.V(1).Info("Associating ExternalIP to node", "externalIP", externalIP.Name)
 		return ctrl.Result{}, r.Update(ctx, externalIP)

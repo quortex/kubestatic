@@ -13,8 +13,8 @@ import (
 	"github.com/aws/aws-sdk-go/service/ec2"
 	corev1 "k8s.io/api/core/v1"
 
-	"quortex.io/kubestatic/pkg/provider"
-	"quortex.io/kubestatic/pkg/provider/aws/converter"
+	"github.com/quortex/kubestatic/pkg/provider"
+	"github.com/quortex/kubestatic/pkg/provider/aws/converter"
 )
 
 const (
@@ -26,7 +26,7 @@ const (
 // The VPC identifier
 // Automatically retrieved with GetVPCID function.
 // For run outside of the cluster, can be set through linker flag, e.g.
-// go build -ldflags "-X quortex.io/kubestatic/pkg/provider/aws.vpcID=$VPC_ID" -a -o manager main.go
+// go build -ldflags "-X github.com/quortex/kubestatic/pkg/provider/aws.vpcID=$VPC_ID" -a -o manager main.go
 var vpcID string
 
 type awsProvider struct {

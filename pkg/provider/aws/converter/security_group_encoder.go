@@ -5,8 +5,8 @@ import (
 	"github.com/aws/aws-sdk-go/aws"
 	"github.com/aws/aws-sdk-go/service/ec2"
 
-	"quortex.io/kubestatic/pkg/helper"
-	"quortex.io/kubestatic/pkg/provider"
+	"github.com/quortex/kubestatic/pkg/helper"
+	"github.com/quortex/kubestatic/pkg/provider"
 )
 
 // EncodeIPPermission converts an IPPermission to an ec2 IpPermission.

@@ -6,6 +6,9 @@
 *.dylib
 bin
 
+# Folder in which make test download envtest
+testbin/
+
 # Test binary, built with `go test -c`
 *.test
 

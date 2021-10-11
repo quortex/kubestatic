@@ -33,10 +33,10 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/healthz"
 	"sigs.k8s.io/controller-runtime/pkg/log/zap"
 
-	kubestaticquortexiov1alpha1 "quortex.io/kubestatic/api/v1alpha1"
-	"quortex.io/kubestatic/controllers"
-	"quortex.io/kubestatic/pkg/provider"
-	"quortex.io/kubestatic/pkg/provider/aws"
+	kubestaticquortexiov1alpha1 "github.com/quortex/kubestatic/api/v1alpha1"
+	"github.com/quortex/kubestatic/controllers"
+	"github.com/quortex/kubestatic/pkg/provider"
+	"github.com/quortex/kubestatic/pkg/provider/aws"
 	//+kubebuilder:scaffold:imports
 )
 
