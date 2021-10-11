@@ -6,6 +6,11 @@ func StringPointerOrNil(s string) *string {
 	if s == "" {
 		return nil
 	}
+	return StringPointer(s)
+}
+
+// StringPointer converts a string value to a string pointer.
+func StringPointer(s string) *string {
 	return &s
 }
 
