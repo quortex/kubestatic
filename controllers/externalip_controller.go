@@ -208,7 +208,7 @@ func (r *ExternalIPReconciler) reconcileExternalIP(ctx context.Context, log logr
 		}
 
 		// Set state back to "Reserved", disassociate address and end reconciliation
-		return disassociateAddress(ctx, r.Provider, r.Status(), log, externalIP)
+		return r.disassociateAddress(ctx, r.Provider, log, externalIP)
 	}
 
 	return ctrl.Result{}, nil
@@ -220,7 +220,7 @@ func (r *ExternalIPReconciler) reconcileExternalIPDeletion(ctx context.Context, 
 	// Reconciliation of a possible external IP associated with the instance.
 	// If an IP is associated with the instance, disassociate it.
 	if externalIP.IsAssociated() {
-		return disassociateAddress(ctx, r.Provider, r.Status(), log, externalIP)
+		return r.disassociateAddress(ctx, r.Provider, log, externalIP)
 	}
 
 	// 2nd STEP
@@ -257,7 +257,7 @@ func (r *ExternalIPReconciler) reconcileExternalIPDeletion(ctx context.Context, 
 }
 
 // disassociateAddress performs address disassociation tasks
-func disassociateAddress(ctx context.Context, pvd provider.Provider, stWriter client.StatusWriter, log logr.Logger, externalIP *v1alpha1.ExternalIP) (ctrl.Result, error) {
+func (r *ExternalIPReconciler) disassociateAddress(ctx context.Context, pvd provider.Provider, log logr.Logger, externalIP *v1alpha1.ExternalIP) (ctrl.Result, error) {
 	// Get address and disassociate it
 	if externalIP.Status.AddressID != nil {
 		res, err := pvd.GetAddress(ctx, *externalIP.Status.AddressID)
@@ -281,7 +281,14 @@ func disassociateAddress(ctx context.Context, pvd provider.Provider, stWriter cl
 	externalIP.Status.State = v1alpha1.ExternalIPStateReserved
 	externalIP.Status.InstanceID = nil
 	log.V(1).Info("Updating ExternalIP", "state", externalIP.Status.State)
-	return ctrl.Result{}, stWriter.Update(ctx, externalIP)
+	if err := r.Status().Update(ctx, externalIP); err != nil {
+		log.Error(err, "Failed to update ExternalIP state", "externalIP", externalIP.Name)
+		return ctrl.Result{}, err
+	}
+
+	log.V(1).Info("Removing ExternalIP NodeName", "externalIP", externalIP.Name)
+	externalIP.Spec.NodeName = ""
+	return ctrl.Result{}, r.Update(ctx, externalIP)
 }
 
 // SetupWithManager sets up the controller with the Manager.
