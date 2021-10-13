@@ -241,7 +241,7 @@ func (r *FirewallRuleReconciler) reconcileFirewallRule(ctx context.Context, log 
 		}
 
 		// Set state back to "Reserved", disassociate firewall rule and end reconciliation
-		return disassociateFirewallRule(ctx, r.Provider, r.Status(), log, rule)
+		return r.disassociateFirewallRule(ctx, r.Provider, log, rule)
 	}
 
 	return ctrl.Result{}, nil
@@ -253,7 +253,7 @@ func (r *FirewallRuleReconciler) reconcileFirewallRuleDeletion(ctx context.Conte
 	// Reconciliation of a possible firewall rule associated with the instance.
 	// If a rule is associated with the instance, disassociate it.
 	if rule.IsAssociated() {
-		return disassociateFirewallRule(ctx, r.Provider, r.Status(), log, rule)
+		return r.disassociateFirewallRule(ctx, r.Provider, log, rule)
 	}
 
 	// 2nd STEP
@@ -290,7 +290,7 @@ func (r *FirewallRuleReconciler) reconcileFirewallRuleDeletion(ctx context.Conte
 }
 
 // disassociateFirewallRule performs firewall rule disassociation tasks
-func disassociateFirewallRule(ctx context.Context, pvd provider.Provider, stWriter client.StatusWriter, log logr.Logger, rule *v1alpha1.FirewallRule) (ctrl.Result, error) {
+func (r *FirewallRuleReconciler) disassociateFirewallRule(ctx context.Context, pvd provider.Provider, log logr.Logger, rule *v1alpha1.FirewallRule) (ctrl.Result, error) {
 	// Get firewall rule and disassociate it
 	if rule.Status.FirewallRuleID != nil {
 		if err := pvd.DisassociateFirewallRule(ctx, provider.AssociateFirewallRuleRequest{
@@ -308,7 +308,14 @@ func disassociateFirewallRule(ctx context.Context, pvd provider.Provider, stWrit
 	rule.Status.InstanceID = nil
 	rule.Status.NetworkInterfaceID = nil
 	log.V(1).Info("Updating FirewallRule", "state", rule.Status.State)
-	return ctrl.Result{}, stWriter.Update(ctx, rule)
+	if err := r.Status().Update(ctx, rule); err != nil {
+		log.Error(err, "Failed to update FirewallRule state", "firewallRule", rule.Name)
+		return ctrl.Result{}, err
+	}
+
+	log.V(1).Info("Removing FirewallRule NodeName", "firewallRule", rule.Name)
+	rule.Spec.NodeName = nil
+	return ctrl.Result{}, r.Update(ctx, rule)
 }
 
 // SetupWithManager sets up the controller with the Manager.
