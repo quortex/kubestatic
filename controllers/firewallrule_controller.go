@@ -217,6 +217,15 @@ func (r *FirewallRuleReconciler) reconcileFirewallRule(ctx context.Context, log 
 				if errors.IsNotFound(err) {
 					// Invalid nodeName, remove FirewallRule nodeName attribute.
 					log.Info("Node not found. Removing it from FirewallRule spec", "nodeName", rule.Spec.NodeName)
+
+					// Set status back to Reserved
+					rule.Status.State = v1alpha1.FirewallRuleStateReserved
+					log.V(1).Info("Updating FirewallRule", "state", rule.Status.State, "InstanceID", rule.Status.InstanceID)
+					if err != r.Status().Update(ctx, rule) {
+						log.Error(err, "Failed to update FirewallRule status", "firewallRule", rule.Name, "status", rule.Status.State)
+						return ctrl.Result{}, err
+					}
+
 					rule.Spec.NodeName = nil
 					return ctrl.Result{}, r.Update(ctx, rule)
 				}
