@@ -384,7 +384,7 @@ func (p *awsProvider) DisassociateFirewallRule(ctx context.Context, req provider
 	})
 
 	if err != nil {
-		return err
+		return converter.DecodeEC2Error("failed to disassociate security group", err)
 	}
 
 	if len(res.NetworkInterfaces) == 0 {

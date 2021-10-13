@@ -21,7 +21,8 @@ func DecodeEC2Error(msg string, err error) error {
 			"InvalidAddress.NotFound",
 			"InvalidAddressID.NotFound",
 			"InvalidAllocationID.NotFound",
-			"InvalidGroup.NotFound":
+			"InvalidGroup.NotFound",
+			"InvalidNetworkInterfaceID.NotFound":
 			return &provider.Error{Code: provider.NotFoundError, Msg: fmt.Sprintf("%s: %s", msg, err.Error())}
 		case
 			"InvalidGroup.Duplicate":
