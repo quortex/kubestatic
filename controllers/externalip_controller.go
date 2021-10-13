@@ -18,6 +18,7 @@ package controllers
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 
 	"github.com/go-logr/logr"
@@ -26,6 +27,7 @@ import (
 	"k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/types"
+	"k8s.io/apimachinery/pkg/util/strategicpatch"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/handler"
@@ -201,8 +203,36 @@ func (r *ExternalIPReconciler) reconcileExternalIP(ctx context.Context, log logr
 				return ctrl.Result{}, err
 			}
 
-			// Node not being deleted, reconciliation done
+			// Node not being deleted, reconcile externalip label
 			if node.ObjectMeta.DeletionTimestamp.IsZero() {
+				// Marshal node, ...
+				old, err := json.Marshal(node)
+				if err != nil {
+					log.Error(err, "Failed to marshal node")
+					return ctrl.Result{}, err
+				}
+
+				// ... then compute new node to marshal it...
+				node.Labels[externalIPLabel] = *externalIP.Status.PublicIPAddress
+				new, err := json.Marshal(node)
+				if err != nil {
+					log.Error(err, "Failed to marshal new node")
+					return ctrl.Result{}, err
+				}
+
+				// ... and create a patch.
+				patch, err := strategicpatch.CreateTwoWayMergePatch(old, new, node)
+				if err != nil {
+					log.Error(err, "Failed to create patch for node")
+					return ctrl.Result{}, err
+				}
+
+				// Apply patch to set node's wanted labels.
+				if err = r.Client.Patch(ctx, &node, client.RawPatch(types.MergePatchType, patch)); err != nil {
+					log.Error(err, "Failed to patch node")
+					return ctrl.Result{}, err
+				}
+
 				return ctrl.Result{}, nil
 			}
 		}
