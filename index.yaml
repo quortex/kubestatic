@@ -2,6 +2,17 @@ apiVersion: v1
 entries:
   kubestatic:
   - apiVersion: v2
+    appVersion: 0.2.1
+    created: "2021-10-14T07:30:55.571519536Z"
+    description: An operator to manage the lifecycle of public cloud providers resources
+      needed to expose endpoints on public nodes.
+    digest: 008b60eb7ba57b11a99836c1cd3dbd1b02db5d508767df3a386430ff6422148e
+    name: kubestatic
+    type: application
+    urls:
+    - https://github.com/quortex/kubestatic/releases/download/kubestatic-chart-0.2.0/kubestatic-0.2.0.tgz
+    version: 0.2.0
+  - apiVersion: v2
     appVersion: 0.1.0
     created: "2021-10-11T14:32:15.011777958Z"
     description: An operator to manage the lifecycle of public cloud providers resources
@@ -23,4 +34,4 @@ entries:
     urls:
     - https://github.com/quortex/kubestatic/releases/download/kubestatic-chart-0.1.0/kubestatic-0.1.0.tgz
     version: 0.1.0
-generated: "2021-10-11T14:32:15.011787358Z"
+generated: "2021-10-14T07:30:55.571531136Z"
