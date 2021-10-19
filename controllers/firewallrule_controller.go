@@ -175,12 +175,19 @@ func (r *FirewallRuleReconciler) reconcileFirewallRule(ctx context.Context, log 
 				return ctrl.Result{}, err
 			}
 
-			if len(res.NetworkInterfaces) == 0 {
-				err := fmt.Errorf("no network interface for instance %s", instanceID)
+			// Get the first network interface with a public IP address
+			var networkInterface *provider.NetworkInterface
+			for _, elem := range res.NetworkInterfaces {
+				if elem != nil && elem.PublicIP != nil {
+					networkInterface = elem
+					break
+				}
+			}
+			if networkInterface == nil {
+				err := fmt.Errorf("no network interface with public IP found for instance %s", instanceID)
 				log.Error(err, "Cannot associate a firewall rule with this instance", "instanceID", instanceID)
 				return ctrl.Result{}, err
 			}
-			networkInterface := res.NetworkInterfaces[0]
 
 			// Finally, associate firewall rule to instance network interface, then update status.
 			if err := r.Provider.AssociateFirewallRule(ctx, provider.AssociateFirewallRuleRequest{
