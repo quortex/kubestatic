@@ -268,7 +268,7 @@ func (r *FirewallRuleReconciler) reconcileFirewallRuleDeletion(ctx context.Conte
 	// Release unassociated firewall rule.
 	if rule.IsReserved() {
 		if err := r.Provider.DeleteFirewallRule(ctx, *rule.Status.FirewallRuleID); err != nil {
-			if !errors.IsNotFound(err) {
+			if !provider.IsErrNotFound(err) {
 				log.Error(err, "Failed to delete FirewallRule", "firewallRuleID", *rule.Status.FirewallRuleID)
 				return ctrl.Result{}, err
 			}
