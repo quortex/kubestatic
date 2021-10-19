@@ -258,7 +258,7 @@ func (r *ExternalIPReconciler) reconcileExternalIPDeletion(ctx context.Context, 
 	// Release unassociated address.
 	if externalIP.IsReserved() {
 		if err := r.Provider.DeleteAddress(ctx, *externalIP.Status.AddressID); err != nil {
-			if !errors.IsNotFound(err) {
+			if !provider.IsErrNotFound(err) {
 				log.Error(err, "Failed to delete Address", "addressID", *externalIP.Status.AddressID)
 				return ctrl.Result{}, err
 			}
