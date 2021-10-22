@@ -176,6 +176,8 @@ func (r *FirewallRuleReconciler) reconcileFirewallRule(ctx context.Context, log 
 			}
 
 			// Get the first network interface with a public IP address
+			// This is needed because we could have multiple network interfaces,
+			// for example on EKS we have the public one, as well as one or more created by the EKS CNI.
 			var networkInterface *provider.NetworkInterface
 			for _, elem := range res.NetworkInterfaces {
 				if elem != nil && elem.PublicIP != nil {
