@@ -145,12 +145,21 @@ func (r *ExternalIPReconciler) reconcileExternalIP(ctx context.Context, log logr
 				return ctrl.Result{}, err
 			}
 
-			if len(res.NetworkInterfaces) == 0 {
-				err := fmt.Errorf("no network interface for instance %s", instanceID)
+			// Get the first network interface with a public IP address
+			// This is needed because we could have multiple network interfaces,
+			// for example on EKS we have the public one, as well as one or more created by the EKS CNI.
+			var networkInterface *provider.NetworkInterface
+			for _, elem := range res.NetworkInterfaces {
+				if elem != nil && elem.PublicIP != nil {
+					networkInterface = elem
+					break
+				}
+			}
+			if networkInterface == nil {
+				err := fmt.Errorf("no network interface with public IP found for instance %s", instanceID)
 				log.Error(err, "Cannot associate an address with this instance", "instanceID", instanceID)
 				return ctrl.Result{}, err
 			}
-			networkInterface := res.NetworkInterfaces[0]
 
 			// Finally, associate address to instance network interface, then update status.
 			if err := r.Provider.AssociateAddress(ctx, provider.AssociateAddressRequest{
