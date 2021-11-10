@@ -17,6 +17,9 @@ limitations under the License.
 package controllers
 
 import (
+	"math/rand"
+	"time"
+
 	"github.com/quortex/kubestatic/api/v1alpha1"
 	corev1 "k8s.io/api/core/v1"
 )
@@ -51,4 +54,15 @@ func getMostReferencedIP(pods []corev1.Pod, eips []v1alpha1.ExternalIP) (ip *v1a
 		}
 	}
 	return
+}
+
+const charset = "abcdefghijklmnopqrstuvwxyz"
+
+func randomString(length int) string {
+	var seededRand = rand.New(rand.NewSource(time.Now().UnixNano()))
+	b := make([]byte, length)
+	for i := range b {
+		b[i] = charset[seededRand.Intn(len(charset))]
+	}
+	return string(b)
 }

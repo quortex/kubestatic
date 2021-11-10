@@ -117,9 +117,33 @@ type FirewallRule struct {
 	FirewallRuleSpec
 }
 
+// FirewallRuleGroup describes a group of firewall rules.
+type FirewallRuleGroup struct {
+	// The name of the firewall rule group.
+	Name string
+
+	// A description for the firewall rule group. This is informational only.
+	Description string
+
+	// The FirewallRules list.
+	FirewallRules []FirewallRuleSpec
+}
+
 // CreateFirewallRuleRequest wraps parameters required to create a firewall rule.
 type CreateFirewallRuleRequest struct {
 	FirewallRuleSpec
+}
+
+// CreateFirewallRuleGroupRequest wraps parameters required to create a firewall rule group.
+type CreateFirewallRuleGroupRequest struct {
+	// The name of the firewall rule group.
+	Name string
+
+	// A description for the firewall rule group. This is informational only.
+	Description string
+
+	// The FirewallRules list.
+	FirewallRules []FirewallRuleSpec
 }
 
 // UpdateFirewallRuleRequest wraps parameters required to update a firewall rule.
@@ -128,6 +152,15 @@ type UpdateFirewallRuleRequest struct {
 
 	// The ID of the firewall rule.
 	FirewallRuleID string
+}
+
+// UpdateFirewallRuleRequest wraps parameters required to update a firewall rule group.
+type UpdateFirewallRuleGroupRequest struct {
+	// The ID of the firewall rule group.
+	FirewallRuleGroupID string
+
+	// The FirewallRules list.
+	FirewallRules []FirewallRuleSpec
 }
 
 // AssociateFirewallRuleRequest wraps parameters required to associate a firewall rule to a Network interface.

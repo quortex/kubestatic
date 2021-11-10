@@ -49,7 +49,7 @@ var _ = Describe("ExternalIP Controller", func() {
 		It("Should associate an externalIP correctly", func() {
 			node := safeDequeueNode()
 			key := types.NamespacedName{
-				Name: "external-ip-" + randomStringWithCharset(10, charset),
+				Name: "external-ip-" + randomString(10),
 			}
 
 			toCreate := &v1alpha1.ExternalIP{
