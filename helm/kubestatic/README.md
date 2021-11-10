@@ -56,7 +56,7 @@ helm repo add kubestatic https://quortex.github.io/kubestatic
 2. Deploy the appropriate release in desired namespace.
 
 ```sh
-helm create namesapce kubestatic-system
+kubectl create namespace kubestatic-system
 helm install kubestatic kubestatic/kubestatic -n kubestatic-system
 ```
 
