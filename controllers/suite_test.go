@@ -23,7 +23,6 @@ import (
 	"context"
 	"fmt"
 	"log"
-	"math/rand"
 	"path/filepath"
 	"sync"
 	"testing"
@@ -90,7 +89,8 @@ var _ = BeforeSuite(func(done Done) {
 	})
 	Expect(err).ToNot(HaveOccurred())
 
-	pvd = aws.NewProvider()
+	pvd, err = aws.NewProvider()
+	Expect(err).ToNot(HaveOccurred())
 
 	err = (&ExternalIPReconciler{
 		Client:   k8sManager.GetClient(),
@@ -149,17 +149,6 @@ var _ = AfterSuite(func() {
 	err := testEnv.Stop()
 	Expect(err).ToNot(HaveOccurred())
 })
-
-const charset = "abcdefghijklmnopqrstuvwxyz"
-
-func randomStringWithCharset(length int, charset string) string {
-	var seededRand = rand.New(rand.NewSource(time.Now().UnixNano()))
-	b := make([]byte, length)
-	for i := range b {
-		b[i] = charset[seededRand.Intn(len(charset))]
-	}
-	return string(b)
-}
 
 // isReady returns if the node Status is Ready
 func isReady(node corev1.Node) bool {

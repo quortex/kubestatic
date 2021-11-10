@@ -121,3 +121,25 @@ func containsPermission(slice []*IPPermission, elem *IPPermission) bool {
 	}
 	return false
 }
+
+// GetIngressIPPermissions get ingress permissions from rule slice.
+func GetIngressIPPermissions(slice []FirewallRuleSpec) []*IPPermission {
+	res := []*IPPermission{}
+	for _, e := range slice {
+		if e.Direction == DirectionIngress {
+			res = append(res, e.IPPermission)
+		}
+	}
+	return res
+}
+
+// GetEgressIPPermission get egress permissions from rule slice.
+func GetEgressIPPermissions(slice []FirewallRuleSpec) []*IPPermission {
+	res := []*IPPermission{}
+	for _, e := range slice {
+		if e.Direction == DirectionEgress {
+			res = append(res, e.IPPermission)
+		}
+	}
+	return res
+}

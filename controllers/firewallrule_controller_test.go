@@ -76,7 +76,7 @@ var _ = Describe("FirewallRule Controller", func() {
 
 			By("Creating a FirewallRule successfully on the Node")
 			firewallRulekey := types.NamespacedName{
-				Name: "firewall-rule-" + randomStringWithCharset(10, charset),
+				Name: "firewall-rule-" + randomString(10),
 			}
 			Expect(k8sClient.Create(context.Background(), &v1alpha1.FirewallRule{
 				ObjectMeta: metav1.ObjectMeta{
@@ -122,7 +122,7 @@ var _ = Describe("FirewallRule Controller", func() {
 			By("Creating an ExternalIP sccessfuly on the Node")
 			// Attach an ExternalIP to the Node
 			externalIPKey := types.NamespacedName{
-				Name: "external-ip-" + randomStringWithCharset(10, charset),
+				Name: "external-ip-" + randomString(10),
 			}
 			Expect(k8sClient.Create(context.Background(), &v1alpha1.ExternalIP{
 				ObjectMeta: metav1.ObjectMeta{
@@ -147,10 +147,10 @@ var _ = Describe("FirewallRule Controller", func() {
 
 			By("Expecting to create echo pod exposed on hostPort")
 			echoDepKey := types.NamespacedName{
-				Name:      "echo-" + randomStringWithCharset(10, charset),
+				Name:      "echo-" + randomString(10),
 				Namespace: "default",
 			}
-			echoText := randomStringWithCharset(10, charset)
+			echoText := randomString(10)
 			echoLabels := map[string]string{
 				"app":  "echo",
 				"name": echoDepKey.Name,
@@ -226,7 +226,7 @@ var _ = Describe("FirewallRule Controller", func() {
 				return errors.IsNotFound(err)
 			}, timeout, interval).Should(BeTrue())
 			Eventually(func() bool {
-				_, err := pvd.GetFirewallRule(context.Background(), firewallRuleID)
+				err := pvd.FetchFirewallRule(context.Background(), firewallRuleID)
 				return provider.IsErrNotFound(err)
 			}, timeout, interval).Should(BeTrue())
 

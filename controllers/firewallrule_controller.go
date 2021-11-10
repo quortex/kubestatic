@@ -38,7 +38,8 @@ import (
 
 const (
 	// firewallRuleFinalizer is a finalizer for FirewallRule
-	firewallRuleFinalizer = "firewallrule.finalizers.kubestatic.quortex.io"
+	firewallRuleFinalizer   = "firewallrule.finalizers.kubestatic.quortex.io"
+	firewallRuleNodeNameKey = ".spec.nodeName"
 )
 
 // FirewallRuleReconciler reconciles a FirewallRule object
@@ -98,18 +99,58 @@ func (r *FirewallRuleReconciler) reconcileFirewallRule(ctx context.Context, log 
 	// Reserve firewall
 	if rule.Status.State == v1alpha1.FirewallRuleStateNone {
 		// Create firewall rule
-		res, err := r.Provider.CreateFirewallRule(ctx, provider.CreateFirewallRuleRequest{
-			FirewallRuleSpec: encodeFirewallRuleSpec(rule),
-		})
+		// In the case of standalone firewall rules, we create it,
+		// otherwise, we update the group dedicated to the node.
+		var id string
+		var err error
+		if r.Provider.HasGroupedFirewallRules() {
+			// List FirewallRules with identical nodeName
+			frs := &v1alpha1.FirewallRuleList{}
+			if err := r.List(ctx, frs, client.MatchingFields{firewallRuleNodeNameKey: *rule.Spec.NodeName}); err != nil {
+				log.Error(err, "Unable to list FirewallRules")
+				return ctrl.Result{}, err
+			}
+
+			// Check for other rules associated to the node.
+			// If there is already one, we update the group of rules, if not, we create a new group.
+			rulesAssociated := v1alpha1.FilterFirewallRules(frs.Items, func(fr v1alpha1.FirewallRule) bool {
+				return fr.Name != rule.Name && fr.Status.State != v1alpha1.FirewallRuleStateNone
+			})
+			if len(rulesAssociated) > 0 {
+				firewallRuleID := helper.StringValue(rulesAssociated[0].Status.FirewallRuleID)
+				log.V(1).Info("Updating FirewallRule group", "firewallRuleID", firewallRuleID)
+				id, err = r.Provider.UpdateFirewallRuleGroup(ctx, encodeUpdateFirewallRuleGroupRequest(firewallRuleID, frs.Items))
+				if err != nil {
+					log.Error(err, "Unable to update FirewallRules")
+					return ctrl.Result{}, err
+				}
+			} else {
+				// No existing group, we create a new one.
+				log.V(1).Info("Creating FirewallRule group")
+				id, err = r.Provider.CreateFirewallRuleGroup(
+					ctx,
+					encodeCreateFirewallRuleGroupRequest(
+						fmt.Sprintf("kubestatic-%s", randomString(10)),
+						fmt.Sprintf("Kubestatic managed group for node %s", *rule.Spec.NodeName),
+						frs.Items,
+					),
+				)
+			}
+		} else {
+			// Standalone rules, we simply create a rule.
+			log.V(1).Info("Creating FirewallRule")
+			id, err = r.Provider.CreateFirewallRule(ctx, encodeCreateFirewallRuleRequest(rule))
+		}
+
 		if err != nil {
 			log.Error(err, "Failed to create firewall rule")
 			return ctrl.Result{}, err
 		}
-		log.Info("Created firewall rule", "id", res.FirewallRuleID)
+		log.Info("Created firewall rule", "id", id)
 
 		// Update status
 		rule.Status.State = v1alpha1.FirewallRuleStateReserved
-		rule.Status.FirewallRuleID = &res.FirewallRuleID
+		rule.Status.FirewallRuleID = &id
 		lastApplied, err := json.Marshal(rule.Spec)
 		if err != nil {
 			return ctrl.Result{}, fmt.Errorf("Failed to marshal last applied firewallrule: %w", err)
@@ -123,19 +164,32 @@ func (r *FirewallRuleReconciler) reconcileFirewallRule(ctx context.Context, log 
 			return ctrl.Result{}, fmt.Errorf("Failed to unmarshal last applied firewallrule: %w", err)
 		}
 
-		// Firewall rule has changed, perform update
+		// Update firewall rule.
+		// In the case of standalone firewall rules, we update it,
+		// otherwise, we update the group dedicated to the node.
 		if !reflect.DeepEqual(rule.Spec, *lastApplied) {
 			// Update firewall rule
 			firewallRuleID := helper.StringValue(rule.Status.FirewallRuleID)
-			res, err := r.Provider.UpdateFirewallRule(ctx, provider.UpdateFirewallRuleRequest{
-				FirewallRuleID:   firewallRuleID,
-				FirewallRuleSpec: encodeFirewallRuleSpec(rule),
-			})
+			var err error
+			if r.Provider.HasGroupedFirewallRules() {
+				// List FirewallRules with identical nodeName
+				frs := &v1alpha1.FirewallRuleList{}
+				if err := r.List(ctx, frs, client.MatchingFields{firewallRuleNodeNameKey: *rule.Spec.NodeName}); err != nil {
+					log.Error(err, "Unable to list FirewallRules")
+					return ctrl.Result{}, err
+				}
+				log.V(1).Info("Updating FirewallRule group", "firewallRuleID", firewallRuleID)
+				_, err = r.Provider.UpdateFirewallRuleGroup(ctx, encodeUpdateFirewallRuleGroupRequest(firewallRuleID, frs.Items))
+			} else {
+				log.V(1).Info("Updating FirewallRule", "firewallRuleID", firewallRuleID)
+				_, err = r.Provider.UpdateFirewallRule(ctx, encodeUpdateFirewallRuleRequest(firewallRuleID, rule))
+			}
+
 			if err != nil {
 				log.Error(err, "Failed to update firewall rule", "id", firewallRuleID)
 				return ctrl.Result{}, err
 			}
-			log.Info("Updated firewall rule", "id", res.FirewallRuleID)
+			log.Info("Updated firewall rule", "id", firewallRuleID)
 
 			// Update status
 			lastApplied, err := json.Marshal(rule.Spec)
@@ -269,14 +323,48 @@ func (r *FirewallRuleReconciler) reconcileFirewallRuleDeletion(ctx context.Conte
 	//
 	// Release unassociated firewall rule.
 	if rule.IsReserved() {
-		if err := r.Provider.DeleteFirewallRule(ctx, *rule.Status.FirewallRuleID); err != nil {
-			if !provider.IsErrNotFound(err) {
-				log.Error(err, "Failed to delete FirewallRule", "firewallRuleID", *rule.Status.FirewallRuleID)
+		// Delete firewall rule
+		// In the case of standalone firewall rules or last rule in a group we delete it.
+		// Otherwise, we update the group dedicated to the node.
+		toDel := false
+		firewallRuleID := helper.StringValue(rule.Status.FirewallRuleID)
+		if r.Provider.HasGroupedFirewallRules() {
+			// List FirewallRules with identical nodeName
+			frs := &v1alpha1.FirewallRuleList{}
+			if err := r.List(ctx, frs); err != nil {
+				log.Error(err, "Unable to list FirewallRules")
 				return ctrl.Result{}, err
 			}
-			log.V(1).Info("FirewallRule not found", "firewallRuleID", *rule.Status.FirewallRuleID)
+
+			// Check for other rules associated to the node.
+			// If there is already one, we update the group of rules, if not, we delete the group.
+			rules := v1alpha1.FilterFirewallRules(frs.Items, func(fr v1alpha1.FirewallRule) bool {
+				return fr.Name != rule.Name && helper.StringValue(fr.Status.FirewallRuleID) == helper.StringValue(rule.Status.FirewallRuleID)
+			})
+			if len(rules) > 0 {
+				log.V(1).Info("Updating FirewallRule", "firewallRuleID", firewallRuleID)
+				if _, err := r.Provider.UpdateFirewallRuleGroup(ctx, encodeUpdateFirewallRuleGroupRequest(firewallRuleID, rules)); err != nil {
+					log.Error(err, "Unable to update FirewallRules")
+					return ctrl.Result{}, err
+				}
+			} else {
+				toDel = true
+			}
+		} else {
+			toDel = true
 		}
-		log.Info("Deleted FirewallRule", "firewallRuleID", *rule.Status.FirewallRuleID)
+
+		if toDel {
+			log.V(1).Info("Deleting FirewallRule", "firewallRuleID", firewallRuleID)
+			if err := r.Provider.DeleteFirewallRule(ctx, *rule.Status.FirewallRuleID); err != nil {
+				if !provider.IsErrNotFound(err) {
+					log.Error(err, "Failed to delete FirewallRule", "firewallRuleID", *rule.Status.FirewallRuleID)
+					return ctrl.Result{}, err
+				}
+				log.V(1).Info("FirewallRule not found", "firewallRuleID", *rule.Status.FirewallRuleID)
+			}
+			log.Info("Deleted FirewallRule", "firewallRuleID", *rule.Status.FirewallRuleID)
+		}
 
 		// Update status
 		rule.Status.State = v1alpha1.FirewallRuleStateNone
@@ -334,9 +422,62 @@ func (r *FirewallRuleReconciler) disassociateFirewallRule(ctx context.Context, p
 
 // SetupWithManager sets up the controller with the Manager.
 func (r *FirewallRuleReconciler) SetupWithManager(mgr ctrl.Manager) error {
+	// Index FirewallRule NodeName to list FirewallRules by node.
+	if err := mgr.GetFieldIndexer().IndexField(context.TODO(), &v1alpha1.FirewallRule{}, firewallRuleNodeNameKey, func(o client.Object) []string {
+		fr := o.(*v1alpha1.FirewallRule)
+		return []string{string(helper.StringValue(fr.Spec.NodeName))}
+	}); err != nil {
+		return err
+	}
+
 	return ctrl.NewControllerManagedBy(mgr).
 		For(&v1alpha1.FirewallRule{}).
 		Complete(r)
+}
+
+// encodeCreateFirewallRuleGroupRequest converts an api FirewallRule slice to a CreateFirewallRuleGroupRequest slice.
+func encodeCreateFirewallRuleGroupRequest(name, description string, data []v1alpha1.FirewallRule) provider.CreateFirewallRuleGroupRequest {
+	return provider.CreateFirewallRuleGroupRequest{
+		Name:          name,
+		Description:   description,
+		FirewallRules: encodeFirewallRuleSpecs(data),
+	}
+}
+
+// encodeCreateFirewallRuleRequest converts an api FirewallRule to a CreateFirewallRuleRequest.
+func encodeCreateFirewallRuleRequest(data *v1alpha1.FirewallRule) provider.CreateFirewallRuleRequest {
+	return provider.CreateFirewallRuleRequest{
+		FirewallRuleSpec: encodeFirewallRuleSpec(data),
+	}
+}
+
+// encodeUpdateFirewallRuleGroupRequest converts an api FirewallRule slice to a UpdateFirewallRuleGroupRequest slice.
+func encodeUpdateFirewallRuleGroupRequest(id string, data []v1alpha1.FirewallRule) provider.UpdateFirewallRuleGroupRequest {
+	return provider.UpdateFirewallRuleGroupRequest{
+		FirewallRuleGroupID: id,
+		FirewallRules:       encodeFirewallRuleSpecs(data),
+	}
+}
+
+// encodeUpdateFirewallRuleRequest converts an api FirewallRule to a UpdateFirewallRuleRequest.
+func encodeUpdateFirewallRuleRequest(id string, data *v1alpha1.FirewallRule) provider.UpdateFirewallRuleRequest {
+	return provider.UpdateFirewallRuleRequest{
+		FirewallRuleID:   id,
+		FirewallRuleSpec: encodeFirewallRuleSpec(data),
+	}
+}
+
+// encodeFirewallRuleSpecs converts an api FirewallRule slice to a FirewallRuleSpec slice.
+func encodeFirewallRuleSpecs(data []v1alpha1.FirewallRule) []provider.FirewallRuleSpec {
+	if data == nil {
+		return make([]provider.FirewallRuleSpec, 0)
+	}
+
+	res := make([]provider.FirewallRuleSpec, len(data))
+	for i, e := range data {
+		res[i] = encodeFirewallRuleSpec(&e)
+	}
+	return res
 }
 
 // encodeFirewallRuleSpec converts an api FirewallRule to a FirewallRuleSpec.

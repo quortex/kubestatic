@@ -136,3 +136,15 @@ type FirewallRuleList struct {
 func init() {
 	SchemeBuilder.Register(&FirewallRule{}, &FirewallRuleList{})
 }
+
+// FilterFirewallRules filter FirewallRules depending on the given filter function.
+// Filter function must return true to keep element, false to filter it.
+func FilterFirewallRules(frs []FirewallRule, filterFunc func(FirewallRule) bool) []FirewallRule {
+	res := []FirewallRule{}
+	for _, e := range frs {
+		if filterFunc(e) {
+			res = append(res, e)
+		}
+	}
+	return res
+}
