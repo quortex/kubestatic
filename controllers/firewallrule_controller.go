@@ -94,6 +94,11 @@ func (r *FirewallRuleReconciler) reconcileFirewallRule(ctx context.Context, log 
 		return ctrl.Result{}, r.Update(ctx, rule)
 	}
 
+	if helper.StringValue(rule.Spec.NodeName) == "" {
+		log.Info("Empty nodeName, nothing to do !")
+		return ctrl.Result{}, nil
+	}
+
 	// 2nd STEP
 	//
 	// Reserve firewall
@@ -264,7 +269,7 @@ func (r *FirewallRuleReconciler) reconcileFirewallRule(ctx context.Context, log 
 		}
 
 		// No spec.nodeName, no association, end reconciliation for FirewallRule.
-		log.V(1).Info("No No spec.nodeName, no association, end reconciliation for FirewallRule.")
+		log.V(1).Info("No spec.nodeName, no association, end reconciliation for FirewallRule.")
 		return ctrl.Result{}, nil
 	}
 
