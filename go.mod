@@ -3,6 +3,10 @@ module github.com/quortex/kubestatic
 go 1.15
 
 require (
+	github.com/Azure/azure-sdk-for-go v59.2.0+incompatible
+	github.com/Azure/go-autorest/autorest/azure/auth v0.5.9
+	github.com/Azure/go-autorest/autorest/to v0.4.0
+	github.com/Azure/go-autorest/autorest/validation v0.3.0 // indirect
 	github.com/aws/aws-sdk-go v1.38.44
 	github.com/go-logr/logr v0.3.0
 	github.com/google/uuid v1.1.1

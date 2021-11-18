@@ -42,7 +42,8 @@ import (
 
 const (
 	// providerAWS describes the AWS cloud provider
-	providerAWS = "aws"
+	providerAWS   = "aws"
+	providerAzure = "azure"
 )
 
 var (
@@ -50,6 +51,7 @@ var (
 	setupLog           = ctrl.Log.WithName("setup")
 	availableProviders = []string{
 		providerAWS,
+		providerAzure,
 	}
 )
 
