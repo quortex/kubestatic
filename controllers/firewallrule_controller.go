@@ -395,18 +395,52 @@ func (r *FirewallRuleReconciler) reconcileFirewallRuleDeletion(ctx context.Conte
 func (r *FirewallRuleReconciler) disassociateFirewallRule(ctx context.Context, pvd provider.Provider, log logr.Logger, rule *v1alpha1.FirewallRule) (ctrl.Result, error) {
 	// Get firewall rule and disassociate it
 	if rule.Status.FirewallRuleID != nil {
-		err := pvd.DisassociateFirewallRule(ctx, provider.AssociateFirewallRuleRequest{
-			FirewallRuleID:     *rule.Status.FirewallRuleID,
-			NetworkInterfaceID: *rule.Status.NetworkInterfaceID,
-		})
-		if err != nil {
-			if !provider.IsErrNotFound(err) {
-				log.Error(err, "Failed to disassociate firewall rule", "firewallRuleID", *rule.Status.FirewallRuleID, "networkInterfaceID", *rule.Status.NetworkInterfaceID)
+		// Disassociate firewall rule
+		// In the case of standalone firewall rules or last rule in a group we disassociate it
+		// from the network interface.
+		// Otherwise, we update the group dedicated to the node.
+		toDisassociate := false
+		firewallRuleID := helper.StringValue(rule.Status.FirewallRuleID)
+		if r.Provider.HasGroupedFirewallRules() {
+			// List FirewallRules with identical nodeName
+			frs := &v1alpha1.FirewallRuleList{}
+			if err := r.List(ctx, frs); err != nil {
+				log.Error(err, "Unable to list FirewallRules")
 				return ctrl.Result{}, err
 			}
-			log.Info("Firewall rule already disassociated", "firewallRuleID", *rule.Status.FirewallRuleID)
+
+			// Check for other rules associated to the node.
+			// If there is other ones, we only update the group of rules, if not, we also disassociate the group.
+			rules := v1alpha1.FilterFirewallRules(frs.Items, func(fr v1alpha1.FirewallRule) bool {
+				return fr.Name != rule.Name && helper.StringValue(fr.Status.FirewallRuleID) == helper.StringValue(rule.Status.FirewallRuleID)
+			})
+			log.V(1).Info("Updating FirewallRule", "firewallRuleID", firewallRuleID)
+			if _, err := r.Provider.UpdateFirewallRuleGroup(ctx, encodeUpdateFirewallRuleGroupRequest(firewallRuleID, rules)); err != nil {
+				log.Error(err, "Unable to update FirewallRules")
+				return ctrl.Result{}, err
+			}
+			if len(rules) == 0 {
+				toDisassociate = true
+			}
 		} else {
-			log.Info("Disassociated firewall rule", "firewallRuleID", *rule.Status.FirewallRuleID, "networkInterfaceID", *rule.Status.NetworkInterfaceID)
+			toDisassociate = true
+		}
+
+		// Perform firewallrule disassociation from network interface.
+		if toDisassociate {
+			err := pvd.DisassociateFirewallRule(ctx, provider.AssociateFirewallRuleRequest{
+				FirewallRuleID:     *rule.Status.FirewallRuleID,
+				NetworkInterfaceID: *rule.Status.NetworkInterfaceID,
+			})
+			if err != nil {
+				if !provider.IsErrNotFound(err) {
+					log.Error(err, "Failed to disassociate firewall rule", "firewallRuleID", *rule.Status.FirewallRuleID, "networkInterfaceID", *rule.Status.NetworkInterfaceID)
+					return ctrl.Result{}, err
+				}
+				log.Info("Firewall rule already disassociated", "firewallRuleID", *rule.Status.FirewallRuleID)
+			} else {
+				log.Info("Disassociated firewall rule", "firewallRuleID", *rule.Status.FirewallRuleID, "networkInterfaceID", *rule.Status.NetworkInterfaceID)
+			}
 		}
 	}
 
