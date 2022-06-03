@@ -199,7 +199,7 @@ func (r *ExternalIPReconciler) reconcileExternalIP(ctx context.Context, log logr
 					// Set status back to Reserved
 					externalIP.Status.State = v1alpha1.ExternalIPStateReserved
 					log.V(1).Info("Updating ExternalIP", "state", externalIP.Status.State, "InstanceID", externalIP.Status.InstanceID)
-					if err != r.Status().Update(ctx, externalIP) {
+					if err = r.Status().Update(ctx, externalIP); err != nil {
 						log.Error(err, "Failed to update ExternalIP status", "externalIP", externalIP.Name, "status", externalIP.Status.State)
 						return ctrl.Result{}, err
 					}
