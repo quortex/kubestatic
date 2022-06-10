@@ -44,12 +44,14 @@ func TestDecodeInstance(t *testing.T) {
 							Association: &ec2.InstanceNetworkInterfaceAssociation{
 								PublicIp: aws.String("FooPublicIp"),
 							},
+							Description: aws.String("FooDescription"),
 						},
 						{
 							NetworkInterfaceId: aws.String("BarNetworkInterfaceId"),
 							Association: &ec2.InstanceNetworkInterfaceAssociation{
 								PublicIp: aws.String("BarPublicIp"),
 							},
+							Description: aws.String("BarDescription"),
 						},
 					},
 					VpcId: aws.String("VpcId"),
@@ -62,10 +64,12 @@ func TestDecodeInstance(t *testing.T) {
 					{
 						NetworkInterfaceID: "FooNetworkInterfaceId",
 						PublicIP:           aws.String("FooPublicIp"),
+						Description:        "FooDescription",
 					},
 					{
 						NetworkInterfaceID: "BarNetworkInterfaceId",
 						PublicIP:           aws.String("BarPublicIp"),
+						Description:        "BarDescription",
 					},
 				},
 			},

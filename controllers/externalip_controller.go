@@ -145,18 +145,18 @@ func (r *ExternalIPReconciler) reconcileExternalIP(ctx context.Context, log logr
 				return ctrl.Result{}, err
 			}
 
-			// Get the first network interface with a public IP address
-			// This is needed because we could have multiple network interfaces,
-			// for example on EKS we have the public one, as well as one or more created by the EKS CNI.
+			// If interface has a public IP and no description, most likely it has just been freshly created.
+			// If it has a KubestaticDescription (with or without publicIP) then an EIP has already been
+			// attached to it.
 			var networkInterface *provider.NetworkInterface
 			for _, elem := range res.NetworkInterfaces {
-				if elem != nil && elem.PublicIP != nil {
+				if elem != nil && (elem.PublicIP != nil || elem.Description == v1alpha1.KubestaticDescription) {
 					networkInterface = elem
 					break
 				}
 			}
 			if networkInterface == nil {
-				err := fmt.Errorf("no network interface with public IP found for instance %s", instanceID)
+				err := fmt.Errorf("no non-k8s managed network interface found for instance %s", instanceID)
 				log.Error(err, "Cannot associate an address with this instance", "instanceID", instanceID)
 				return ctrl.Result{}, err
 			}

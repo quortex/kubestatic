@@ -13,6 +13,8 @@ import (
 	"github.com/aws/aws-sdk-go/service/ec2"
 	corev1 "k8s.io/api/core/v1"
 
+	"github.com/quortex/kubestatic/api/v1alpha1"
+	"github.com/quortex/kubestatic/pkg/helper"
 	"github.com/quortex/kubestatic/pkg/provider"
 	"github.com/quortex/kubestatic/pkg/provider/aws/converter"
 )
@@ -186,6 +188,17 @@ func (p *awsProvider) AssociateAddress(ctx context.Context, req provider.Associa
 		return converter.DecodeEC2Error("failed to associate address", err)
 	}
 
+	input := ec2.ModifyNetworkInterfaceAttributeInput{
+		NetworkInterfaceId: &req.NetworkInterfaceID,
+		Description: &ec2.AttributeValue{
+			Value: helper.StringPointer(v1alpha1.KubestaticDescription),
+		},
+	}
+	_, err = p.ec2.ModifyNetworkInterfaceAttribute(&input)
+
+	if err != nil {
+		return converter.DecodeEC2Error("failed to add description to network interface", err)
+	}
 	return nil
 }
 

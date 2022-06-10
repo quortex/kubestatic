@@ -20,6 +20,9 @@ type NetworkInterface struct {
 
 	// The public IP address bound to the network interface.
 	PublicIP *string
+
+	// Description of the network interface.
+	Description string
 }
 
 // Describes an external IP address.

@@ -35,6 +35,7 @@ const (
 	ExternalIPStateNone       ExternalIPState = ""
 	ExternalIPStateReserved   ExternalIPState = "Reserved"
 	ExternalIPStateAssociated ExternalIPState = "Associated"
+	KubestaticDescription                     = "kubestatic-managed"
 )
 
 // ExternalIPStatus defines the observed state of ExternalIP
