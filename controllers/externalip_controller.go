@@ -150,7 +150,7 @@ func (r *ExternalIPReconciler) reconcileExternalIP(ctx context.Context, log logr
 			// You cannot detach a primary network interface from an instance.
 			var networkInterface *provider.NetworkInterface
 			for _, elem := range res.NetworkInterfaces {
-				if elem != nil && elem.DeviceID == helper.Int64Pointer(0) {
+				if elem != nil && *elem.DeviceID == 0 {
 					networkInterface = elem
 					break
 				}
