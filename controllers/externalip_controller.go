@@ -145,12 +145,12 @@ func (r *ExternalIPReconciler) reconcileExternalIP(ctx context.Context, log logr
 				return ctrl.Result{}, err
 			}
 
-			// Get the first network interface with a public IP address
-			// This is needed because we could have multiple network interfaces,
-			// for example on EKS we have the public one, as well as one or more created by the EKS CNI.
+			// Interface with index 0 is the first attached to node, the one we're interested in.
+			// Each instance has a default network interface, called the primary network interface.
+			// You cannot detach a primary network interface from an instance.
 			var networkInterface *provider.NetworkInterface
 			for _, elem := range res.NetworkInterfaces {
-				if elem != nil && elem.PublicIP != nil {
+				if elem != nil && *elem.DeviceID == 0 {
 					networkInterface = elem
 					break
 				}
