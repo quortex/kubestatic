@@ -34,6 +34,7 @@ func DecodeNetworkInterface(data *ec2.InstanceNetworkInterface) *provider.Networ
 	return &provider.NetworkInterface{
 		NetworkInterfaceID: aws.StringValue(data.NetworkInterfaceId),
 		PublicIP:           publicIP,
+		DeviceID:           data.Attachment.DeviceIndex,
 	}
 }
 

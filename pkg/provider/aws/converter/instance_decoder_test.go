@@ -7,6 +7,7 @@ import (
 
 	"github.com/aws/aws-sdk-go/aws"
 	"github.com/aws/aws-sdk-go/service/ec2"
+	"github.com/quortex/kubestatic/pkg/helper"
 	"github.com/quortex/kubestatic/pkg/provider"
 )
 
@@ -38,11 +39,15 @@ func TestDecodeInstance(t *testing.T) {
 			args: args{
 				data: &ec2.Instance{
 					InstanceId: aws.String("InstanceId"),
+					VpcId:      aws.String("VpcId"),
 					NetworkInterfaces: []*ec2.InstanceNetworkInterface{
 						{
 							NetworkInterfaceId: aws.String("FooNetworkInterfaceId"),
 							Association: &ec2.InstanceNetworkInterfaceAssociation{
 								PublicIp: aws.String("FooPublicIp"),
+							},
+							Attachment: &ec2.InstanceNetworkInterfaceAttachment{
+								DeviceIndex: helper.Int64Pointer(1),
 							},
 						},
 						{
@@ -50,9 +55,11 @@ func TestDecodeInstance(t *testing.T) {
 							Association: &ec2.InstanceNetworkInterfaceAssociation{
 								PublicIp: aws.String("BarPublicIp"),
 							},
+							Attachment: &ec2.InstanceNetworkInterfaceAttachment{
+								DeviceIndex: helper.Int64Pointer(0),
+							},
 						},
 					},
-					VpcId: aws.String("VpcId"),
 				},
 			},
 			want: &provider.Instance{
@@ -62,10 +69,12 @@ func TestDecodeInstance(t *testing.T) {
 					{
 						NetworkInterfaceID: "FooNetworkInterfaceId",
 						PublicIP:           aws.String("FooPublicIp"),
+						DeviceID:           helper.Int64Pointer(1),
 					},
 					{
 						NetworkInterfaceID: "BarNetworkInterfaceId",
 						PublicIP:           aws.String("BarPublicIp"),
+						DeviceID:           helper.Int64Pointer(0),
 					},
 				},
 			},
