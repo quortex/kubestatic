@@ -20,13 +20,13 @@ jobs:
 
     steps:
       - name: Set up Go 1.16
-        uses: actions/setup-go@v2
+        uses: actions/setup-go@v3
         with:
           go-version: 1.16
 
       # This step uses Github's checkout-action: https://github.com/actions/checkout
       - name: Check out code
-        uses: actions/checkout@v2
+        uses: actions/checkout@v3
 
       # Deduced the appropriate tag for the image (inspired by the docker action https://github.com/actions-hub/docker)
       - name: Set env
@@ -43,7 +43,7 @@ jobs:
           echo "IMAGE_TAG=${IMAGE_TAG}" >> $GITHUB_ENV
 
       # Setup gcloud CLI
-      - uses: google-github-actions/setup-gcloud@v0.2.1
+      - uses: google-github-actions/setup-gcloud@v0.6.0
         with:
           service_account_key: ${{ secrets.GCP_SA_KEY }}
           project_id: ${{ env.GCP_PROJECT_ID }}

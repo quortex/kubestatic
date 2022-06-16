@@ -20,6 +20,9 @@ type NetworkInterface struct {
 
 	// The public IP address bound to the network interface.
 	PublicIP *string
+
+	// DeviceID of the network interface.
+	DeviceID *int64
 }
 
 // Describes an external IP address.
