@@ -97,6 +97,9 @@ func (r *ExternalIPReconciler) reconcileExternalIP(ctx context.Context, log logr
 		return ctrl.Result{}, r.Update(ctx, externalIP)
 	}
 
+	if externalIP.ShouldDisassociate() {
+		return r.disassociateAddress(ctx, r.Provider, log, externalIP)
+	}
 	// 2nd STEP
 	//
 	// Reserve external IP address
@@ -222,7 +225,7 @@ func (r *ExternalIPReconciler) reconcileExternalIP(ctx context.Context, log logr
 				}
 
 				// ... then compute new node to marshal it...
-				node.Labels[externalIPLabel] = *externalIP.Status.PublicIPAddress
+				node.Labels[v1alpha1.ExternalIPLabel] = *externalIP.Status.PublicIPAddress
 				new, err := json.Marshal(node)
 				if err != nil {
 					log.Error(err, "Failed to marshal new node")
@@ -266,18 +269,22 @@ func (r *ExternalIPReconciler) reconcileExternalIPDeletion(ctx context.Context, 
 	//
 	// Release unassociated address.
 	if externalIP.IsReserved() {
-		if err := r.Provider.DeleteAddress(ctx, *externalIP.Status.AddressID); err != nil {
-			if !provider.IsErrNotFound(err) {
-				log.Error(err, "Failed to delete Address", "addressID", *externalIP.Status.AddressID)
-				return ctrl.Result{}, err
+		// Do not delete EIP if flag PreventEIPDeallocation is set
+		if externalIP.Status.AddressID != nil && !externalIP.Spec.PreventEIPDeallocation {
+			if err := r.Provider.DeleteAddress(ctx, *externalIP.Status.AddressID); err != nil {
+				if !provider.IsErrNotFound(err) {
+					log.Error(err, "Failed to delete Address", "addressID", *externalIP.Status.AddressID)
+					return ctrl.Result{}, err
+				}
+				log.V(1).Info("Address not found", "addressID", *externalIP.Status.AddressID)
 			}
-			log.V(1).Info("Address not found", "addressID", *externalIP.Status.AddressID)
-		}
-		log.Info("Deleted Address", "addressID", *externalIP.Status.AddressID)
+			log.Info("Deleted Address", "addressID", *externalIP.Status.AddressID)
 
-		// Update status
+			// Update status
+			externalIP.Status.AddressID = nil
+		}
+		// set State to None for finalizer to delete externalIP object
 		externalIP.Status.State = v1alpha1.ExternalIPStateNone
-		externalIP.Status.AddressID = nil
 		log.V(1).Info("Updating ExternalIP", "state", externalIP.Status.State)
 		return ctrl.Result{}, r.Status().Update(ctx, externalIP)
 	}
@@ -344,7 +351,7 @@ func (r *ExternalIPReconciler) SetupWithManager(mgr ctrl.Manager) error {
 				// List ExternalIPs that matches node name
 				log.V(1).Info("List all ExternalIP for node")
 				externalIPs := &v1alpha1.ExternalIPList{}
-				if err := r.Client.List(ctx, externalIPs, client.MatchingFields{externalIPNodeNameField: node.Name}); err != nil {
+				if err := r.Client.List(ctx, externalIPs, client.MatchingFields{v1alpha1.ExternalIPNodeNameField: node.Name}); err != nil {
 					log.Error(err, "Unable to list ExternalIP resources", "nodeName", node.Name)
 					return []reconcile.Request{}
 				}
