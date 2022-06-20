@@ -111,28 +111,28 @@ func Test_countReferencedIP(t *testing.T) {
 					{
 						ObjectMeta: metav1.ObjectMeta{
 							Labels: map[string]string{
-								externalIPLabel: "foo",
+								v1alpha1.ExternalIPLabel: "foo",
 							},
 						},
 					},
 					{
 						ObjectMeta: metav1.ObjectMeta{
 							Labels: map[string]string{
-								externalIPLabel: "foo",
+								v1alpha1.ExternalIPLabel: "foo",
 							},
 						},
 					},
 					{
 						ObjectMeta: metav1.ObjectMeta{
 							Labels: map[string]string{
-								externalIPLabel: "bar",
+								v1alpha1.ExternalIPLabel: "bar",
 							},
 						},
 					},
 					{
 						ObjectMeta: metav1.ObjectMeta{
 							Labels: map[string]string{
-								externalIPLabel: "foo",
+								v1alpha1.ExternalIPLabel: "foo",
 							},
 						},
 					},
@@ -176,28 +176,28 @@ func Test_getMostReferencedIP(t *testing.T) {
 					{
 						ObjectMeta: metav1.ObjectMeta{
 							Labels: map[string]string{
-								externalIPLabel: "foo",
+								v1alpha1.ExternalIPLabel: "foo",
 							},
 						},
 					},
 					{
 						ObjectMeta: metav1.ObjectMeta{
 							Labels: map[string]string{
-								externalIPLabel: "foo",
+								v1alpha1.ExternalIPLabel: "foo",
 							},
 						},
 					},
 					{
 						ObjectMeta: metav1.ObjectMeta{
 							Labels: map[string]string{
-								externalIPLabel: "bar",
+								v1alpha1.ExternalIPLabel: "bar",
 							},
 						},
 					},
 					{
 						ObjectMeta: metav1.ObjectMeta{
 							Labels: map[string]string{
-								externalIPLabel: "foo",
+								v1alpha1.ExternalIPLabel: "foo",
 							},
 						},
 					},

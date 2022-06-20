@@ -37,7 +37,7 @@ func publicIPAddresses(eips []v1alpha1.ExternalIP) (res []string) {
 // countReferencedIP counts pods that refer to the kubestatic.quortex.io/externalip label with the desired ip
 func countReferencedIP(pods []corev1.Pod, ip string) (count int) {
 	for _, e := range pods {
-		if e.Labels[externalIPLabel] == ip {
+		if e.Labels[v1alpha1.ExternalIPLabel] == ip {
 			count++
 		}
 	}
