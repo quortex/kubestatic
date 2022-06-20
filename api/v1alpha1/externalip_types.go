@@ -25,6 +25,11 @@ type ExternalIPSpec struct {
 	// NodeName is the node's instance on which the address must be attached
 	// +optional
 	NodeName string `json:"nodeName,omitempty"`
+
+	// PreventDeallocation tells if EIP should be deallocated on ExternalIP deletion
+	//+kubebuilder:validation:Optional
+	//+kubebuilder:default:=false
+	PreventEIPDeallocation bool `json:"preventEIPDeallocation,omitempty"`
 }
 
 // ExternalIPState describes the ExternalIP state.
@@ -35,6 +40,12 @@ const (
 	ExternalIPStateNone       ExternalIPState = ""
 	ExternalIPStateReserved   ExternalIPState = "Reserved"
 	ExternalIPStateAssociated ExternalIPState = "Associated"
+	// ExternalIPAutoAssignLabel is the key for auto externalIP assignment label
+	ExternalIPAutoAssignLabel = "kubestatic.quortex.io/externalip-auto-assign"
+	// ExternalIPLabel is the key for auto externalIP label (the externalIP a pod should have)
+	ExternalIPLabel = "kubestatic.quortex.io/externalip"
+	// ExternalIPNodeNameField is the nodeName field in ExternalIP resource
+	ExternalIPNodeNameField = ".spec.nodeName"
 )
 
 // ExternalIPStatus defines the observed state of ExternalIP
@@ -76,6 +87,11 @@ func (e *ExternalIP) IsReserved() bool {
 // IsAssociated returns if externalIP is associated
 func (e *ExternalIP) IsAssociated() bool {
 	return e.Status.State == ExternalIPStateAssociated
+}
+
+// ShouldDisassociate returns true if EIP should disassociate from node, based on label
+func (e *ExternalIP) ShouldDisassociate() bool {
+	return e.Labels[ExternalIPAutoAssignLabel] != "true"
 }
 
 //+kubebuilder:object:root=true

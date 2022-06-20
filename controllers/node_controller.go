@@ -35,15 +35,6 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/predicate"
 )
 
-const (
-	// externalIPAutoAssignLabel is the key for auto externalIP assignment label
-	externalIPAutoAssignLabel = "kubestatic.quortex.io/externalip-auto-assign"
-	// externalIPLabel is the key for auto externalIP label (the externalIP a pod should have)
-	externalIPLabel = "kubestatic.quortex.io/externalip"
-	// externalIPNodeNameField is the nodeName field in ExternalIP resource
-	externalIPNodeNameField = ".spec.nodeName"
-)
-
 // NodeReconciler reconciles a Node object
 type NodeReconciler struct {
 	client.Client
@@ -69,8 +60,8 @@ func (r *NodeReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.
 	if err := r.Client.List(
 		ctx,
 		externalIPs,
-		client.MatchingFields{externalIPNodeNameField: req.Name},
-		client.MatchingLabels{externalIPAutoAssignLabel: "true"},
+		client.MatchingFields{v1alpha1.ExternalIPNodeNameField: req.Name},
+		client.MatchingLabels{v1alpha1.ExternalIPAutoAssignLabel: "true"},
 	); err != nil {
 		log.Error(err, "Unable to list ExternalIP resources", "nodeName", req.Name)
 		return ctrl.Result{}, err
@@ -87,8 +78,8 @@ func (r *NodeReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.
 	if err := r.Client.List(
 		ctx,
 		externalIPs,
-		client.MatchingFields{externalIPNodeNameField: ""},
-		client.MatchingLabels{externalIPAutoAssignLabel: "true"},
+		client.MatchingFields{v1alpha1.ExternalIPNodeNameField: ""},
+		client.MatchingLabels{v1alpha1.ExternalIPAutoAssignLabel: "true"},
 	); err != nil {
 		log.Error(err, "Unable to list ExternalIP resources", "nodeName", "")
 		return ctrl.Result{}, err
@@ -99,14 +90,14 @@ func (r *NodeReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.
 		// List pods that should be scheduled on orphaned ExternalIPs
 		publicIPAddresses := publicIPAddresses(externalIPs.Items)
 		lblValue := fmt.Sprintf("in (%s)", strings.Join(publicIPAddresses, ","))
-		log.V(1).Info("List all Pods with labels", "key", externalIPLabel, "value", lblValue)
+		log.V(1).Info("List all Pods with labels", "key", v1alpha1.ExternalIPLabel, "value", lblValue)
 		podList := &corev1.PodList{}
 		if err := r.Client.List(
 			ctx,
 			podList,
-			client.MatchingLabels{externalIPAutoAssignLabel: lblValue},
+			client.MatchingLabels{v1alpha1.ExternalIPAutoAssignLabel: lblValue},
 		); err != nil {
-			log.Error(err, "List all Pods with labels", "key", externalIPLabel, "value", lblValue)
+			log.Error(err, "List all Pods with labels", "key", v1alpha1.ExternalIPLabel, "value", lblValue)
 			return ctrl.Result{}, err
 		}
 
@@ -125,7 +116,7 @@ func (r *NodeReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.
 	externalIP := &v1alpha1.ExternalIP{
 		ObjectMeta: metav1.ObjectMeta{
 			GenerateName: "auto-assigned-",
-			Labels:       map[string]string{externalIPAutoAssignLabel: "true"},
+			Labels:       map[string]string{v1alpha1.ExternalIPAutoAssignLabel: "true"},
 		},
 		Spec: v1alpha1.ExternalIPSpec{
 			NodeName: req.Name,
@@ -142,7 +133,7 @@ func (r *NodeReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.
 // SetupWithManager sets up the controller with the Manager.
 func (r *NodeReconciler) SetupWithManager(mgr ctrl.Manager) error {
 	// Index ExternalIP NodeName to list only ExternalIPs assigned to Node.
-	_ = mgr.GetCache().IndexField(context.TODO(), &v1alpha1.ExternalIP{}, externalIPNodeNameField, func(o client.Object) []string {
+	_ = mgr.GetCache().IndexField(context.TODO(), &v1alpha1.ExternalIP{}, v1alpha1.ExternalIPNodeNameField, func(o client.Object) []string {
 		externalIP := o.(*v1alpha1.ExternalIP)
 		return []string{externalIP.Spec.NodeName}
 	})
@@ -170,5 +161,5 @@ func (r *NodeReconciler) nodeReconciliationPredicates() builder.Predicates {
 // shouldReconcileNode returns if given Node should be reconciled by the controller.
 func (r *NodeReconciler) shouldReconcileNode(obj *corev1.Node) bool {
 	// We should consider reconciliation for nodes with automatic IP assignment label.
-	return helper.ContainsElements(obj.ObjectMeta.Labels, map[string]string{externalIPAutoAssignLabel: "true"})
+	return helper.ContainsElements(obj.ObjectMeta.Labels, map[string]string{v1alpha1.ExternalIPAutoAssignLabel: "true"})
 }
