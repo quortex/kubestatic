@@ -25,6 +25,11 @@ type ExternalIPSpec struct {
 	// NodeName is the node's instance on which the address must be attached
 	// +optional
 	NodeName string `json:"nodeName,omitempty"`
+
+	// PreventDeallocation tells if EIP should be deallocated on ExternalIP deletion
+	//+kubebuilder:validation:Optional
+	//+kubebuilder:default:=false
+	PreventEIPDeallocation bool `json:"preventEIPDeallocation,omitempty"`
 }
 
 // ExternalIPState describes the ExternalIP state.
