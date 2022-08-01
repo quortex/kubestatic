@@ -55,6 +55,11 @@ spec:
                 description: NodeName is the node's instance on which the address
                   must be attached
                 type: string
+              preventEIPDeallocation:
+                default: false
+                description: PreventDeallocation tells if EIP should be deallocated
+                  on ExternalIP deletion
+                type: boolean
             type: object
           status:
             description: ExternalIPStatus defines the observed state of ExternalIP

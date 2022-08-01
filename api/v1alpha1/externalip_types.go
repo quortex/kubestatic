@@ -30,6 +30,11 @@ type ExternalIPSpec struct {
 	//+kubebuilder:validation:Optional
 	//+kubebuilder:default:=false
 	DisableReconciliation bool `json:"disableReconciliation"`
+
+	// PreventDeallocation tells if EIP should be deallocated on ExternalIP deletion
+	//+kubebuilder:validation:Optional
+	//+kubebuilder:default:=false
+	PreventEIPDeallocation bool `json:"preventEIPDeallocation,omitempty"`
 }
 
 // ExternalIPState describes the ExternalIP state.
