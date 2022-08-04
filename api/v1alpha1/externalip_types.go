@@ -50,6 +50,11 @@ type ExternalIPStatus struct {
 
 	// The instance identifier
 	InstanceID *string `json:"instanceID,omitempty"`
+
+	// Whether to disable reconcialition of this resource for development purpose
+	//+kubebuilder:validation:Optional
+	//+kubebuilder:default:=false
+	DisableReconciliation bool `json:"disableReconciliation"`
 }
 
 //+kubebuilder:object:root=true

@@ -78,6 +78,11 @@ func (r *ExternalIPReconciler) Reconcile(ctx context.Context, req ctrl.Request) 
 		return ctrl.Result{}, err
 	}
 
+	if externalIP.Spec.DisableReconciliation {
+		log.Info("Reconciliation externalIp disabled")
+		return ctrl.Result{}, nil
+	}
+
 	// Lifecycle reconciliation
 	if externalIP.ObjectMeta.DeletionTimestamp.IsZero() {
 		return r.reconcileExternalIP(ctx, log, externalIP)
