@@ -75,7 +75,7 @@ helm install kubestatic kubestatic/kubestatic -n kubestatic-system
 | manager.securityContext | object | `{}` | kubestatic manager container security contexts |
 | kubeRBACProxy.enabled | bool | `true` |  |
 | kubeRBACProxy.image.repository | string | `"gcr.io/kubebuilder/kube-rbac-proxy"` | kube-rbac-proxy image repository. |
-| kubeRBACProxy.image.tag | string | `"v0.8.0"` | kube-rbac-proxy image tag. |
+| kubeRBACProxy.image.tag | string | `"v0.11.0"` | kube-rbac-proxy image tag. |
 | kubeRBACProxy.image.pullPolicy | string | `"IfNotPresent"` | kube-rbac-proxy image pull policy. |
 | kubeRBACProxy.resources | object | `{}` | kube-rbac-proxy container required resources. |
 | replicaCount | int | `1` | Number of desired pods. |

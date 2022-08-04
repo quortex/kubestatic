@@ -19,14 +19,12 @@ jobs:
       GCP_PROJECT_ID: quortex-registry-public
 
     steps:
-      - name: Set up Go 1.16
-        uses: actions/setup-go@v3
-        with:
-          go-version: 1.16
-
-      # This step uses Github's checkout-action: https://github.com/actions/checkout
       - name: Check out code
         uses: actions/checkout@v3
+
+      - uses: actions/setup-go@v3
+        with:
+          go-version: 1.17
 
       # Deduced the appropriate tag for the image (inspired by the docker action https://github.com/actions-hub/docker)
       - name: Set env

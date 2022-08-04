@@ -112,7 +112,6 @@ func main() {
 
 	if err = (&controllers.ExternalIPReconciler{
 		Client:   mgr.GetClient(),
-		Log:      ctrl.Log.WithName("controllers").WithName("ExternalIP"),
 		Scheme:   mgr.GetScheme(),
 		Provider: pvd,
 	}).SetupWithManager(mgr); err != nil {
@@ -121,7 +120,6 @@ func main() {
 	}
 	if err = (&controllers.NodeReconciler{
 		Client: mgr.GetClient(),
-		Log:    ctrl.Log.WithName("controllers").WithName("Node"),
 		Scheme: mgr.GetScheme(),
 	}).SetupWithManager(mgr); err != nil {
 		setupLog.Error(err, "unable to create controller", "controller", "Node")
@@ -129,7 +127,6 @@ func main() {
 	}
 	if err = (&controllers.FirewallRuleReconciler{
 		Client:   mgr.GetClient(),
-		Log:      ctrl.Log.WithName("controllers").WithName("FirewallRule"),
 		Scheme:   mgr.GetScheme(),
 		Provider: pvd,
 	}).SetupWithManager(mgr); err != nil {

@@ -35,7 +35,7 @@ kubeRBACProxy:
     # -- kube-rbac-proxy image repository.
     repository: gcr.io/kubebuilder/kube-rbac-proxy
     # -- kube-rbac-proxy image tag.
-    tag: v0.8.0
+    tag: v0.11.0
     # -- kube-rbac-proxy image pull policy.
     pullPolicy: IfNotPresent
   # --  kube-rbac-proxy container required resources.

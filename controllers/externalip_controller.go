@@ -22,7 +22,6 @@ import (
 	"fmt"
 
 	"github.com/go-logr/logr"
-	"github.com/google/uuid"
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/runtime"
@@ -31,6 +30,7 @@ import (
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/handler"
+	"sigs.k8s.io/controller-runtime/pkg/log"
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 	"sigs.k8s.io/controller-runtime/pkg/source"
 
@@ -47,7 +47,6 @@ const (
 // ExternalIPReconciler reconciles a ExternalIP object
 type ExternalIPReconciler struct {
 	client.Client
-	Log      logr.Logger
 	Scheme   *runtime.Scheme
 	Provider provider.Provider
 }
@@ -60,7 +59,7 @@ type ExternalIPReconciler struct {
 // Reconcile is part of the main kubernetes reconciliation loop which aims to
 // move the current state of the cluster closer to the desired state.
 func (r *ExternalIPReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Result, error) {
-	log := r.Log.WithValues("externalip", req.NamespacedName, "reconciliationID", uuid.New().String())
+	log := log.FromContext(ctx)
 
 	log.V(1).Info("ExternalIP reconciliation started")
 	defer log.V(1).Info("ExternalIP reconciliation done")
@@ -338,7 +337,7 @@ func (r *ExternalIPReconciler) SetupWithManager(mgr ctrl.Manager) error {
 			&source.Kind{Type: &corev1.Node{}},
 			handler.EnqueueRequestsFromMapFunc(func(o client.Object) []reconcile.Request {
 				ctx := context.Background()
-				log := r.Log.WithName("nodemapper")
+				log := mgr.GetLogger().WithName("externalip-node-mapper")
 				node := o.(*corev1.Node)
 
 				// List ExternalIPs that matches node name

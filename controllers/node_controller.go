@@ -21,8 +21,6 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/go-logr/logr"
-	"github.com/google/uuid"
 	"github.com/quortex/kubestatic/api/v1alpha1"
 	"github.com/quortex/kubestatic/pkg/helper"
 	corev1 "k8s.io/api/core/v1"
@@ -32,6 +30,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/builder"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/event"
+	"sigs.k8s.io/controller-runtime/pkg/log"
 	"sigs.k8s.io/controller-runtime/pkg/predicate"
 )
 
@@ -47,7 +46,6 @@ const (
 // NodeReconciler reconciles a Node object
 type NodeReconciler struct {
 	client.Client
-	Log    logr.Logger
 	Scheme *runtime.Scheme
 }
 
@@ -58,7 +56,7 @@ type NodeReconciler struct {
 // Reconcile is part of the main kubernetes reconciliation loop which aims to
 // move the current state of the cluster closer to the desired state.
 func (r *NodeReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Result, error) {
-	log := r.Log.WithValues("node", req.NamespacedName, "reconciliationID", uuid.New().String())
+	log := log.FromContext(ctx)
 
 	log.V(1).Info("Node reconciliation started")
 	defer log.V(1).Info("Node reconciliation done")

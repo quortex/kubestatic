@@ -23,13 +23,13 @@ import (
 	"reflect"
 
 	"github.com/go-logr/logr"
-	"github.com/google/uuid"
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/types"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
+	"sigs.k8s.io/controller-runtime/pkg/log"
 
 	"github.com/quortex/kubestatic/api/v1alpha1"
 	"github.com/quortex/kubestatic/pkg/helper"
@@ -45,7 +45,6 @@ const (
 // FirewallRuleReconciler reconciles a FirewallRule object
 type FirewallRuleReconciler struct {
 	client.Client
-	Log      logr.Logger
 	Scheme   *runtime.Scheme
 	Provider provider.Provider
 }
@@ -57,7 +56,7 @@ type FirewallRuleReconciler struct {
 // Reconcile is part of the main kubernetes reconciliation loop which aims to
 // move the current state of the cluster closer to the desired state.
 func (r *FirewallRuleReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Result, error) {
-	log := r.Log.WithValues("firewallrule", req.NamespacedName, "reconciliationID", uuid.New().String())
+	log := log.FromContext(ctx)
 
 	log.V(1).Info("FirewallRule reconciliation started")
 	defer log.V(1).Info("FirewallRule reconciliation done")
