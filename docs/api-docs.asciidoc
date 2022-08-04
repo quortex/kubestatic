@@ -55,6 +55,7 @@ ExternalIPSpec defines the desired state of ExternalIP
 |===
 | Field | Description
 | *`nodeName`* __string__ | NodeName is the node's instance on which the address must be attached
+| *`disableReconciliation`* __boolean__ | Whether to disable reconcialition of this resource for development purpose
 |===
 
 

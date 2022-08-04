@@ -75,6 +75,11 @@ func (r *FirewallRuleReconciler) Reconcile(ctx context.Context, req ctrl.Request
 		return ctrl.Result{}, err
 	}
 
+	if firewallRule.Spec.DisableReconciliation {
+		log.Info("Reconciliation externalIpdisabled")
+		return ctrl.Result{}, nil
+	}
+
 	// Lifecycle reconciliation
 	if firewallRule.ObjectMeta.DeletionTimestamp.IsZero() {
 		return r.reconcileFirewallRule(ctx, log, firewallRule)

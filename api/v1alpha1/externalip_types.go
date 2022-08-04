@@ -25,6 +25,11 @@ type ExternalIPSpec struct {
 	// NodeName is the node's instance on which the address must be attached
 	// +optional
 	NodeName string `json:"nodeName,omitempty"`
+
+	// Whether to disable reconcialition of this resource for development purpose
+	//+kubebuilder:validation:Optional
+	//+kubebuilder:default:=false
+	DisableReconciliation bool `json:"disableReconciliation"`
 }
 
 // ExternalIPState describes the ExternalIP state.
@@ -50,11 +55,6 @@ type ExternalIPStatus struct {
 
 	// The instance identifier
 	InstanceID *string `json:"instanceID,omitempty"`
-
-	// Whether to disable reconcialition of this resource for development purpose
-	//+kubebuilder:validation:Optional
-	//+kubebuilder:default:=false
-	DisableReconciliation bool `json:"disableReconciliation"`
 }
 
 //+kubebuilder:object:root=true

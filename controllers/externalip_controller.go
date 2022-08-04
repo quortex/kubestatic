@@ -79,7 +79,7 @@ func (r *ExternalIPReconciler) Reconcile(ctx context.Context, req ctrl.Request) 
 	}
 
 	if externalIP.Spec.DisableReconciliation {
-		log.Info("Reconciliation externalIp disabled")
+		log.Info("Reconciliation externalIpdisabled")
 		return ctrl.Result{}, nil
 	}
 

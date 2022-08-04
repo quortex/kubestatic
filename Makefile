@@ -109,13 +109,13 @@ CONTROLLER_GEN = $(shell pwd)/bin/controller-gen
 controller-gen: ## Download controller-gen locally if necessary.
 	$(call go-get-tool,$(CONTROLLER_GEN),sigs.k8s.io/controller-tools/cmd/controller-gen@v0.4.1)
 
-# CRD_REF_DOCS = $(shell which crd-ref-docs)
-# crd-ref-docs: ## Download crd-ref-docs locally if necessary.
-# 	$(call go-get-tool,$(CRD_REF_DOCS),github.com/elastic/crd-ref-docs@v0.0.5)
+CRD_REF_DOCS = $(shell pwd)/bin/crd-ref-docs
+crd-ref-docs: ## Download crd-ref-docs locally if necessary.
+    $(call go-get-tool,$(CRD_REF_DOCS),github.com/elastic/crd-ref-docs@v0.0.5)
 
-# GOLANG_CI_LINT = $(shell which golangci-lint)
-# golangci-lint: ## Download golangci-lint locally if necessary.
-# 	$(call go-get-tool,$(CRD_REF_DOCS),github.com/golangci/golangci-lint/cmd/golangci-lint@v1.42.1)
+GOLANG_CI_LINT = $(shell pwd)/bin/golangci-lint
+golangci-lint: ## Download golangci-lint locally if necessary.
+    $(call go-get-tool,$(GOLANG_CI_LINT),github.com/golangci/golangci-lint/cmd/golangci-lint@v1.42.1)
 
 KUSTOMIZE = $(shell pwd)/bin/kustomize
 kustomize: ## Download kustomize locally if necessary.
