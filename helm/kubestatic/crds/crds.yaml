@@ -45,6 +45,11 @@ spec:
             spec:
               description: ExternalIPSpec defines the desired state of ExternalIP
               properties:
+                disableReconciliation:
+                  default: false
+                  description: Whether to disable reconciliation of this resource
+                    for development purpose
+                  type: boolean
                 nodeName:
                   description: NodeName is the node's instance on which the address
                     must be attached
@@ -136,6 +141,11 @@ spec:
                     - Ingress
                     - Egress
                   type: string
+                disableReconciliation:
+                  default: false
+                  description: Whether to disable reconciliation of this resource
+                    for development purpose
+                  type: boolean
                 fromPort:
                   description: The start of port range for the TCP and UDP protocols,
                     or an ICMP/ICMPv6 type number.
