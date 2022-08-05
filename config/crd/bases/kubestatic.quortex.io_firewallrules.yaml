@@ -57,6 +57,11 @@ spec:
                 - Ingress
                 - Egress
                 type: string
+              disableReconciliation:
+                default: false
+                description: Whether to disable reconciliation of this resource for
+                  development purpose
+                type: boolean
               fromPort:
                 description: The start of port range for the TCP and UDP protocols,
                   or an ICMP/ICMPv6 type number.

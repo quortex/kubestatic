@@ -68,6 +68,11 @@ type FirewallRuleSpec struct {
 
 	// The end of port range for the TCP and UDP protocols, or an ICMP/ICMPv6 code.
 	ToPort *int64 `json:"toPort,omitempty"`
+
+	// Whether to disable reconciliation of this resource for development purpose
+	//+kubebuilder:validation:Optional
+	//+kubebuilder:default:=false
+	DisableReconciliation bool `json:"disableReconciliation"`
 }
 
 // FirewallRuleState describes the FirewallRule state.
