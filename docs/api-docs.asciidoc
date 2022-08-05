@@ -56,6 +56,7 @@ ExternalIPSpec defines the desired state of ExternalIP
 | Field | Description
 | *`nodeName`* __string__ | NodeName is the node's instance on which the address must be attached
 | *`disableReconciliation`* __boolean__ | Whether to disable reconciliation of this resource for development purpose
+| *`preventEIPDeallocation`* __boolean__ | PreventDeallocation tells if EIP should be deallocated on ExternalIP deletion
 |===
 
 

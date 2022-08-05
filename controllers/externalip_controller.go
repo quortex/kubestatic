@@ -271,18 +271,22 @@ func (r *ExternalIPReconciler) reconcileExternalIPDeletion(ctx context.Context, 
 	//
 	// Release unassociated address.
 	if externalIP.IsReserved() {
-		if err := r.Provider.DeleteAddress(ctx, *externalIP.Status.AddressID); err != nil {
-			if !provider.IsErrNotFound(err) {
-				log.Error(err, "Failed to delete Address", "addressID", *externalIP.Status.AddressID)
-				return ctrl.Result{}, err
+		// Do not delete EIP if flag PreventEIPDeallocation is set
+		if externalIP.Status.AddressID != nil && !externalIP.Spec.PreventEIPDeallocation {
+			if err := r.Provider.DeleteAddress(ctx, *externalIP.Status.AddressID); err != nil {
+				if !provider.IsErrNotFound(err) {
+					log.Error(err, "Failed to delete Address", "addressID", *externalIP.Status.AddressID)
+					return ctrl.Result{}, err
+				}
+				log.V(1).Info("Address not found", "addressID", *externalIP.Status.AddressID)
 			}
-			log.V(1).Info("Address not found", "addressID", *externalIP.Status.AddressID)
-		}
-		log.Info("Deleted Address", "addressID", *externalIP.Status.AddressID)
+			log.Info("Deleted Address", "addressID", *externalIP.Status.AddressID)
 
-		// Update status
+			// Update status
+			externalIP.Status.AddressID = nil
+		}
+		// set State to None for finalizer to delete externalIP object
 		externalIP.Status.State = v1alpha1.ExternalIPStateNone
-		externalIP.Status.AddressID = nil
 		log.V(1).Info("Updating ExternalIP", "state", externalIP.Status.State)
 		return ctrl.Result{}, r.Status().Update(ctx, externalIP)
 	}
