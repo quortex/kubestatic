@@ -55,7 +55,7 @@ ExternalIPSpec defines the desired state of ExternalIP
 |===
 | Field | Description
 | *`nodeName`* __string__ | NodeName is the node's instance on which the address must be attached
-| *`disableReconciliation`* __boolean__ | Whether to disable reconcialition of this resource for development purpose
+| *`disableReconciliation`* __boolean__ | Whether to disable reconciliation of this resource for development purpose
 |===
 
 
@@ -97,6 +97,7 @@ FirewallRuleSpec defines the desired state of FirewallRule
 | *`protocol`* __string__ | The IP protocol name (tcp, udp, icmp, icmpv6) or number (see Protocol Numbers (http://www.iana.org/assignments/protocol-numbers/protocol-numbers.xhtml)). Use -1 to specify all protocols.
 | *`ipRanges`* __xref:{anchor_prefix}-github-com-quortex-kubestatic-api-v1alpha1-iprange[$$IPRange$$]__ | The IPv4 ranges.
 | *`toPort`* __integer__ | The end of port range for the TCP and UDP protocols, or an ICMP/ICMPv6 code.
+| *`disableReconciliation`* __boolean__ | Whether to disable reconciliation of this resource for development purpose
 |===
 
 

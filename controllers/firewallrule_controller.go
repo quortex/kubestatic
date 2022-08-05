@@ -76,7 +76,7 @@ func (r *FirewallRuleReconciler) Reconcile(ctx context.Context, req ctrl.Request
 	}
 
 	if firewallRule.Spec.DisableReconciliation {
-		log.Info("Reconciliation externalIpdisabled")
+		log.Info("Reconciliation disabled")
 		return ctrl.Result{}, nil
 	}
 

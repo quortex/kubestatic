@@ -48,7 +48,7 @@ spec:
             properties:
               disableReconciliation:
                 default: false
-                description: Whether to disable reconcialition of this resource for
+                description: Whether to disable reconciliation of this resource for
                   development purpose
                 type: boolean
               nodeName:
