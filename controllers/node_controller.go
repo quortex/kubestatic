@@ -104,7 +104,7 @@ func (r *NodeReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.
 		if err := r.Client.List(
 			ctx,
 			podList,
-			client.MatchingLabels{externalIPAutoAssignLabel: lblValue},
+			client.MatchingLabels{externalIPLabel: lblValue},
 		); err != nil {
 			log.Error(err, "List all Pods with labels", "key", externalIPLabel, "value", lblValue)
 			return ctrl.Result{}, err
