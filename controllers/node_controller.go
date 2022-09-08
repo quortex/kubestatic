@@ -18,8 +18,6 @@ package controllers
 
 import (
 	"context"
-	"fmt"
-	"strings"
 
 	"github.com/go-logr/logr"
 	"github.com/google/uuid"
@@ -27,7 +25,9 @@ import (
 	"github.com/quortex/kubestatic/pkg/helper"
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/labels"
 	"k8s.io/apimachinery/pkg/runtime"
+	"k8s.io/apimachinery/pkg/selection"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/builder"
 	"sigs.k8s.io/controller-runtime/pkg/client"
@@ -98,15 +98,18 @@ func (r *NodeReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.
 	if len(externalIPs.Items) > 0 {
 		// List pods that should be scheduled on orphaned ExternalIPs
 		publicIPAddresses := publicIPAddresses(externalIPs.Items)
-		lblValue := fmt.Sprintf("in (%s)", strings.Join(publicIPAddresses, ","))
-		log.V(1).Info("List all Pods with labels", "key", externalIPLabel, "value", lblValue)
+
+		requirement, err := labels.NewRequirement(externalIPLabel, selection.In, publicIPAddresses)
+		if err != nil {
+			log.Error(err, "Unable to compute selector")
+			return ctrl.Result{}, err
+		}
+		sel := labels.NewSelector().Add(*requirement)
+
+		log.V(1).Info("List all Pods with selector", "selector", sel)
 		podList := &corev1.PodList{}
-		if err := r.Client.List(
-			ctx,
-			podList,
-			client.MatchingLabels{externalIPLabel: lblValue},
-		); err != nil {
-			log.Error(err, "List all Pods with labels", "key", externalIPLabel, "value", lblValue)
+		if err := r.Client.List(ctx, podList, client.MatchingLabelsSelector{Selector: sel}); err != nil {
+			log.Error(err, "Failed to list all Pods with selector", "selector", sel)
 			return ctrl.Result{}, err
 		}
 
@@ -114,6 +117,7 @@ func (r *NodeReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.
 		externalIP := getMostReferencedIP(podList.Items, externalIPs.Items)
 		if externalIP == nil {
 			externalIP = &externalIPs.Items[0]
+			log.V(1).Info("No used ExternalIP found, fallback on using the first")
 		}
 		externalIP.Spec.NodeName = req.Name
 		log.V(1).Info("Associating ExternalIP to node", "externalIP", externalIP.Name)
