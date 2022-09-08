@@ -467,9 +467,9 @@ func (r *FirewallRuleReconciler) disassociateFirewallRule(ctx context.Context, p
 // SetupWithManager sets up the controller with the Manager.
 func (r *FirewallRuleReconciler) SetupWithManager(mgr ctrl.Manager) error {
 	// Index FirewallRule NodeName to list FirewallRules by node.
-	if err := mgr.GetFieldIndexer().IndexField(context.TODO(), &v1alpha1.FirewallRule{}, firewallRuleNodeNameKey, func(o client.Object) []string {
+	if err := mgr.GetFieldIndexer().IndexField(context.Background(), &v1alpha1.FirewallRule{}, firewallRuleNodeNameKey, func(o client.Object) []string {
 		fr := o.(*v1alpha1.FirewallRule)
-		return []string{string(helper.StringValue(fr.Spec.NodeName))}
+		return []string{helper.StringValue(fr.Spec.NodeName)}
 	}); err != nil {
 		return err
 	}

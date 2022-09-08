@@ -146,10 +146,12 @@ func (r *NodeReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.
 // SetupWithManager sets up the controller with the Manager.
 func (r *NodeReconciler) SetupWithManager(mgr ctrl.Manager) error {
 	// Index ExternalIP NodeName to list only ExternalIPs assigned to Node.
-	_ = mgr.GetCache().IndexField(context.TODO(), &v1alpha1.ExternalIP{}, externalIPNodeNameField, func(o client.Object) []string {
+	if err := mgr.GetFieldIndexer().IndexField(context.Background(), &v1alpha1.ExternalIP{}, externalIPNodeNameField, func(o client.Object) []string {
 		externalIP := o.(*v1alpha1.ExternalIP)
 		return []string{externalIP.Spec.NodeName}
-	})
+	}); err != nil {
+		return err
+	}
 
 	return ctrl.NewControllerManagedBy(mgr).
 		For(&corev1.Node{}, r.nodeReconciliationPredicates()).
