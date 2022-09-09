@@ -21,6 +21,7 @@ const (
 	// Retrieve instance metadata for AWS EC2 instance
 	// https://docs.aws.amazon.com/AWSEC2/latest/UserGuide/instancedata-data-retrieval.html
 	instanceMetadataEndpoint = "http://169.254.169.254/latest/meta-data"
+	tokenEndpoint            = "http://169.254.169.254/latest/api/token"
 )
 
 // The VPC identifier
@@ -60,8 +61,11 @@ func NewProvider() (provider.Provider, error) {
 	}, nil
 }
 
-func retrieveInstanceNetworkInterfaceMacAddress() (string, error) {
-	res, err := http.Get(instanceMetadataEndpoint + "/mac")
+func retrieveInstanceNetworkInterfaceMacAddress(token string) (string, error) {
+	client := &http.Client{}
+	req, _ := http.NewRequest(http.MethodGet, instanceMetadataEndpoint+"/mac", nil)
+	req.Header.Set("X-aws-ec2-metadata-token", token)
+	res, err := client.Do(req)
 	if err != nil {
 		return "", err
 	}
@@ -78,17 +82,35 @@ func retrieveVPCID() (string, error) {
 	if vpcID != "" {
 		return vpcID, nil
 	}
-	mac, err := retrieveInstanceNetworkInterfaceMacAddress()
+
+	client := &http.Client{}
+	req, _ := http.NewRequest(http.MethodPut, tokenEndpoint, nil)
+	req.Header.Set("X-aws-ec2-metadata-token-ttl-seconds", "21600")
+	res, err := client.Do(req)
 	if err != nil {
 		return "", err
 	}
 
-	res, err := http.Get(fmt.Sprintf(instanceMetadataEndpoint + "/network/interfaces/macs/" + mac + "/vpc-id"))
+	token, err := io.ReadAll(res.Body)
 	if err != nil {
 		return "", err
 	}
+
 	defer res.Body.Close()
-	body, err := io.ReadAll(res.Body)
+
+	mac, err := retrieveInstanceNetworkInterfaceMacAddress(string(token))
+	if err != nil {
+		return "", err
+	}
+
+	req, _ = http.NewRequest(http.MethodGet, instanceMetadataEndpoint+"/network/interfaces/macs/"+mac+"/vpc-id", nil)
+	req.Header.Set("X-aws-ec2-metadata-token", string(token))
+	result, err := client.Do(req)
+	if err != nil {
+		return "", err
+	}
+	defer result.Body.Close()
+	body, err := io.ReadAll(result.Body)
 	if err != nil {
 		return "", err
 	}
