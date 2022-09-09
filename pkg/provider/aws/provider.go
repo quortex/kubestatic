@@ -61,14 +61,14 @@ func NewProvider() (provider.Provider, error) {
 	}, nil
 }
 
-func retrieveInstanceNetworkInterfaceMacAddress(token string) (string, error) {
-	client := &http.Client{}
+func retrieveInstanceNetworkInterfaceMacAddress(client *http.Client, token string) (string, error) {
 	req, _ := http.NewRequest(http.MethodGet, instanceMetadataEndpoint+"/mac", nil)
 	req.Header.Set("X-aws-ec2-metadata-token", token)
 	res, err := client.Do(req)
 	if err != nil {
 		return "", err
 	}
+
 	defer res.Body.Close()
 	body, err := io.ReadAll(res.Body)
 	if err != nil {
@@ -84,26 +84,31 @@ func retrieveVPCID() (string, error) {
 	}
 
 	client := &http.Client{}
-	req, _ := http.NewRequest(http.MethodPut, tokenEndpoint, nil)
+	req, err := http.NewRequest(http.MethodPut, tokenEndpoint, nil)
+	if err != nil {
+		return "", err
+	}
 	req.Header.Set("X-aws-ec2-metadata-token-ttl-seconds", "21600")
 	res, err := client.Do(req)
 	if err != nil {
 		return "", err
 	}
+	defer res.Body.Close()
 
 	token, err := io.ReadAll(res.Body)
 	if err != nil {
 		return "", err
 	}
 
-	defer res.Body.Close()
-
-	mac, err := retrieveInstanceNetworkInterfaceMacAddress(string(token))
+	mac, err := retrieveInstanceNetworkInterfaceMacAddress(client, string(token))
 	if err != nil {
 		return "", err
 	}
 
-	req, _ = http.NewRequest(http.MethodGet, instanceMetadataEndpoint+"/network/interfaces/macs/"+mac+"/vpc-id", nil)
+	req, err = http.NewRequest(http.MethodGet, instanceMetadataEndpoint+"/network/interfaces/macs/"+mac+"/vpc-id", nil)
+	if err != nil {
+		return "", err
+	}
 	req.Header.Set("X-aws-ec2-metadata-token", string(token))
 	result, err := client.Do(req)
 	if err != nil {
@@ -131,7 +136,6 @@ func (p *awsProvider) GetInstance(ctx context.Context, instanceID string) (*prov
 	res, err := p.ec2.DescribeInstances(&ec2.DescribeInstancesInput{
 		InstanceIds: aws.StringSlice([]string{instanceID}),
 	})
-
 	if err != nil {
 		return nil, converter.DecodeEC2Error("failed to get instance", err)
 	}
@@ -159,7 +163,6 @@ func (p *awsProvider) GetAddress(ctx context.Context, addressID string) (*provid
 			},
 		},
 	})
-
 	if err != nil {
 		return nil, converter.DecodeEC2Error("failed to get address", err)
 	}
@@ -178,7 +181,6 @@ func (p *awsProvider) CreateAddress(ctx context.Context) (*provider.Address, err
 	res, err := p.ec2.AllocateAddress(&ec2.AllocateAddressInput{
 		Domain: aws.String("vpc"),
 	})
-
 	if err != nil {
 		return nil, converter.DecodeEC2Error("failed to create address", err)
 	}
@@ -190,7 +192,6 @@ func (p *awsProvider) DeleteAddress(ctx context.Context, addressID string) error
 	_, err := p.ec2.ReleaseAddress(&ec2.ReleaseAddressInput{
 		AllocationId: aws.String(addressID),
 	})
-
 	if err != nil {
 		return converter.DecodeEC2Error("failed to delete address", err)
 	}
@@ -203,7 +204,6 @@ func (p *awsProvider) AssociateAddress(ctx context.Context, req provider.Associa
 		AllocationId:       aws.String(req.AddressID),
 		NetworkInterfaceId: aws.String(req.NetworkInterfaceID),
 	})
-
 	if err != nil {
 		return converter.DecodeEC2Error("failed to associate address", err)
 	}
@@ -215,7 +215,6 @@ func (p *awsProvider) DisassociateAddress(ctx context.Context, req provider.Disa
 	_, err := p.ec2.DisassociateAddress(&ec2.DisassociateAddressInput{
 		AssociationId: aws.String(req.AssociationID),
 	})
-
 	if err != nil {
 		return converter.DecodeEC2Error("failed to disassociate address", err)
 	}
@@ -227,7 +226,6 @@ func (p *awsProvider) getSecurityGroup(ctx context.Context, firewallRuleID strin
 	res, err := p.ec2.DescribeSecurityGroups(&ec2.DescribeSecurityGroupsInput{
 		GroupIds: aws.StringSlice([]string{firewallRuleID}),
 	})
-
 	if err != nil {
 		return nil, converter.DecodeEC2Error("failed to get security group", err)
 	}
@@ -260,7 +258,6 @@ func (p *awsProvider) CreateFirewallRuleGroup(ctx context.Context, req provider.
 		GroupName:   aws.String(req.Name),
 		VpcId:       aws.String(vpcID),
 	})
-
 	if err != nil {
 		return "", converter.DecodeEC2Error("failed to create security group", err)
 	}
@@ -297,7 +294,6 @@ func (p *awsProvider) DeleteFirewallRule(ctx context.Context, firewallRuleID str
 	_, err := p.ec2.DeleteSecurityGroup(&ec2.DeleteSecurityGroupInput{
 		GroupId: aws.String(firewallRuleID),
 	})
-
 	if err != nil {
 		return converter.DecodeEC2Error("failed to delete security group", err)
 	}
@@ -312,7 +308,6 @@ func (p *awsProvider) authorizeSecurityGroupIngress(ctx context.Context, firewal
 			converter.EncodeIPPermission(req),
 		},
 	})
-
 	if err != nil {
 		return converter.DecodeEC2Error("failed to authorize security group ingress permission", err)
 	}
@@ -327,7 +322,6 @@ func (p *awsProvider) revokeSecurityGroupIngress(ctx context.Context, firewallRu
 			converter.EncodeIPPermission(req),
 		},
 	})
-
 	if err != nil {
 		return converter.DecodeEC2Error("failed to revoke security group ingress permission", err)
 	}
@@ -342,7 +336,6 @@ func (p *awsProvider) authorizeSecurityGroupEgress(ctx context.Context, firewall
 			converter.EncodeIPPermission(req),
 		},
 	})
-
 	if err != nil {
 		return converter.DecodeEC2Error("failed to authorize security group egress permission", err)
 	}
@@ -357,7 +350,6 @@ func (p *awsProvider) revokeSecurityGroupEgress(ctx context.Context, firewallRul
 			converter.EncodeIPPermission(req),
 		},
 	})
-
 	if err != nil {
 		return converter.DecodeEC2Error("failed to revoke security group egress permission", err)
 	}
@@ -369,7 +361,6 @@ func (p *awsProvider) AssociateFirewallRule(ctx context.Context, req provider.As
 	res, err := p.ec2.DescribeNetworkInterfaces(&ec2.DescribeNetworkInterfacesInput{
 		NetworkInterfaceIds: aws.StringSlice([]string{req.NetworkInterfaceID}),
 	})
-
 	if err != nil {
 		return err
 	}
@@ -402,7 +393,6 @@ func (p *awsProvider) DisassociateFirewallRule(ctx context.Context, req provider
 	res, err := p.ec2.DescribeNetworkInterfaces(&ec2.DescribeNetworkInterfacesInput{
 		NetworkInterfaceIds: aws.StringSlice([]string{req.NetworkInterfaceID}),
 	})
-
 	if err != nil {
 		return converter.DecodeEC2Error("failed to disassociate security group", err)
 	}
