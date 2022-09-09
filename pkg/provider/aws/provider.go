@@ -7,6 +7,7 @@ import (
 	"io"
 	"net/http"
 	"path"
+	"time"
 
 	"github.com/aws/aws-sdk-go/aws"
 	"github.com/aws/aws-sdk-go/aws/session"
@@ -21,7 +22,11 @@ const (
 	// Retrieve instance metadata for AWS EC2 instance
 	// https://docs.aws.amazon.com/AWSEC2/latest/UserGuide/instancedata-data-retrieval.html
 	instanceMetadataEndpoint = "http://169.254.169.254/latest/meta-data"
-	tokenEndpoint            = "http://169.254.169.254/latest/api/token"
+
+	// IMDSv2 token related constants
+	tokenEndpoint      = "http://169.254.169.254/latest/api/token"
+	tokenTTLHeader     = "X-aws-ec2-metadata-token-ttl-seconds"
+	tokenRequestHeader = "X-aws-ec2-metadata-token"
 )
 
 // The VPC identifier
@@ -61,34 +66,12 @@ func NewProvider() (provider.Provider, error) {
 	}, nil
 }
 
-func retrieveInstanceNetworkInterfaceMacAddress(client *http.Client, token string) (string, error) {
-	req, _ := http.NewRequest(http.MethodGet, instanceMetadataEndpoint+"/mac", nil)
-	req.Header.Set("X-aws-ec2-metadata-token", token)
-	res, err := client.Do(req)
-	if err != nil {
-		return "", err
-	}
-
-	defer res.Body.Close()
-	body, err := io.ReadAll(res.Body)
-	if err != nil {
-		return "", err
-	}
-
-	return string(body), nil
-}
-
-func retrieveVPCID() (string, error) {
-	if vpcID != "" {
-		return vpcID, nil
-	}
-
-	client := &http.Client{}
+func getV2Token(client http.Client) (string, error) {
 	req, err := http.NewRequest(http.MethodPut, tokenEndpoint, nil)
 	if err != nil {
 		return "", err
 	}
-	req.Header.Set("X-aws-ec2-metadata-token-ttl-seconds", "21600")
+	req.Header.Set(tokenTTLHeader, "21600")
 	res, err := client.Do(req)
 	if err != nil {
 		return "", err
@@ -100,27 +83,54 @@ func retrieveVPCID() (string, error) {
 		return "", err
 	}
 
-	mac, err := retrieveInstanceNetworkInterfaceMacAddress(client, string(token))
+	return string(token), nil
+}
+
+func retrieveInstanceMetadata(client http.Client, contextPath string, token string) (string, error) {
+	req, err := http.NewRequest(http.MethodGet, instanceMetadataEndpoint+contextPath, nil)
 	if err != nil {
 		return "", err
 	}
 
-	req, err = http.NewRequest(http.MethodGet, instanceMetadataEndpoint+"/network/interfaces/macs/"+mac+"/vpc-id", nil)
-	if err != nil {
-		return "", err
+	if token != "" {
+		req.Header.Set(tokenRequestHeader, token)
 	}
-	req.Header.Set("X-aws-ec2-metadata-token", string(token))
-	result, err := client.Do(req)
-	if err != nil {
-		return "", err
-	}
-	defer result.Body.Close()
-	body, err := io.ReadAll(result.Body)
+	res, err := client.Do(req)
 	if err != nil {
 		return "", err
 	}
 
+	defer res.Body.Close()
+	body, err := io.ReadAll(res.Body)
+	if err != nil {
+		return "", err
+	}
 	return string(body), nil
+}
+
+func retrieveVPCID() (string, error) {
+	if vpcID != "" {
+		return vpcID, nil
+	}
+
+	client := http.Client{Timeout: 3 * time.Second}
+
+	token, err := getV2Token(client)
+	if err != nil {
+		fmt.Printf("failed getting IMDSv2 token falling back to IMDSv1 : %s", err)
+	}
+
+	mac, err := retrieveInstanceMetadata(client, "/mac", string(token))
+	if err != nil {
+		return "", err
+	}
+
+	body, err := retrieveInstanceMetadata(client, "/network/interfaces/macs/"+mac+"/vpc-id", string(token))
+	if err != nil {
+		return "", err
+	}
+
+	return body, nil
 }
 
 func (p *awsProvider) GetInstanceID(node corev1.Node) string {
