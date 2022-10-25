@@ -417,7 +417,7 @@ func (r *FirewallRuleReconciler) disassociateFirewallRule(ctx context.Context, p
 			// Check for other rules associated to the node.
 			// If there is other ones, we only update the group of rules, if not, we also disassociate the group.
 			rules := v1alpha1.FilterFirewallRules(frs.Items, func(fr v1alpha1.FirewallRule) bool {
-				return fr.Name != rule.Name && helper.StringValue(fr.Status.FirewallRuleID) == helper.StringValue(rule.Status.FirewallRuleID)
+				return fr.Name != rule.Name && helper.StringValue(fr.Status.FirewallRuleID) == helper.StringValue(rule.Status.FirewallRuleID) && fr.IsAssociated()
 			})
 			log.V(1).Info("Updating FirewallRule", "firewallRuleID", firewallRuleID)
 			if _, err := r.Provider.UpdateFirewallRuleGroup(ctx, encodeUpdateFirewallRuleGroupRequest(firewallRuleID, rules)); err != nil {
