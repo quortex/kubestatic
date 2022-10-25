@@ -62,10 +62,11 @@ func init() {
 
 func main() {
 	var (
-		fMetricsAddr          string
-		fEnableLeaderElection bool
-		fProbeAddr            string
-		fCloudProvider        string
+		fMetricsAddr            string
+		fEnableLeaderElection   bool
+		fProbeAddr              string
+		fCloudProvider          string
+		fPreventEIPDeallocation bool
 	)
 	flag.StringVar(&fMetricsAddr, "metrics-bind-address", ":8080", "The address the metric endpoint binds to.")
 	flag.StringVar(&fProbeAddr, "health-probe-bind-address", ":8081", "The address the probe endpoint binds to.")
@@ -73,6 +74,7 @@ func main() {
 		"Enable leader election for controller manager. "+
 			"Enabling this will ensure there is only one active controller manager.")
 	flag.StringVar(&fCloudProvider, "cloud-provider", "aws", "Cloud provider type. Available values: ["+strings.Join(availableProviders, ",")+"]")
+	flag.BoolVar(&fPreventEIPDeallocation, "prevent-eip-deallocation", false, "Prevent EIP deallocation on nodes auto-assigned ExternalIPs.")
 	opts := zap.Options{
 		Development: true,
 	}
@@ -120,9 +122,10 @@ func main() {
 		os.Exit(1)
 	}
 	if err = (&controllers.NodeReconciler{
-		Client: mgr.GetClient(),
-		Log:    ctrl.Log.WithName("controllers").WithName("Node"),
-		Scheme: mgr.GetScheme(),
+		Client:                 mgr.GetClient(),
+		Log:                    ctrl.Log.WithName("controllers").WithName("Node"),
+		Scheme:                 mgr.GetScheme(),
+		PreventEIPDeallocation: fPreventEIPDeallocation,
 	}).SetupWithManager(mgr); err != nil {
 		setupLog.Error(err, "unable to create controller", "controller", "Node")
 		os.Exit(1)
