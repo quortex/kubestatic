@@ -80,6 +80,7 @@ The kubestatic container takes as argument the parameters below.
 | metrics-bind-address      | The address the metric endpoint binds to.                                                                             | :8080   |
 | health-probe-bind-address | The address the probe endpoint binds to.                                                                              | :8081   |
 | leader-elect              | Enable leader election for controller manager. Enabling this will ensure there is only one active controller manager. | `false` |
+| prevent-eip-deallocation  | Prevent EIP deallocation on nodes auto-assigned ExternalIPs.                                                          | `false` |
 
 
 ## License

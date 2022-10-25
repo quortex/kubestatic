@@ -47,8 +47,9 @@ const (
 // NodeReconciler reconciles a Node object
 type NodeReconciler struct {
 	client.Client
-	Log    logr.Logger
-	Scheme *runtime.Scheme
+	Log                    logr.Logger
+	Scheme                 *runtime.Scheme
+	PreventEIPDeallocation bool
 }
 
 //+kubebuilder:rbac:groups=core,resources=nodes,verbs=get;list;watch;update;patch
@@ -132,7 +133,8 @@ func (r *NodeReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.
 			Labels:       map[string]string{externalIPAutoAssignLabel: "true"},
 		},
 		Spec: v1alpha1.ExternalIPSpec{
-			NodeName: req.Name,
+			NodeName:               req.Name,
+			PreventEIPDeallocation: r.PreventEIPDeallocation,
 		},
 	}
 	if err := r.Create(ctx, externalIP); err != nil {
