@@ -5,6 +5,9 @@
 # -- The desired cloud provider (only AWS at the moment).
 cloudProvider: aws
 
+# -- Prevent EIP deallocation on nodes auto-assigned ExternalIPs.
+preventEIPDeallocation: false
+
 aws:
   # -- the region in which the cluster resides.
   region: ""
@@ -12,7 +15,6 @@ aws:
   accessKeyID: ""
   # -- the secret access key of a user with necessary permissions.
   secretAccessKey: ""
-
 
 manager:
   image:

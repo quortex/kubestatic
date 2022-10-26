@@ -38,6 +38,9 @@ spec:
             - --metrics-bind-address={{ ternary "127.0.0.1:8080" "0.0.0.0:8080" $.Values.kubeRBACProxy.enabled }}
             - --leader-elect
             - --cloud-provider={{ required "A valid .Values.cloudProvider entry required!" $.Values.cloudProvider }}
+            {{- if $.Values.preventEIPDeallocation }}
+            - --prevent-eip-deallocation
+            {{- end }}
           env:
           {{- if (eq $.Values.cloudProvider "aws") }}
           {{- with $.Values.aws }}
