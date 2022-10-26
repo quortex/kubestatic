@@ -1,6 +1,6 @@
 # kubestatic
 
-![Version: 0.5.1](https://img.shields.io/badge/Version-0.5.1-informational?style=flat-square) ![Type: application](https://img.shields.io/badge/Type-application-informational?style=flat-square) ![AppVersion: 0.5.1](https://img.shields.io/badge/AppVersion-0.5.1-informational?style=flat-square)
+![Version: 0.7.0](https://img.shields.io/badge/Version-0.7.0-informational?style=flat-square) ![Type: application](https://img.shields.io/badge/Type-application-informational?style=flat-square) ![AppVersion: 0.7.0](https://img.shields.io/badge/AppVersion-0.7.0-informational?style=flat-square)
 
 An operator to manage the lifecycle of public cloud providers resources needed to expose endpoints on public nodes.
 
@@ -65,6 +65,7 @@ helm install kubestatic kubestatic/kubestatic -n kubestatic-system
 | Key | Type | Default | Description |
 |-----|------|---------|-------------|
 | cloudProvider | string | `"aws"` | The desired cloud provider (only AWS at the moment). |
+| preventEIPDeallocation | bool | `false` | Prevent EIP deallocation on nodes auto-assigned ExternalIPs. |
 | aws.region | string | `""` | the region in which the cluster resides. |
 | aws.accessKeyID | string | `""` | the access key id of a user with necessary permissions. |
 | aws.secretAccessKey | string | `""` | the secret access key of a user with necessary permissions. |
