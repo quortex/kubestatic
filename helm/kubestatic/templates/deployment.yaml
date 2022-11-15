@@ -50,17 +50,11 @@ spec:
             {{- end }}
             {{- if .accessKeyID }}
             - name: AWS_ACCESS_KEY_ID
-              valueFrom:
-                secretKeyRef:
-                  key: accessKeyId
-                  name: {{ template "kubestatic.fullname" $ }}
+              value: {{ .accessKeyID }}
             {{- end }}
             {{- if .secretAccessKey }}
             - name: AWS_SECRET_ACCESS_KEY
-              valueFrom:
-                secretKeyRef:
-                  key: secretAccessKey
-                  name: {{ template "kubestatic.fullname" $ }}
+              value: {{ .secretAccessKey }}
             {{- end }}
           {{- end }}
           {{- end }}
