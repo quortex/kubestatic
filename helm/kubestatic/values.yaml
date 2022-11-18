@@ -72,5 +72,7 @@ tolerations: []
 # --  Affinity for Kubestitute pod assignment.
 affinity: {}
 
-# -- Annotations to be added to serviceAccount
-serviceAccountAnnotations: {}
+# -- ServiceAccount setup
+serviceAccount:
+  # -- Annotations added to the ServiceAccount.
+  annotations: {}
