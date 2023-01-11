@@ -28,6 +28,7 @@ import (
 	"k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/types"
+	"k8s.io/utils/pointer"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
@@ -282,7 +283,7 @@ func (r *FirewallRuleReconciler) reconcileFirewallRule(ctx context.Context, log 
 	//
 	// Check if the associated node still exists and disassociate it if it does not.
 	// No nodeName or no living node, set state back to "Reserved"
-	if rule.IsAssociated() {
+	if rule.Status.State != v1alpha1.FirewallRuleStateNone {
 		if rule.Spec.NodeName != nil {
 			// Get node from FirewallRule spec
 			var node corev1.Node
@@ -307,14 +308,16 @@ func (r *FirewallRuleReconciler) reconcileFirewallRule(ctx context.Context, log 
 				return ctrl.Result{}, err
 			}
 
-			// Node not being deleted, reconciliation done
-			if node.ObjectMeta.DeletionTimestamp.IsZero() {
+			// If the node is not being deleted and has an instance corresponding to its node name, the reconciliation is done
+			// This check exist to disassociate the rule of the old instance if the node name change
+			if node.ObjectMeta.DeletionTimestamp.IsZero() && pointer.StringPtrDerefOr(rule.Status.InstanceID, "") == r.Provider.GetInstanceID(node) {
 				return ctrl.Result{}, nil
 			}
 		}
 
-		// Set state back to "Reserved", disassociate firewall rule and end reconciliation
-		return r.disassociateFirewallRule(ctx, r.Provider, log, rule)
+		// If the rule has no node name, has an node name not matching its instance ID, or its node is being deleted
+		// clear firewall rule from provider and set state back to "None"
+		return r.clearFirewallRule(ctx, log, rule)
 	}
 
 	return ctrl.Result{}, nil
@@ -324,88 +327,32 @@ func (r *FirewallRuleReconciler) reconcileFirewallRuleDeletion(ctx context.Conte
 	// 1st STEP
 	//
 	// Reconciliation of a possible firewall rule associated with the instance.
-	// If a rule is associated with the instance, disassociate it.
-	if rule.IsAssociated() {
-		return r.disassociateFirewallRule(ctx, r.Provider, log, rule)
+	// If a rule is associated with an instance or reserved, clear it.
+	if rule.Status.State != v1alpha1.FirewallRuleStateNone {
+		return r.clearFirewallRule(ctx, log, rule)
 	}
 
 	// 2nd STEP
 	//
-	// Release unassociated firewall rule.
-	if rule.IsReserved() {
-		// Delete firewall rule
-		// In the case of standalone firewall rules or last rule in a group we delete it.
-		// Otherwise, we update the group dedicated to the node.
-		toDel := false
-		firewallRuleID := helper.StringValue(rule.Status.FirewallRuleID)
-		if r.Provider.HasGroupedFirewallRules() {
-			// List FirewallRules with identical nodeName
-			frs := &v1alpha1.FirewallRuleList{}
-			if err := r.List(ctx, frs); err != nil {
-				log.Error(err, "Unable to list FirewallRules")
-				return ctrl.Result{}, err
-			}
-
-			// Check for other rules associated to the node.
-			// If there is already one, we update the group of rules, if not, we delete the group.
-			rules := v1alpha1.FilterFirewallRules(frs.Items, func(fr v1alpha1.FirewallRule) bool {
-				return fr.Name != rule.Name && helper.StringValue(fr.Status.FirewallRuleID) == helper.StringValue(rule.Status.FirewallRuleID)
-			})
-			if len(rules) > 0 {
-				log.V(1).Info("Updating FirewallRule", "firewallRuleID", firewallRuleID)
-				if _, err := r.Provider.UpdateFirewallRuleGroup(ctx, encodeUpdateFirewallRuleGroupRequest(firewallRuleID, rules)); err != nil {
-					log.Error(err, "Unable to update FirewallRules")
-					return ctrl.Result{}, err
-				}
-			} else {
-				toDel = true
-			}
-		} else {
-			toDel = true
-		}
-
-		if toDel {
-			log.V(1).Info("Deleting FirewallRule", "firewallRuleID", firewallRuleID)
-			if err := r.Provider.DeleteFirewallRule(ctx, *rule.Status.FirewallRuleID); err != nil {
-				if !provider.IsErrNotFound(err) {
-					log.Error(err, "Failed to delete FirewallRule", "firewallRuleID", *rule.Status.FirewallRuleID)
-					return ctrl.Result{}, err
-				}
-				log.V(1).Info("FirewallRule not found", "firewallRuleID", *rule.Status.FirewallRuleID)
-			}
-			log.Info("Deleted FirewallRule", "firewallRuleID", *rule.Status.FirewallRuleID)
-		}
-
-		// Update status
-		rule.Status.State = v1alpha1.FirewallRuleStateNone
-		rule.Status.FirewallRuleID = nil
-		log.V(1).Info("Updating FirewallRule", "state", rule.Status.State)
-		return ctrl.Result{}, r.Status().Update(ctx, rule)
-	}
-
-	// 3rd STEP
-	//
 	// Remove finalizer to release FirewallRule
-	if rule.Status.State == v1alpha1.FirewallRuleStateNone {
-		if helper.ContainsString(rule.Finalizers, firewallRuleFinalizer) {
-			rule.Finalizers = helper.RemoveString(rule.Finalizers, firewallRuleFinalizer)
-			return ctrl.Result{}, r.Update(ctx, rule)
-		}
+	if helper.ContainsString(rule.Finalizers, firewallRuleFinalizer) {
+		rule.Finalizers = helper.RemoveString(rule.Finalizers, firewallRuleFinalizer)
+		return ctrl.Result{}, r.Update(ctx, rule)
 	}
 
 	return ctrl.Result{}, nil
 }
 
-// disassociateFirewallRule performs firewall rule disassociation tasks
-func (r *FirewallRuleReconciler) disassociateFirewallRule(ctx context.Context, pvd provider.Provider, log logr.Logger, rule *v1alpha1.FirewallRule) (ctrl.Result, error) {
-	// Get firewall rule and disassociate it
+// clearFirewallRule remove the rule from the provider rule
+// In the case of grouped rules, the provider rule is updated and deleted if needed
+// In the case of standalone rules the provider rule is deleted
+func (r *FirewallRuleReconciler) clearFirewallRule(ctx context.Context, log logr.Logger, rule *v1alpha1.FirewallRule) (ctrl.Result, error) {
+	log = log.WithValues("ruleName", rule.Name)
+
 	if rule.Status.FirewallRuleID != nil {
-		// Disassociate firewall rule
-		// In the case of standalone firewall rules or last rule in a group we disassociate it
-		// from the network interface.
-		// Otherwise, we update the group dedicated to the node.
-		toDisassociate := false
 		firewallRuleID := helper.StringValue(rule.Status.FirewallRuleID)
+
+		toDelete := false
 		if r.Provider.HasGroupedFirewallRules() {
 			// List FirewallRules with identical nodeName
 			frs := &v1alpha1.FirewallRuleList{}
@@ -417,51 +364,63 @@ func (r *FirewallRuleReconciler) disassociateFirewallRule(ctx context.Context, p
 			// Check for other rules associated to the node.
 			// If there is other ones, we only update the group of rules, if not, we also disassociate the group.
 			rules := v1alpha1.FilterFirewallRules(frs.Items, func(fr v1alpha1.FirewallRule) bool {
-				return fr.Name != rule.Name && helper.StringValue(fr.Status.FirewallRuleID) == helper.StringValue(rule.Status.FirewallRuleID) && fr.IsAssociated()
+				return fr.Name != rule.Name && helper.StringValue(fr.Status.FirewallRuleID) == helper.StringValue(rule.Status.FirewallRuleID)
 			})
-			log.V(1).Info("Updating FirewallRule", "firewallRuleID", firewallRuleID)
-			if _, err := r.Provider.UpdateFirewallRuleGroup(ctx, encodeUpdateFirewallRuleGroupRequest(firewallRuleID, rules)); err != nil {
-				log.Error(err, "Unable to update FirewallRules")
-				return ctrl.Result{}, err
-			}
-			if len(rules) == 0 {
-				toDisassociate = true
-			}
-		} else {
-			toDisassociate = true
-		}
-
-		// Perform firewallrule disassociation from network interface.
-		if toDisassociate {
-			err := pvd.DisassociateFirewallRule(ctx, provider.AssociateFirewallRuleRequest{
-				FirewallRuleID:     *rule.Status.FirewallRuleID,
-				NetworkInterfaceID: *rule.Status.NetworkInterfaceID,
-			})
-			if err != nil {
-				if !provider.IsErrNotFound(err) {
-					log.Error(err, "Failed to disassociate firewall rule", "firewallRuleID", *rule.Status.FirewallRuleID, "networkInterfaceID", *rule.Status.NetworkInterfaceID)
+			if len(rules) > 0 {
+				log.V(1).Info("Updating FirewallRule", "firewallRuleID", firewallRuleID)
+				if _, err := r.Provider.UpdateFirewallRuleGroup(ctx, encodeUpdateFirewallRuleGroupRequest(firewallRuleID, rules)); err != nil {
+					log.Error(err, "Unable to update FirewallRules")
 					return ctrl.Result{}, err
 				}
-				log.Info("Firewall rule already disassociated", "firewallRuleID", *rule.Status.FirewallRuleID)
 			} else {
-				log.Info("Disassociated firewall rule", "firewallRuleID", *rule.Status.FirewallRuleID, "networkInterfaceID", *rule.Status.NetworkInterfaceID)
+				toDelete = true
+			}
+		} else {
+			toDelete = true
+		}
+
+		// Perform firewallrule deletion if needed
+		if toDelete {
+			if rule.Status.NetworkInterfaceID != nil {
+				log.V(1).Info("Disassociating firewall rule on provider", "firewallRuleID", firewallRuleID)
+				err := r.Provider.DisassociateFirewallRule(ctx, provider.AssociateFirewallRuleRequest{
+					FirewallRuleID:     *rule.Status.FirewallRuleID,
+					NetworkInterfaceID: *rule.Status.NetworkInterfaceID,
+				})
+				if err != nil {
+					if !provider.IsErrNotFound(err) {
+						log.Error(err, "Failed to disassociate firewall rule", "firewallRuleID", *rule.Status.FirewallRuleID, "networkInterfaceID", *rule.Status.NetworkInterfaceID)
+						return ctrl.Result{}, err
+					}
+					log.V(1).Info("Firewall rule already disassociated", "firewallRuleID", *rule.Status.FirewallRuleID)
+				} else {
+					log.Info("Disassociated firewall rule", "firewallRuleID", *rule.Status.FirewallRuleID, "networkInterfaceID", *rule.Status.NetworkInterfaceID)
+				}
+			}
+
+			log.V(1).Info("Deleting firewall rule on provider", "firewallRuleID", firewallRuleID)
+			err := r.Provider.DeleteFirewallRule(ctx, *rule.Status.FirewallRuleID)
+			if err != nil {
+				if !provider.IsErrNotFound(err) {
+					log.Error(err, "Failed to delete firewall rule", "firewallRuleID", *rule.Status.FirewallRuleID)
+					return ctrl.Result{}, err
+				}
+				log.V(1).Info("Firewall rule already deleted", "firewallRuleID", *rule.Status.FirewallRuleID)
+			} else {
+				log.Info("Deleted firewall rule", "firewallRuleID", *rule.Status.FirewallRuleID)
 			}
 		}
 	}
 
 	// Update status
-	rule.Status.State = v1alpha1.FirewallRuleStateReserved
-	rule.Status.InstanceID = nil
-	rule.Status.NetworkInterfaceID = nil
+	rule.Status = v1alpha1.FirewallRuleStatus{State: v1alpha1.FirewallRuleStateNone}
 	log.V(1).Info("Updating FirewallRule", "state", rule.Status.State)
 	if err := r.Status().Update(ctx, rule); err != nil {
 		log.Error(err, "Failed to update FirewallRule state", "firewallRule", rule.Name)
 		return ctrl.Result{}, err
 	}
 
-	log.V(1).Info("Removing FirewallRule NodeName", "firewallRule", rule.Name)
-	rule.Spec.NodeName = nil
-	return ctrl.Result{}, r.Update(ctx, rule)
+	return ctrl.Result{}, nil
 }
 
 // SetupWithManager sets up the controller with the Manager.
