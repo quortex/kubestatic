@@ -284,7 +284,7 @@ func (r *FirewallRuleReconciler) reconcileFirewallRule(ctx context.Context, log 
 					// Set status back to Reserved
 					rule.Status.State = v1alpha1.FirewallRuleStateReserved
 					log.V(1).Info("Updating FirewallRule", "state", rule.Status.State, "InstanceID", rule.Status.InstanceID)
-					if err != r.Status().Update(ctx, rule) {
+					if err = r.Status().Update(ctx, rule); err != nil {
 						log.Error(err, "Failed to update FirewallRule status", "firewallRule", rule.Name, "status", rule.Status.State)
 						return ctrl.Result{}, err
 					}
