@@ -100,15 +100,10 @@ func (r *FirewallRuleReconciler) reconcileFirewallRule(ctx context.Context, log 
 		return ctrl.Result{}, r.Update(ctx, rule)
 	}
 
-	if helper.StringValue(rule.Spec.NodeName) == "" {
-		log.Info("Empty nodeName, nothing to do !")
-		return ctrl.Result{}, nil
-	}
-
 	// 2nd STEP
 	//
 	// Reserve firewall
-	if rule.Status.State == v1alpha1.FirewallRuleStateNone {
+	if rule.Status.State == v1alpha1.FirewallRuleStateNone && rule.Spec.NodeName != nil {
 		// Create firewall rule
 		// In the case of standalone firewall rules, we create it,
 		// otherwise, we update the group dedicated to the node.
@@ -169,7 +164,7 @@ func (r *FirewallRuleReconciler) reconcileFirewallRule(ctx context.Context, log 
 		rule.Status.LastApplied = helper.StringPointerOrNil(string(lastApplied))
 		log.V(1).Info("Updating FirewallRule", "state", rule.Status.State, "firewallRuleID", rule.Status.FirewallRuleID)
 		return ctrl.Result{}, r.Status().Update(ctx, rule)
-	} else {
+	} else if rule.Spec.NodeName != nil {
 		lastApplied := &v1alpha1.FirewallRuleSpec{}
 		if err := json.Unmarshal([]byte(helper.StringValue(rule.Status.LastApplied)), lastApplied); err != nil {
 			return ctrl.Result{}, fmt.Errorf("Failed to unmarshal last applied firewallrule: %w", err)
@@ -216,67 +211,61 @@ func (r *FirewallRuleReconciler) reconcileFirewallRule(ctx context.Context, log 
 	// 3rd STEP
 	//
 	// Finally associate firewall rule to instance network interface.
-	if rule.IsReserved() {
-		if rule.Spec.NodeName != nil {
-			// Get node from FirewallRule spec
-			var node corev1.Node
-			if err := r.Get(ctx, types.NamespacedName{Name: *rule.Spec.NodeName}, &node); err != nil {
-				if errors.IsNotFound(err) {
-					// Invalid nodeName, remove FirewallRule nodeName attribute.
-					log.Info("Node not found. Removing it from FirewallRule spec", "nodeName", rule.Spec.NodeName)
-					rule.Spec.NodeName = nil
-					return ctrl.Result{}, r.Update(ctx, rule)
-				}
-				// Error reading the object - requeue the request.
-				log.Error(err, "Failed to get Node")
-				return ctrl.Result{}, err
+	if rule.IsReserved() && rule.Spec.NodeName != nil {
+		// Get node from FirewallRule spec
+		var node corev1.Node
+		if err := r.Get(ctx, types.NamespacedName{Name: *rule.Spec.NodeName}, &node); err != nil {
+			if errors.IsNotFound(err) {
+				// Invalid nodeName, remove FirewallRule nodeName attribute.
+				log.Info("Node not found. Removing it from FirewallRule spec", "nodeName", rule.Spec.NodeName)
+				rule.Spec.NodeName = nil
+				return ctrl.Result{}, r.Update(ctx, rule)
 			}
-
-			// Retrieve node instance
-			instanceID := r.Provider.GetInstanceID(node)
-			res, err := r.Provider.GetInstance(ctx, instanceID)
-			if err != nil {
-				log.Error(err, "Failed to get instance", "id", instanceID)
-				return ctrl.Result{}, err
-			}
-
-			// Get the first network interface with a public IP address
-			// This is needed because we could have multiple network interfaces,
-			// for example on EKS we have the public one, as well as one or more created by the EKS CNI.
-			var networkInterface *provider.NetworkInterface
-			for _, elem := range res.NetworkInterfaces {
-				if elem != nil && elem.PublicIP != nil {
-					networkInterface = elem
-					break
-				}
-			}
-			if networkInterface == nil {
-				err := fmt.Errorf("no network interface with public IP found for instance %s", instanceID)
-				log.Error(err, "Cannot associate a firewall rule with this instance", "instanceID", instanceID)
-				return ctrl.Result{}, err
-			}
-
-			// Finally, associate firewall rule to instance network interface, then update status.
-			if err := r.Provider.AssociateFirewallRule(ctx, provider.AssociateFirewallRuleRequest{
-				FirewallRuleID:     *rule.Status.FirewallRuleID,
-				NetworkInterfaceID: networkInterface.NetworkInterfaceID,
-			}); err != nil {
-				log.Error(err, "Failed to associate firewall rule", "firewallRuleID", *rule.Status.FirewallRuleID, "instanceID", instanceID, "networkInterfaceID", networkInterface.NetworkInterfaceID)
-				return ctrl.Result{}, err
-			}
-			log.Info("Associated firewall rule", "firewallRuleID", *rule.Status.FirewallRuleID, "instanceID", instanceID, "networkInterfaceID", networkInterface.NetworkInterfaceID)
-
-			// Update status
-			rule.Status.State = v1alpha1.FirewallRuleStateAssociated
-			rule.Status.InstanceID = &instanceID
-			rule.Status.NetworkInterfaceID = &networkInterface.NetworkInterfaceID
-			log.V(1).Info("Updating FirewallRule", "state", rule.Status.State, "instanceID", rule.Status.InstanceID, "networkInterfaceID", rule.Status.NetworkInterfaceID)
-			return ctrl.Result{}, r.Status().Update(ctx, rule)
+			// Error reading the object - requeue the request.
+			log.Error(err, "Failed to get Node")
+			return ctrl.Result{}, err
 		}
 
-		// No spec.nodeName, no association, end reconciliation for FirewallRule.
-		log.V(1).Info("No spec.nodeName, no association, end reconciliation for FirewallRule.")
-		return ctrl.Result{}, nil
+		// Retrieve node instance
+		instanceID := r.Provider.GetInstanceID(node)
+		res, err := r.Provider.GetInstance(ctx, instanceID)
+		if err != nil {
+			log.Error(err, "Failed to get instance", "id", instanceID)
+			return ctrl.Result{}, err
+		}
+
+		// Get the first network interface with a public IP address
+		// This is needed because we could have multiple network interfaces,
+		// for example on EKS we have the public one, as well as one or more created by the EKS CNI.
+		var networkInterface *provider.NetworkInterface
+		for _, elem := range res.NetworkInterfaces {
+			if elem != nil && elem.PublicIP != nil {
+				networkInterface = elem
+				break
+			}
+		}
+		if networkInterface == nil {
+			err := fmt.Errorf("no network interface with public IP found for instance %s", instanceID)
+			log.Error(err, "Cannot associate a firewall rule with this instance", "instanceID", instanceID)
+			return ctrl.Result{}, err
+		}
+
+		// Finally, associate firewall rule to instance network interface, then update status.
+		if err := r.Provider.AssociateFirewallRule(ctx, provider.AssociateFirewallRuleRequest{
+			FirewallRuleID:     *rule.Status.FirewallRuleID,
+			NetworkInterfaceID: networkInterface.NetworkInterfaceID,
+		}); err != nil {
+			log.Error(err, "Failed to associate firewall rule", "firewallRuleID", *rule.Status.FirewallRuleID, "instanceID", instanceID, "networkInterfaceID", networkInterface.NetworkInterfaceID)
+			return ctrl.Result{}, err
+		}
+		log.Info("Associated firewall rule", "firewallRuleID", *rule.Status.FirewallRuleID, "instanceID", instanceID, "networkInterfaceID", networkInterface.NetworkInterfaceID)
+
+		// Update status
+		rule.Status.State = v1alpha1.FirewallRuleStateAssociated
+		rule.Status.InstanceID = &instanceID
+		rule.Status.NetworkInterfaceID = &networkInterface.NetworkInterfaceID
+		log.V(1).Info("Updating FirewallRule", "state", rule.Status.State, "instanceID", rule.Status.InstanceID, "networkInterfaceID", rule.Status.NetworkInterfaceID)
+		return ctrl.Result{}, r.Status().Update(ctx, rule)
 	}
 
 	// FirewallRule reliability check
