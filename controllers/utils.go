@@ -48,6 +48,11 @@ func countReferencedIP(pods []corev1.Pod, ip string) (count int) {
 func getMostReferencedIP(pods []corev1.Pod, eips []v1alpha1.ExternalIP) (ip *v1alpha1.ExternalIP) {
 	count := 0
 	for i, e := range eips {
+		// Skip externalIP without PublicIPAddress
+		if e.Status.PublicIPAddress == nil {
+			continue
+		}
+
 		if c := countReferencedIP(pods, *e.Status.PublicIPAddress); c > count {
 			count = c
 			ip = &eips[i]
@@ -59,7 +64,7 @@ func getMostReferencedIP(pods []corev1.Pod, eips []v1alpha1.ExternalIP) (ip *v1a
 const charset = "abcdefghijklmnopqrstuvwxyz"
 
 func randomString(length int) string {
-	var seededRand = rand.New(rand.NewSource(time.Now().UnixNano()))
+	seededRand := rand.New(rand.NewSource(time.Now().UnixNano()))
 	b := make([]byte, length)
 	for i := range b {
 		b[i] = charset[seededRand.Intn(len(charset))]
