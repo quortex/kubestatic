@@ -1,6 +1,6 @@
 # kubestatic
 
-![Version: 0.7.0](https://img.shields.io/badge/Version-0.7.0-informational?style=flat-square) ![Type: application](https://img.shields.io/badge/Type-application-informational?style=flat-square) ![AppVersion: 0.7.0](https://img.shields.io/badge/AppVersion-0.7.0-informational?style=flat-square)
+![Version: 0.9.0](https://img.shields.io/badge/Version-0.9.0-informational?style=flat-square) ![Type: application](https://img.shields.io/badge/Type-application-informational?style=flat-square) ![AppVersion: 0.9.0](https://img.shields.io/badge/AppVersion-0.9.0-informational?style=flat-square)
 
 An operator to manage the lifecycle of public cloud providers resources needed to expose endpoints on public nodes.
 
@@ -88,4 +88,6 @@ helm install kubestatic kubestatic/kubestatic -n kubestatic-system
 | nodeSelector | object | `{}` | Node labels for Kubestitute pod assignment. |
 | tolerations | list | `[]` | Node tolerations for Kubestitute scheduling to nodes with taints. |
 | affinity | object | `{}` | Affinity for Kubestitute pod assignment. |
+| serviceAccount | object | `{"annotations":{}}` | ServiceAccount setup |
+| serviceAccount.annotations | object | `{}` | Annotations added to the ServiceAccount. |
 
