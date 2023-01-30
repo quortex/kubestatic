@@ -279,7 +279,7 @@ func (r *FirewallRuleReconciler) reconcileFirewallRule(ctx context.Context, log 
 			if err := r.Get(ctx, types.NamespacedName{Name: *rule.Spec.NodeName}, &node); err != nil {
 				if errors.IsNotFound(err) {
 					// Invalid nodeName, remove FirewallRule nodeName attribute.
-					log.Info("Node not found. Removing it from FirewallRule spec", "nodeName", rule.Spec.NodeName)
+					log.Info("Node not found. Set state back to Reserved", "nodeName", rule.Spec.NodeName)
 
 					// Set status back to Reserved
 					rule.Status.State = v1alpha1.FirewallRuleStateReserved
