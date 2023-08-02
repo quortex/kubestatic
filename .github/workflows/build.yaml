@@ -13,6 +13,9 @@ jobs:
   build-and-push:
     name: BuildAndPush
     runs-on: ubuntu-latest
+    permissions:
+      contents: 'read'
+      id-token: 'write'
 
     env:
       IMAGE_NAME: kubestatic
@@ -43,11 +46,12 @@ jobs:
           echo "IMAGE_TAG=${IMAGE_TAG}" >> $GITHUB_ENV
 
       # Setup gcloud CLI
-      - uses: google-github-actions/setup-gcloud@v0.6.0
+      - name: 'Authenticate to Google Cloud'
+        uses: 'google-github-actions/auth@v1'
         with:
-          service_account_key: ${{ secrets.GCP_SA_KEY }}
-          project_id: ${{ env.GCP_PROJECT_ID }}
-          export_default_credentials: true
+          token_format: 'access_token'
+          workload_identity_provider: ${{ env.WORKLOAD_IDENTITY_POOL }}
+          service_account: ${{ env.SERVICE_ACCOUNT }}
 
       # Build docker image
       - name: Build
