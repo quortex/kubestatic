@@ -20,6 +20,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"time"
 
 	"github.com/go-logr/logr"
 	"github.com/google/uuid"
@@ -119,7 +120,7 @@ func (r *ExternalIPReconciler) reconcileExternalIP(ctx context.Context, log logr
 		externalIP.Status.AddressID = &res.AddressID
 		externalIP.Status.PublicIPAddress = &res.PublicIP
 		log.V(1).Info("Updating ExternalIP", "state", externalIP.Status.State, "addressID", externalIP.Status.AddressID, "PublicIPAddress", externalIP.Status.PublicIPAddress)
-		return ctrl.Result{}, r.Status().Update(ctx, externalIP)
+		return ctrl.Result{RequeueAfter: time.Second * 5}, r.Status().Update(ctx, externalIP)
 	}
 
 	// 3rd STEP
@@ -180,7 +181,7 @@ func (r *ExternalIPReconciler) reconcileExternalIP(ctx context.Context, log logr
 			externalIP.Status.State = v1alpha1.ExternalIPStateAssociated
 			externalIP.Status.InstanceID = &instanceID
 			log.V(1).Info("Updating ExternalIP", "state", externalIP.Status.State, "InstanceID", externalIP.Status.InstanceID)
-			return ctrl.Result{}, r.Status().Update(ctx, externalIP)
+			return ctrl.Result{RequeueAfter: time.Second * 5}, r.Status().Update(ctx, externalIP)
 		}
 
 		// No spec.nodeName, no association, end reconciliation for ExternalIP.
@@ -288,7 +289,7 @@ func (r *ExternalIPReconciler) reconcileExternalIPDeletion(ctx context.Context, 
 		// set State to None for finalizer to delete externalIP object
 		externalIP.Status.State = v1alpha1.ExternalIPStateNone
 		log.V(1).Info("Updating ExternalIP", "state", externalIP.Status.State)
-		return ctrl.Result{}, r.Status().Update(ctx, externalIP)
+		return ctrl.Result{RequeueAfter: time.Second * 5}, r.Status().Update(ctx, externalIP)
 	}
 
 	// 3rd STEP
