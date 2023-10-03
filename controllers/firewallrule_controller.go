@@ -76,6 +76,11 @@ func (r *FirewallRuleReconciler) Reconcile(ctx context.Context, req ctrl.Request
 		return ctrl.Result{}, err
 	}
 
+	if firewallRule.Spec.Direction == v1alpha1.DirectionEgress {
+		log.Info("Egress Rule, do nothing")
+		return ctrl.Result{}, nil
+	}
+
 	if firewallRule.Spec.DisableReconciliation {
 		log.Info("Reconciliation disabled")
 		return ctrl.Result{}, nil
