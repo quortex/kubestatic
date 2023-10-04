@@ -21,6 +21,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"reflect"
+	"time"
 
 	"github.com/go-logr/logr"
 	"github.com/google/uuid"
@@ -163,7 +164,7 @@ func (r *FirewallRuleReconciler) reconcileFirewallRule(ctx context.Context, log 
 		}
 		rule.Status.LastApplied = helper.StringPointerOrNil(string(lastApplied))
 		log.V(1).Info("Updating FirewallRule", "state", rule.Status.State, "firewallRuleID", rule.Status.FirewallRuleID)
-		return ctrl.Result{}, r.Status().Update(ctx, rule)
+		return ctrl.Result{RequeueAfter: time.Second * 5}, r.Status().Update(ctx, rule)
 	} else if rule.Spec.NodeName != nil {
 		lastApplied := &v1alpha1.FirewallRuleSpec{}
 		if err := json.Unmarshal([]byte(helper.StringValue(rule.Status.LastApplied)), lastApplied); err != nil {
@@ -204,7 +205,7 @@ func (r *FirewallRuleReconciler) reconcileFirewallRule(ctx context.Context, log 
 			}
 			rule.Status.LastApplied = helper.StringPointerOrNil(string(lastApplied))
 			log.V(1).Info("Updating FirewallRule", "state", rule.Status.State, "firewallRuleID", rule.Status.FirewallRuleID)
-			return ctrl.Result{}, r.Status().Update(ctx, rule)
+			return ctrl.Result{RequeueAfter: time.Second * 5}, r.Status().Update(ctx, rule)
 		}
 	}
 
@@ -265,7 +266,7 @@ func (r *FirewallRuleReconciler) reconcileFirewallRule(ctx context.Context, log 
 		rule.Status.InstanceID = &instanceID
 		rule.Status.NetworkInterfaceID = &networkInterface.NetworkInterfaceID
 		log.V(1).Info("Updating FirewallRule", "state", rule.Status.State, "instanceID", rule.Status.InstanceID, "networkInterfaceID", rule.Status.NetworkInterfaceID)
-		return ctrl.Result{}, r.Status().Update(ctx, rule)
+		return ctrl.Result{RequeueAfter: time.Second * 5}, r.Status().Update(ctx, rule)
 	}
 
 	// FirewallRule reliability check
@@ -409,7 +410,7 @@ func (r *FirewallRuleReconciler) clearFirewallRule(ctx context.Context, log logr
 		return ctrl.Result{}, err
 	}
 
-	return ctrl.Result{}, nil
+	return ctrl.Result{RequeueAfter: time.Second * 5}, nil
 }
 
 // SetupWithManager sets up the controller with the Manager.
