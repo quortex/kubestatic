@@ -73,10 +73,10 @@ doc: crd-ref-docs ## Build api documentation.
 .PHONY: charts
 charts: yq kustomize ## Generate helm chart crds, rbac from kustomize files and doc from helm values.
 	@TMPFILE=$$(mktemp) && \
-	${YQ} -y '.metadata.name = ("PREFIX-" + .metadata.name)' config/rbac/role.yaml | \
+	${YQ} '.metadata.name = ("PREFIX-" + .metadata.name)' config/rbac/role.yaml | \
 		sed "s/PREFIX/{{ include \"kubestatic.fullname\" . }}/" > helm/kubestatic/templates/manager_role.yaml && \
 	${KUSTOMIZE} build config/default/ > $${TMPFILE} && \
-	${YQ} -y 'select(.kind=="CustomResourceDefinition")' $${TMPFILE} > helm/kubestatic/crds/crds.yaml && \
+	${YQ} 'select(.kind=="CustomResourceDefinition")' $${TMPFILE} > helm/kubestatic/crds/crds.yaml && \
 	rm -rf $${TMPFILE}
 	@docker run --rm --volume "$$(pwd)/helm/kubestatic:/helm-docs" jnorwood/helm-docs:latest -s file
 
