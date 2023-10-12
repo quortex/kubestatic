@@ -75,9 +75,7 @@ func main() {
 			"Enabling this will ensure there is only one active controller manager.")
 	flag.StringVar(&fCloudProvider, "cloud-provider", "aws", "Cloud provider type. Available values: ["+strings.Join(availableProviders, ",")+"]")
 	flag.BoolVar(&fPreventEIPDeallocation, "prevent-eip-deallocation", false, "Prevent EIP deallocation on nodes auto-assigned ExternalIPs.")
-	opts := zap.Options{
-		Development: true,
-	}
+	opts := zap.Options{}
 	opts.BindFlags(flag.CommandLine)
 	flag.Parse()
 
