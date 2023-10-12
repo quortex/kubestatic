@@ -31,6 +31,9 @@ manager:
   # -- kubestatic manager container security contexts
   securityContext: {}
 
+  # -- kubestatic manager additional arguments to the entrypoint.
+  extraArgs: []
+
 kubeRBACProxy:
   enabled: true
   image:
