@@ -40,8 +40,6 @@ const (
 	externalIPAutoAssignLabel = "kubestatic.quortex.io/externalip-auto-assign"
 	// externalIPLabel is the key for auto externalIP label (the externalIP a pod should have)
 	externalIPLabel = "kubestatic.quortex.io/externalip"
-	// externalIPNodeNameField is the nodeName field in ExternalIP resource
-	externalIPNodeNameField = ".spec.nodeName"
 )
 
 // NodeReconciler reconciles a Node object
@@ -70,35 +68,31 @@ func (r *NodeReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.
 	if err := r.Client.List(
 		ctx,
 		externalIPs,
-		client.MatchingFields{externalIPNodeNameField: req.Name},
-		client.MatchingLabels{externalIPAutoAssignLabel: "true"},
 	); err != nil {
 		log.Error(err, "Unable to list ExternalIP resources", "nodeName", req.Name)
 		return ctrl.Result{}, err
 	}
 
-	// Already existing ExternalIPs for this node, end reconciliation
-	if len(externalIPs.Items) > 0 {
-		log.V(1).Info("Already associated ExternalIP, aborting")
-		return ctrl.Result{}, nil
-	}
-
-	// List orphaned auto assigned ExternalIPs to reuse it
-	log.V(1).Info("Listing orphaned auto assigned ExternalIPs")
-	if err := r.Client.List(
-		ctx,
-		externalIPs,
-		client.MatchingFields{externalIPNodeNameField: ""},
-		client.MatchingLabels{externalIPAutoAssignLabel: "true"},
-	); err != nil {
-		log.Error(err, "Unable to list ExternalIP resources", "nodeName", "")
-		return ctrl.Result{}, err
+	// Check for existing eip and filter orphaned ones
+	orphanedEIPs := []v1alpha1.ExternalIP{}
+	for _, eip := range externalIPs.Items {
+		if eip.Labels[externalIPAutoAssignLabel] != "true" {
+			continue
+		}
+		// Already existing ExternalIPs for this node, end reconciliation
+		if eip.Spec.NodeName == req.Name {
+			log.V(1).Info("Already associated ExternalIP, aborting")
+			return ctrl.Result{}, nil
+		}
+		if eip.Spec.NodeName == "" {
+			orphanedEIPs = append(orphanedEIPs, eip)
+		}
 	}
 
 	// Some orphaned auto assigned ExternalIPs, check which one to reuse
-	if len(externalIPs.Items) > 0 {
+	if len(orphanedEIPs) > 0 {
 		// List pods that should be scheduled on orphaned ExternalIPs
-		publicIPAddresses := publicIPAddresses(externalIPs.Items)
+		publicIPAddresses := publicIPAddresses(orphanedEIPs)
 
 		requirement, err := labels.NewRequirement(externalIPLabel, selection.In, publicIPAddresses)
 		if err != nil {
@@ -115,9 +109,9 @@ func (r *NodeReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.
 		}
 
 		// We get the most referenced ExternalIP ore reuse the first one arbitrarily
-		externalIP := getMostReferencedIP(podList.Items, externalIPs.Items)
+		externalIP := getMostReferencedIP(podList.Items, orphanedEIPs)
 		if externalIP == nil {
-			externalIP = &externalIPs.Items[0]
+			externalIP = &orphanedEIPs[0]
 			log.V(1).Info("No used ExternalIP found, fallback on using the first")
 		}
 		externalIP.Spec.NodeName = req.Name
@@ -147,14 +141,6 @@ func (r *NodeReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.
 
 // SetupWithManager sets up the controller with the Manager.
 func (r *NodeReconciler) SetupWithManager(mgr ctrl.Manager) error {
-	// Index ExternalIP NodeName to list only ExternalIPs assigned to Node.
-	if err := mgr.GetFieldIndexer().IndexField(context.Background(), &v1alpha1.ExternalIP{}, externalIPNodeNameField, func(o client.Object) []string {
-		externalIP := o.(*v1alpha1.ExternalIP)
-		return []string{externalIP.Spec.NodeName}
-	}); err != nil {
-		return err
-	}
-
 	return ctrl.NewControllerManagedBy(mgr).
 		For(&corev1.Node{}, r.nodeReconciliationPredicates()).
 		Complete(r)
