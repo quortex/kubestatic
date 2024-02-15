@@ -18,12 +18,14 @@ package controllers
 
 import (
 	"context"
+	"time"
 
 	"github.com/go-logr/logr"
 	"github.com/google/uuid"
 	"github.com/quortex/kubestatic/api/v1alpha1"
 	"github.com/quortex/kubestatic/pkg/helper"
 	corev1 "k8s.io/api/core/v1"
+	"k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/labels"
 	"k8s.io/apimachinery/pkg/runtime"
@@ -40,6 +42,10 @@ const (
 	externalIPAutoAssignLabel = "kubestatic.quortex.io/externalip-auto-assign"
 	// externalIPLabel is the key for auto externalIP label (the externalIP a pod should have)
 	externalIPLabel = "kubestatic.quortex.io/externalip"
+	// Minimum time to wait between two reconciliations for the same node
+	minReconciliationInterval = 10 * time.Second
+	// The time for which nodes are automatically reconciled
+	reconciliationRequeueInterval = 1 * time.Minute
 )
 
 // NodeReconciler reconciles a Node object
@@ -48,6 +54,7 @@ type NodeReconciler struct {
 	Log                    logr.Logger
 	Scheme                 *runtime.Scheme
 	PreventEIPDeallocation bool
+	lastReconciliation     map[string]time.Time
 }
 
 //+kubebuilder:rbac:groups=core,resources=nodes,verbs=get;list;watch;update;patch
@@ -61,6 +68,23 @@ func (r *NodeReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.
 
 	log.V(1).Info("Node reconciliation started")
 	defer log.V(1).Info("Node reconciliation done")
+
+	node := &corev1.Node{}
+	if err := r.Get(ctx, req.NamespacedName, node); err != nil {
+		if errors.IsNotFound(err) {
+			// Request object not found, could have been deleted after reconcile request.
+			// Return and don't requeue
+			log.Info("ExternalIP resource not found. Ignoring since object must be deleted")
+			delete(r.lastReconciliation, req.Name)
+			return ctrl.Result{}, nil
+		}
+		// Error reading the object - requeue the request.
+		log.Error(err, "Failed to get Node")
+		return ctrl.Result{}, err
+	}
+
+	// Store reconciliation time to handle reconciliation interval
+	r.lastReconciliation[req.Name] = time.Now()
 
 	// List auto assigned ExternalIPs for reconciled node
 	log.V(1).Info("List all ExternalIPs for node")
@@ -82,7 +106,7 @@ func (r *NodeReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.
 		// Already existing ExternalIPs for this node, end reconciliation
 		if eip.Spec.NodeName == req.Name {
 			log.V(1).Info("Already associated ExternalIP, aborting")
-			return ctrl.Result{}, nil
+			return ctrl.Result{RequeueAfter: reconciliationRequeueInterval}, nil
 		}
 		if eip.Spec.NodeName == "" {
 			orphanedEIPs = append(orphanedEIPs, eip)
@@ -116,7 +140,10 @@ func (r *NodeReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.
 		}
 		externalIP.Spec.NodeName = req.Name
 		log.V(1).Info("Associating ExternalIP to node", "externalIP", externalIP.Name)
-		return ctrl.Result{}, r.Update(ctx, externalIP)
+		if err := r.Update(ctx, externalIP); err != nil {
+			return ctrl.Result{}, err
+		}
+		return ctrl.Result{RequeueAfter: reconciliationRequeueInterval}, nil
 	}
 
 	// No ExternalIP to reuse, creating a new one.
@@ -136,11 +163,12 @@ func (r *NodeReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.
 		return ctrl.Result{}, err
 	}
 
-	return ctrl.Result{}, nil
+	return ctrl.Result{RequeueAfter: reconciliationRequeueInterval}, nil
 }
 
 // SetupWithManager sets up the controller with the Manager.
 func (r *NodeReconciler) SetupWithManager(mgr ctrl.Manager) error {
+	r.lastReconciliation = map[string]time.Time{}
 	return ctrl.NewControllerManagedBy(mgr).
 		For(&corev1.Node{}, r.nodeReconciliationPredicates()).
 		Complete(r)
@@ -164,5 +192,20 @@ func (r *NodeReconciler) nodeReconciliationPredicates() builder.Predicates {
 // shouldReconcileNode returns if given Node should be reconciled by the controller.
 func (r *NodeReconciler) shouldReconcileNode(obj *corev1.Node) bool {
 	// We should consider reconciliation for nodes with automatic IP assignment label.
-	return helper.ContainsElements(obj.ObjectMeta.Labels, map[string]string{externalIPAutoAssignLabel: "true"})
+	if !helper.ContainsElements(obj.ObjectMeta.Labels, map[string]string{externalIPAutoAssignLabel: "true"}) {
+		return false
+	}
+
+	// In the case of close consecutive reconciliations for the same Node, if an
+	// ExternalIP is created for this node the cached ExternalIP list may not have been
+	// notified of the fact that there is a new ExternalIP when the following
+	// reconciliation for this Node occurs.
+	// This can lead to the creation of unwanted ExternalIPs for this Node.
+	// Prevent frequent reconciliations is a workaround to ensure that the list of
+	// cached ExternalIPs is the correct one.
+	lastRec, ok := r.lastReconciliation[obj.Name]
+	if ok && time.Since(lastRec) < minReconciliationInterval {
+		return false
+	}
+	return true
 }
