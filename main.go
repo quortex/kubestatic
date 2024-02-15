@@ -21,6 +21,7 @@ import (
 	"fmt"
 	"os"
 	"strings"
+	"time"
 
 	// Import all Kubernetes client auth plugins (e.g. Azure, GCP, OIDC, etc.)
 	// to ensure that exec-entrypoint and run can make use of them.
@@ -62,11 +63,13 @@ func init() {
 
 func main() {
 	var (
-		fMetricsAddr            string
-		fEnableLeaderElection   bool
-		fProbeAddr              string
-		fCloudProvider          string
-		fPreventEIPDeallocation bool
+		fMetricsAddr                       string
+		fEnableLeaderElection              bool
+		fProbeAddr                         string
+		fCloudProvider                     string
+		fPreventEIPDeallocation            bool
+		fNodeMinReconciliationInterval     time.Duration
+		fNodeReconciliationRequeueInterval time.Duration
 	)
 	flag.StringVar(&fMetricsAddr, "metrics-bind-address", ":8080", "The address the metric endpoint binds to.")
 	flag.StringVar(&fProbeAddr, "health-probe-bind-address", ":8081", "The address the probe endpoint binds to.")
@@ -75,6 +78,8 @@ func main() {
 			"Enabling this will ensure there is only one active controller manager.")
 	flag.StringVar(&fCloudProvider, "cloud-provider", "aws", "Cloud provider type. Available values: ["+strings.Join(availableProviders, ",")+"]")
 	flag.BoolVar(&fPreventEIPDeallocation, "prevent-eip-deallocation", false, "Prevent EIP deallocation on nodes auto-assigned ExternalIPs.")
+	flag.DurationVar(&fNodeMinReconciliationInterval, "node-min-reconciliation-interval", 10*time.Second, "The minimum duration to wait between two reconciliations for the same node.")
+	flag.DurationVar(&fNodeReconciliationRequeueInterval, "node-reconciliation-requeue-interval", 1*time.Minute, "The duration for which nodes are automatically reconciled.")
 	opts := zap.Options{}
 	opts.BindFlags(flag.CommandLine)
 	flag.Parse()
@@ -120,10 +125,12 @@ func main() {
 		os.Exit(1)
 	}
 	if err = (&controllers.NodeReconciler{
-		Client:                 mgr.GetClient(),
-		Log:                    ctrl.Log.WithName("controllers").WithName("Node"),
-		Scheme:                 mgr.GetScheme(),
-		PreventEIPDeallocation: fPreventEIPDeallocation,
+		Client:                        mgr.GetClient(),
+		Log:                           ctrl.Log.WithName("controllers").WithName("Node"),
+		Scheme:                        mgr.GetScheme(),
+		PreventEIPDeallocation:        fPreventEIPDeallocation,
+		MinReconciliationInterval:     fNodeMinReconciliationInterval,
+		ReconciliationRequeueInterval: fNodeReconciliationRequeueInterval,
 	}).SetupWithManager(mgr); err != nil {
 		setupLog.Error(err, "unable to create controller", "controller", "Node")
 		os.Exit(1)

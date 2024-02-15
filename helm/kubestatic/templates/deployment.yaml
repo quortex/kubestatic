@@ -38,6 +38,8 @@ spec:
             - --metrics-bind-address={{ ternary "127.0.0.1:8080" "0.0.0.0:8080" $.Values.kubeRBACProxy.enabled }}
             - --leader-elect
             - --cloud-provider={{ required "A valid .Values.cloudProvider entry required!" $.Values.cloudProvider }}
+            - --node-min-reconciliation-interval={{ $.Values.nodeMinReconciliationInterval }}
+            - --node-reconciliation-requeue-interval={{ $.Values.nodeReconciliationRequeueInterval }}
             {{- if $.Values.preventEIPDeallocation }}
             - --prevent-eip-deallocation
             {{- end }}

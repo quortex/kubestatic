@@ -8,6 +8,12 @@ cloudProvider: aws
 # -- Prevent EIP deallocation on nodes auto-assigned ExternalIPs.
 preventEIPDeallocation: false
 
+# -- The minimum duration to wait between two reconciliations for the same node.
+nodeMinReconciliationInterval: 10s
+
+# -- The duration for which nodes are automatically reconciled.
+nodeReconciliationRequeueInterval: 1m
+
 aws:
   # -- the region in which the cluster resides.
   region: ""

@@ -74,13 +74,15 @@ If you want to automatically attach an external IP to certain nodes of your clus
 
 ### Optional args
 The kubestatic container takes as argument the parameters below.
-| Key                       | Description                                                                                                           | Default |
-| ------------------------- | --------------------------------------------------------------------------------------------------------------------- | ------- |
-| cloud-provider            | Which cloud provider to deploy to. Available values: aws                                                              | ""      |
-| metrics-bind-address      | The address the metric endpoint binds to.                                                                             | :8080   |
-| health-probe-bind-address | The address the probe endpoint binds to.                                                                              | :8081   |
-| leader-elect              | Enable leader election for controller manager. Enabling this will ensure there is only one active controller manager. | `false` |
-| prevent-eip-deallocation  | Prevent EIP deallocation on nodes auto-assigned ExternalIPs.                                                          | `false` |
+| Key                                  | Description                                                                                                           | Default |
+| ------------------------------------ | --------------------------------------------------------------------------------------------------------------------- | ------- |
+| cloud-provider                       | Which cloud provider to deploy to. Available values: aws                                                              | ""      |
+| metrics-bind-address                 | The address the metric endpoint binds to.                                                                             | :8080   |
+| health-probe-bind-address            | The address the probe endpoint binds to.                                                                              | :8081   |
+| leader-elect                         | Enable leader election for controller manager. Enabling this will ensure there is only one active controller manager. | `false` |
+| prevent-eip-deallocation             | Prevent EIP deallocation on nodes auto-assigned ExternalIPs.                                                          | `false` |
+| node-min-reconciliation-interval     | The minimum duration to wait between two reconciliations for the same node.                                           | 10s     |
+| node-reconciliation-requeue-interval | The duration for which nodes are automatically reconciled.                                                            | 1m      |
 
 
 ## License

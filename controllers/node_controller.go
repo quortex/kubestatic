@@ -42,19 +42,17 @@ const (
 	externalIPAutoAssignLabel = "kubestatic.quortex.io/externalip-auto-assign"
 	// externalIPLabel is the key for auto externalIP label (the externalIP a pod should have)
 	externalIPLabel = "kubestatic.quortex.io/externalip"
-	// Minimum time to wait between two reconciliations for the same node
-	minReconciliationInterval = 10 * time.Second
-	// The time for which nodes are automatically reconciled
-	reconciliationRequeueInterval = 1 * time.Minute
 )
 
 // NodeReconciler reconciles a Node object
 type NodeReconciler struct {
 	client.Client
-	Log                    logr.Logger
-	Scheme                 *runtime.Scheme
-	PreventEIPDeallocation bool
-	lastReconciliation     map[string]time.Time
+	Log                           logr.Logger
+	Scheme                        *runtime.Scheme
+	PreventEIPDeallocation        bool
+	MinReconciliationInterval     time.Duration
+	ReconciliationRequeueInterval time.Duration
+	lastReconciliation            map[string]time.Time
 }
 
 //+kubebuilder:rbac:groups=core,resources=nodes,verbs=get;list;watch;update;patch
@@ -106,7 +104,7 @@ func (r *NodeReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.
 		// Already existing ExternalIPs for this node, end reconciliation
 		if eip.Spec.NodeName == req.Name {
 			log.V(1).Info("Already associated ExternalIP, aborting")
-			return ctrl.Result{RequeueAfter: reconciliationRequeueInterval}, nil
+			return ctrl.Result{RequeueAfter: r.ReconciliationRequeueInterval}, nil
 		}
 		if eip.Spec.NodeName == "" {
 			orphanedEIPs = append(orphanedEIPs, eip)
@@ -143,7 +141,7 @@ func (r *NodeReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.
 		if err := r.Update(ctx, externalIP); err != nil {
 			return ctrl.Result{}, err
 		}
-		return ctrl.Result{RequeueAfter: reconciliationRequeueInterval}, nil
+		return ctrl.Result{RequeueAfter: r.ReconciliationRequeueInterval}, nil
 	}
 
 	// No ExternalIP to reuse, creating a new one.
@@ -163,7 +161,7 @@ func (r *NodeReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.
 		return ctrl.Result{}, err
 	}
 
-	return ctrl.Result{RequeueAfter: reconciliationRequeueInterval}, nil
+	return ctrl.Result{RequeueAfter: r.ReconciliationRequeueInterval}, nil
 }
 
 // SetupWithManager sets up the controller with the Manager.
@@ -204,7 +202,7 @@ func (r *NodeReconciler) shouldReconcileNode(obj *corev1.Node) bool {
 	// Prevent frequent reconciliations is a workaround to ensure that the list of
 	// cached ExternalIPs is the correct one.
 	lastRec, ok := r.lastReconciliation[obj.Name]
-	if ok && time.Since(lastRec) < minReconciliationInterval {
+	if ok && time.Since(lastRec) < r.MinReconciliationInterval {
 		return false
 	}
 	return true
