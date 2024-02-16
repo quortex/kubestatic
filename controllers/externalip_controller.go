@@ -351,18 +351,19 @@ func (r *ExternalIPReconciler) SetupWithManager(mgr ctrl.Manager) error {
 				log := r.Log.WithName("nodemapper")
 				node := o.(*corev1.Node)
 
-				// List ExternalIPs that matches node name
-				log.V(1).Info("List all ExternalIP for node")
+				log.V(1).Info("List all ExternalIP")
 				externalIPs := &v1alpha1.ExternalIPList{}
-				if err := r.Client.List(ctx, externalIPs, client.MatchingFields{externalIPNodeNameField: node.Name}); err != nil {
+				if err := r.Client.List(ctx, externalIPs); err != nil {
 					log.Error(err, "Unable to list ExternalIP resources", "nodeName", node.Name)
 					return []reconcile.Request{}
 				}
 
 				// Reconcile each matching ExternalIP
-				res := make([]reconcile.Request, len(externalIPs.Items))
-				for i, e := range externalIPs.Items {
-					res[i] = reconcile.Request{NamespacedName: types.NamespacedName{Name: e.Name}}
+				res := []reconcile.Request{}
+				for _, eip := range externalIPs.Items {
+					if eip.Spec.NodeName == node.Name {
+						res = append(res, reconcile.Request{NamespacedName: types.NamespacedName{Name: eip.Name}})
+					}
 				}
 				return res
 			}),
