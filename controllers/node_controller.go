@@ -81,6 +81,14 @@ func (r *NodeReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.
 		return ctrl.Result{}, err
 	}
 
+	// RequeueAfter can lead to node reconciliation which may not have the
+	// externalip-auto-assign label, in this case we end the reconciliation.
+	if !helper.ContainsElements(node.Labels, map[string]string{externalIPAutoAssignLabel: "true"}) {
+		log.V(1).Info("externalip-auto-assign label removed, stopping reconciliation")
+		delete(r.lastReconciliation, req.Name)
+		return ctrl.Result{}, nil
+	}
+
 	// Store reconciliation time to handle reconciliation interval
 	r.lastReconciliation[req.Name] = time.Now()
 
