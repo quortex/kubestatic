@@ -231,6 +231,7 @@ func (in *FirewallRuleStatus) DeepCopyInto(out *FirewallRuleStatus) {
 		*out = new(string)
 		**out = **in
 	}
+	in.LastTransitionTime.DeepCopyInto(&out.LastTransitionTime)
 	if in.FirewallRuleID != nil {
 		in, out := &in.FirewallRuleID, &out.FirewallRuleID
 		*out = new(string)
