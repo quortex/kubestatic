@@ -126,12 +126,19 @@ spec:
                   make API requests to cloud providers only if the resource has been
                   changed to avoid throttling issues.
                 type: string
+              lastTransitionTime:
+                description: lastTransitionTime is the last time the status transitioned
+                  from one status to another.
+                format: date-time
+                type: string
               networkInterfaceID:
                 description: The network interface identifier
                 type: string
               state:
                 description: The current state of the FirewallRule
                 type: string
+            required:
+            - lastTransitionTime
             type: object
         type: object
     served: true

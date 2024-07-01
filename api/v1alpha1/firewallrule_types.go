@@ -93,6 +93,12 @@ type FirewallRuleStatus struct {
 	// The latest FirewallRule specification applied, used to make API requests to cloud providers only if the resource has been changed to avoid throttling issues.
 	LastApplied *string `json:"lastApplied,omitempty"`
 
+	// lastTransitionTime is the last time the status transitioned from one status to another.
+	// +kubebuilder:validation:Required
+	// +kubebuilder:validation:Type=string
+	// +kubebuilder:validation:Format=date-time
+	LastTransitionTime metav1.Time `json:"lastTransitionTime"`
+
 	// The firewall rule identifier
 	FirewallRuleID *string `json:"firewallRuleID,omitempty"`
 
