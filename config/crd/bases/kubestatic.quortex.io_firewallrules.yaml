@@ -3,8 +3,7 @@ apiVersion: apiextensions.k8s.io/v1
 kind: CustomResourceDefinition
 metadata:
   annotations:
-    controller-gen.kubebuilder.io/version: v0.9.2
-  creationTimestamp: null
+    controller-gen.kubebuilder.io/version: v0.15.0
   name: firewallrules.kubestatic.quortex.io
 spec:
   group: kubestatic.quortex.io
@@ -31,14 +30,19 @@ spec:
         description: FirewallRule is the Schema for the firewallrules API
         properties:
           apiVersion:
-            description: 'APIVersion defines the versioned schema of this representation
-              of an object. Servers should convert recognized schemas to the latest
-              internal value, and may reject unrecognized values. More info: https://git.k8s.io/community/contributors/devel/sig-architecture/api-conventions.md#resources'
+            description: |-
+              APIVersion defines the versioned schema of this representation of an object.
+              Servers should convert recognized schemas to the latest internal value, and
+              may reject unrecognized values.
+              More info: https://git.k8s.io/community/contributors/devel/sig-architecture/api-conventions.md#resources
             type: string
           kind:
-            description: 'Kind is a string value representing the REST resource this
-              object represents. Servers may infer this from the endpoint the client
-              submits requests to. Cannot be updated. In CamelCase. More info: https://git.k8s.io/community/contributors/devel/sig-architecture/api-conventions.md#types-kinds'
+            description: |-
+              Kind is a string value representing the REST resource this object represents.
+              Servers may infer this from the endpoint the client submits requests to.
+              Cannot be updated.
+              In CamelCase.
+              More info: https://git.k8s.io/community/contributors/devel/sig-architecture/api-conventions.md#types-kinds
             type: string
           metadata:
             type: object
@@ -62,8 +66,9 @@ spec:
                   development purpose
                 type: boolean
               fromPort:
-                description: The start of port range for the TCP and UDP protocols,
-                  or an ICMP/ICMPv6 type number.
+                description: |-
+                  The start of port range for the TCP and UDP protocols, or an ICMP/ICMPv6
+                  type number.
                 format: int64
                 type: integer
               ipRanges:
@@ -72,13 +77,14 @@ spec:
                   description: IPRange Describes an IPv4 range.
                   properties:
                     cidr:
-                      description: The IPv4 CIDR range. You can either specify a CIDR
-                        range or a source security group, not both. To specify a single
-                        IPv4 address, use the /32 prefix length.
+                      description: |-
+                        The IPv4 CIDR range. You can either specify a CIDR range or a source security
+                        group, not both. To specify a single IPv4 address, use the /32 prefix length.
                       type: string
                     description:
-                      description: A description for the rule that references this
-                        IPv4 address range.
+                      description: |-
+                        A description for the rule that references this IPv4 address
+                        range.
                       type: string
                   required:
                   - cidr
@@ -90,8 +96,9 @@ spec:
                   rule must be attached
                 type: string
               protocol:
-                description: The IP protocol name (tcp, udp, icmp, icmpv6) or number
-                  (see Protocol Numbers (http://www.iana.org/assignments/protocol-numbers/protocol-numbers.xhtml)).
+                description: |-
+                  The IP protocol name (tcp, udp, icmp, icmpv6) or number (see Protocol Numbers
+                  (http://www.iana.org/assignments/protocol-numbers/protocol-numbers.xhtml)).
                   Use -1 to specify all protocols.
                 type: string
               toPort:
