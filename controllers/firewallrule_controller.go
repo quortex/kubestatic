@@ -472,8 +472,7 @@ func (r *FirewallRuleReconciler) clearFirewallRule(ctx context.Context, log logr
 	}
 
 	// Update status
-	rule.Status.LastTransitionTime = metav1.Now()
-	rule.Status = v1alpha1.FirewallRuleStatus{State: v1alpha1.FirewallRuleStateNone}
+	rule.Status = v1alpha1.FirewallRuleStatus{State: v1alpha1.FirewallRuleStateNone, LastTransitionTime: metav1.Now()}
 	log.V(1).Info("Updating FirewallRule", "state", rule.Status.State)
 	if err := r.Status().Update(ctx, rule); err != nil {
 		log.Error(err, "Failed to update FirewallRule state", "firewallRule", rule.Name)

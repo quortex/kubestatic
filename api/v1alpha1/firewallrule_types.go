@@ -94,7 +94,7 @@ type FirewallRuleStatus struct {
 	LastApplied *string `json:"lastApplied,omitempty"`
 
 	// lastTransitionTime is the last time the status transitioned from one status to another.
-	// +kubebuilder:validation:Optional
+	// +kubebuilder:validation:Required
 	// +kubebuilder:validation:Type=string
 	// +kubebuilder:validation:Format=date-time
 	LastTransitionTime metav1.Time `json:"lastTransitionTime"`

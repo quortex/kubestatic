@@ -212,6 +212,8 @@ spec:
                 state:
                   description: The current state of the FirewallRule
                   type: string
+              required:
+                - lastTransitionTime
               type: object
           type: object
       served: true
