@@ -145,7 +145,7 @@ func (r *FirewallRuleReconciler) reconcileFirewallRule(ctx context.Context, log 
 			rulesAssociated := []v1alpha1.FirewallRule{}
 			for _, fr := range frs.Items {
 				knownLastTransitionTime := r.frLastTransitionTime[fr.Name]
-				if !fr.Status.LastTransitionTime.Equal(&knownLastTransitionTime) {
+				if fr.Status.LastTransitionTime.IsZero() || !fr.Status.LastTransitionTime.Equal(&knownLastTransitionTime) {
 					log.V(1).Info("FirewallRule LastTransitionTime inconsistency, requeuing in 1 second", "firewallRuleName", fr.Name)
 					return ctrl.Result{RequeueAfter: time.Second}, nil
 				}
@@ -226,7 +226,7 @@ func (r *FirewallRuleReconciler) reconcileFirewallRule(ctx context.Context, log 
 				rules := []v1alpha1.FirewallRule{}
 				for _, fr := range frs.Items {
 					knownLastTransitionTime := r.frLastTransitionTime[fr.Name]
-					if !fr.Status.LastTransitionTime.Equal(&knownLastTransitionTime) {
+					if fr.Status.LastTransitionTime.IsZero() || !fr.Status.LastTransitionTime.Equal(&knownLastTransitionTime) {
 						log.V(1).Info("FirewallRule LastTransitionTime inconsistency, requeuing in 1 second", "firewallRuleName", fr.Name)
 						return ctrl.Result{RequeueAfter: time.Second}, nil
 					}
@@ -417,7 +417,7 @@ func (r *FirewallRuleReconciler) clearFirewallRule(ctx context.Context, log logr
 			rules := []v1alpha1.FirewallRule{}
 			for _, fr := range frs.Items {
 				knownLastTransitionTime := r.frLastTransitionTime[fr.Name]
-				if !fr.Status.LastTransitionTime.Equal(&knownLastTransitionTime) {
+				if fr.Status.LastTransitionTime.IsZero() || !fr.Status.LastTransitionTime.Equal(&knownLastTransitionTime) {
 					log.V(1).Info("FirewallRule LastTransitionTime inconsistency, requeuing in 1 second", "firewallRuleName", fr.Name)
 					return ctrl.Result{RequeueAfter: time.Second}, nil
 				}
