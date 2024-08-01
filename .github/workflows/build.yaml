@@ -31,7 +31,7 @@ jobs:
 
       # This step uses Github's checkout-action: https://github.com/actions/checkout
       - name: Check out code
-        uses: actions/checkout@v3
+        uses: actions/checkout@v4
 
       # Deduced the appropriate tag for the image (inspired by the docker action https://github.com/actions-hub/docker)
       - name: Set env
