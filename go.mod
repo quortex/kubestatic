@@ -5,7 +5,7 @@ go 1.22.4
 require (
 	github.com/aws/aws-sdk-go v1.44.211
 	github.com/go-logr/logr v1.4.1
-	github.com/google/uuid v1.3.0
+	github.com/google/uuid v1.6.0
 	github.com/onsi/ginkgo/v2 v2.19.0
 	github.com/onsi/gomega v1.33.1
 	k8s.io/api v0.25.3
