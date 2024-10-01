@@ -3,7 +3,7 @@ module github.com/quortex/kubestatic
 go 1.22.4
 
 require (
-	github.com/aws/aws-sdk-go v1.44.211
+	github.com/aws/aws-sdk-go v1.55.5
 	github.com/go-logr/logr v1.4.1
 	github.com/google/uuid v1.3.0
 	github.com/onsi/ginkgo/v2 v2.19.0
