@@ -7,8 +7,8 @@ import (
 
 	"github.com/aws/aws-sdk-go/aws"
 	"github.com/aws/aws-sdk-go/service/ec2"
-	"github.com/quortex/kubestatic/pkg/helper"
-	"github.com/quortex/kubestatic/pkg/provider"
+	"github.com/quortex/kubestatic/internal/helper"
+	"github.com/quortex/kubestatic/internal/provider"
 )
 
 func TestDecodeInstance(t *testing.T) {

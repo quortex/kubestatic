@@ -23,7 +23,7 @@ import (
 	"github.com/go-logr/logr"
 	"github.com/google/uuid"
 	"github.com/quortex/kubestatic/api/v1alpha1"
-	"github.com/quortex/kubestatic/pkg/helper"
+	"github.com/quortex/kubestatic/internal/helper"
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"

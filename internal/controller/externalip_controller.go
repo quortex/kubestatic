@@ -33,11 +33,10 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/handler"
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
-	"sigs.k8s.io/controller-runtime/pkg/source"
 
 	"github.com/quortex/kubestatic/api/v1alpha1"
-	"github.com/quortex/kubestatic/pkg/helper"
-	"github.com/quortex/kubestatic/pkg/provider"
+	"github.com/quortex/kubestatic/internal/helper"
+	"github.com/quortex/kubestatic/internal/provider"
 )
 
 const (
@@ -345,9 +344,8 @@ func (r *ExternalIPReconciler) SetupWithManager(mgr ctrl.Manager) error {
 	return ctrl.NewControllerManagedBy(mgr).
 		For(&v1alpha1.ExternalIP{}).
 		Watches(
-			&source.Kind{Type: &corev1.Node{}},
-			handler.EnqueueRequestsFromMapFunc(func(o client.Object) []reconcile.Request {
-				ctx := context.Background()
+			&corev1.Node{},
+			handler.EnqueueRequestsFromMapFunc(func(ctx context.Context, o client.Object) []reconcile.Request {
 				log := r.Log.WithName("nodemapper")
 				node := o.(*corev1.Node)
 

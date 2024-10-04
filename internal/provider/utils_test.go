@@ -5,7 +5,7 @@ import (
 	"reflect"
 	"testing"
 
-	"github.com/quortex/kubestatic/pkg/helper"
+	"github.com/quortex/kubestatic/internal/helper"
 )
 
 func Test_computePermissionRequests(t *testing.T) {

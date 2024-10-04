@@ -37,13 +37,12 @@ import (
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/envtest"
-	"sigs.k8s.io/controller-runtime/pkg/envtest/printer"
 	logf "sigs.k8s.io/controller-runtime/pkg/log"
 	"sigs.k8s.io/controller-runtime/pkg/log/zap"
 
 	"github.com/quortex/kubestatic/api/v1alpha1"
-	"github.com/quortex/kubestatic/pkg/provider"
-	"github.com/quortex/kubestatic/pkg/provider/aws"
+	"github.com/quortex/kubestatic/internal/provider"
+	"github.com/quortex/kubestatic/internalprovider/aws"
 	//+kubebuilder:scaffold:imports
 )
 
@@ -69,7 +68,7 @@ var _ = BeforeSuite(func(done Done) {
 
 	By("bootstrapping test environment")
 	testEnv = &envtest.Environment{
-		CRDDirectoryPaths:     []string{filepath.Join("..", "config", "crd", "bases")},
+		CRDDirectoryPaths:     []string{filepath.Join("..", "..", "config", "crd", "bases")},
 		ErrorIfCRDPathMissing: true,
 	}
 

@@ -1,0 +1,5 @@
+## Append samples of your project ##
+resources:
+- v1alpha1_externalip.yaml
+- v1alpha1_firewallrule.yaml
+# +kubebuilder:scaffold:manifestskustomizesamples

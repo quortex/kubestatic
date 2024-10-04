@@ -1,6 +1,6 @@
 domain: kubestatic.quortex.io
 layout:
-- go.kubebuilder.io/v3
+- go.kubebuilder.io/v4
 projectName: kubestatic
 repo: github.com/quortex/kubestatic
 resources:

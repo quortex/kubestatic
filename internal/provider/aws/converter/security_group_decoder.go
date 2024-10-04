@@ -4,8 +4,7 @@ package converter
 import (
 	"github.com/aws/aws-sdk-go/aws"
 	"github.com/aws/aws-sdk-go/service/ec2"
-
-	"github.com/quortex/kubestatic/pkg/provider"
+	"github.com/quortex/kubestatic/internal/provider"
 )
 
 // DecodeSecurityGroup converts an ec2 SecurityGroup to a Firewall.

@@ -5,8 +5,7 @@ import (
 	"fmt"
 
 	"github.com/aws/aws-sdk-go/aws/awserr"
-
-	"github.com/quortex/kubestatic/pkg/provider"
+	"github.com/quortex/kubestatic/internal/provider"
 )
 
 // DecodeEC2Error converts an ec2 specific Error to a QXError.
