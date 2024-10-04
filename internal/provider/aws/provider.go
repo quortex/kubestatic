@@ -76,7 +76,7 @@ func getV2Token(client http.Client) (string, error) {
 	if err != nil {
 		return "", err
 	}
-	defer res.Body.Close()
+	defer func() { _ = res.Body.Close() }()
 
 	token, err := io.ReadAll(res.Body)
 	if err != nil {
@@ -100,7 +100,7 @@ func retrieveInstanceMetadata(client http.Client, contextPath string, token stri
 		return "", err
 	}
 
-	defer res.Body.Close()
+	defer func() { _ = res.Body.Close() }()
 	body, err := io.ReadAll(res.Body)
 	if err != nil {
 		return "", err
@@ -120,12 +120,12 @@ func retrieveVPCID() (string, error) {
 		fmt.Printf("failed getting IMDSv2 token falling back to IMDSv1 : %s", err)
 	}
 
-	mac, err := retrieveInstanceMetadata(client, "/mac", string(token))
+	mac, err := retrieveInstanceMetadata(client, "/mac", token)
 	if err != nil {
 		return "", err
 	}
 
-	body, err := retrieveInstanceMetadata(client, "/network/interfaces/macs/"+mac+"/vpc-id", string(token))
+	body, err := retrieveInstanceMetadata(client, "/network/interfaces/macs/"+mac+"/vpc-id", token)
 	if err != nil {
 		return "", err
 	}
@@ -232,7 +232,7 @@ func (p *awsProvider) DisassociateAddress(ctx context.Context, req provider.Disa
 	return nil
 }
 
-func (p *awsProvider) getSecurityGroup(ctx context.Context, firewallRuleID string) (*ec2.SecurityGroup, error) {
+func (p *awsProvider) getSecurityGroup(_ context.Context, firewallRuleID string) (*ec2.SecurityGroup, error) {
 	res, err := p.ec2.DescribeSecurityGroups(&ec2.DescribeSecurityGroupsInput{
 		GroupIds: aws.StringSlice([]string{firewallRuleID}),
 	})
@@ -289,11 +289,25 @@ func (p *awsProvider) UpdateFirewallRuleGroup(ctx context.Context, req provider.
 	}
 
 	// Apply Ingress permissions reconciliation
-	if err := provider.ReconcilePermissions(ctx, req.FirewallRuleGroupID, p.authorizeSecurityGroupIngress, p.revokeSecurityGroupIngress, provider.GetIngressIPPermissions(req.FirewallRules), converter.DecodeIpPermissions(sg.IpPermissions)); err != nil {
+	if err := provider.ReconcilePermissions(
+		ctx,
+		req.FirewallRuleGroupID,
+		p.authorizeSecurityGroupIngress,
+		p.revokeSecurityGroupIngress,
+		provider.GetIngressIPPermissions(req.FirewallRules),
+		converter.DecodeIpPermissions(sg.IpPermissions),
+	); err != nil {
 		return "", converter.DecodeEC2Error("failed to apply security group ingress permissions", err)
 	}
 	// Apply Egress permissions reconciliation
-	if err := provider.ReconcilePermissions(ctx, req.FirewallRuleGroupID, p.authorizeSecurityGroupEgress, p.revokeSecurityGroupEgress, provider.GetEgressIPPermissions(req.FirewallRules), converter.DecodeIpPermissions(sg.IpPermissionsEgress)); err != nil {
+	if err := provider.ReconcilePermissions(
+		ctx,
+		req.FirewallRuleGroupID,
+		p.authorizeSecurityGroupEgress,
+		p.revokeSecurityGroupEgress,
+		provider.GetEgressIPPermissions(req.FirewallRules),
+		converter.DecodeIpPermissions(sg.IpPermissionsEgress),
+	); err != nil {
 		return "", converter.DecodeEC2Error("failed to apply security group egress permissions", err)
 	}
 

@@ -14,7 +14,7 @@ See the License for the specific language governing permissions and
 limitations under the License.
 */
 
-package controllers
+package controller
 
 import (
 	"context"
@@ -113,7 +113,12 @@ func (r *FirewallRuleReconciler) Reconcile(ctx context.Context, req ctrl.Request
 	return r.reconcileFirewallRuleDeletion(ctx, log, firewallRule)
 }
 
-func (r *FirewallRuleReconciler) reconcileFirewallRule(ctx context.Context, log logr.Logger, rule *v1alpha1.FirewallRule) (ctrl.Result, error) {
+//nolint:gocyclo
+func (r *FirewallRuleReconciler) reconcileFirewallRule(
+	ctx context.Context,
+	log logr.Logger,
+	rule *v1alpha1.FirewallRule,
+) (ctrl.Result, error) {
 	// 1st STEP
 	//
 	// Add finalizer
@@ -315,17 +320,33 @@ func (r *FirewallRuleReconciler) reconcileFirewallRule(ctx context.Context, log 
 			FirewallRuleID:     *rule.Status.FirewallRuleID,
 			NetworkInterfaceID: networkInterface.NetworkInterfaceID,
 		}); err != nil {
-			log.Error(err, "Failed to associate firewall rule", "firewallRuleID", *rule.Status.FirewallRuleID, "instanceID", instanceID, "networkInterfaceID", networkInterface.NetworkInterfaceID)
+			log.Error(
+				err,
+				"Failed to associate firewall rule",
+				"firewallRuleID", *rule.Status.FirewallRuleID,
+				"instanceID", instanceID,
+				"networkInterfaceID", networkInterface.NetworkInterfaceID,
+			)
 			return ctrl.Result{}, err
 		}
-		log.Info("Associated firewall rule", "firewallRuleID", *rule.Status.FirewallRuleID, "instanceID", instanceID, "networkInterfaceID", networkInterface.NetworkInterfaceID)
+		log.Info(
+			"Associated firewall rule",
+			"firewallRuleID", *rule.Status.FirewallRuleID,
+			"instanceID", instanceID,
+			"networkInterfaceID", networkInterface.NetworkInterfaceID,
+		)
 
 		// Update status
 		rule.Status.LastTransitionTime = metav1.Now()
 		rule.Status.State = v1alpha1.FirewallRuleStateAssociated
 		rule.Status.InstanceID = &instanceID
 		rule.Status.NetworkInterfaceID = &networkInterface.NetworkInterfaceID
-		log.V(1).Info("Updating FirewallRule", "state", rule.Status.State, "instanceID", rule.Status.InstanceID, "networkInterfaceID", rule.Status.NetworkInterfaceID)
+		log.V(1).Info(
+			"Updating FirewallRule",
+			"state", rule.Status.State,
+			"instanceID", rule.Status.InstanceID,
+			"networkInterfaceID", rule.Status.NetworkInterfaceID,
+		)
 		if err = r.Status().Update(ctx, rule); err != nil {
 			log.Error(err, "Failed to update FirewallRule status", "firewallRule", rule.Name, "status", rule.Status.State)
 			return ctrl.Result{}, err
@@ -380,7 +401,11 @@ func (r *FirewallRuleReconciler) reconcileFirewallRule(ctx context.Context, log 
 	return ctrl.Result{}, nil
 }
 
-func (r *FirewallRuleReconciler) reconcileFirewallRuleDeletion(ctx context.Context, log logr.Logger, rule *v1alpha1.FirewallRule) (ctrl.Result, error) {
+func (r *FirewallRuleReconciler) reconcileFirewallRuleDeletion(
+	ctx context.Context,
+	log logr.Logger,
+	rule *v1alpha1.FirewallRule,
+) (ctrl.Result, error) {
 	// 1st STEP
 	//
 	// Reconciliation of a possible firewall rule associated with the instance.
@@ -454,7 +479,12 @@ func (r *FirewallRuleReconciler) clearFirewallRule(ctx context.Context, log logr
 				})
 				if err != nil {
 					if !provider.IsErrNotFound(err) {
-						log.Error(err, "Failed to disassociate firewall rule", "firewallRuleID", *rule.Status.FirewallRuleID, "networkInterfaceID", *rule.Status.NetworkInterfaceID)
+						log.Error(
+							err,
+							"Failed to disassociate firewall rule",
+							"firewallRuleID", *rule.Status.FirewallRuleID,
+							"networkInterfaceID", *rule.Status.NetworkInterfaceID,
+						)
 						return ctrl.Result{}, err
 					}
 					log.V(1).Info("Firewall rule already disassociated", "firewallRuleID", *rule.Status.FirewallRuleID)

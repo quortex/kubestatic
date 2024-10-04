@@ -14,7 +14,7 @@ See the License for the specific language governing permissions and
 limitations under the License.
 */
 
-package controllers
+package controller
 
 import (
 	"context"
@@ -118,7 +118,12 @@ func (r *ExternalIPReconciler) reconcileExternalIP(ctx context.Context, log logr
 		externalIP.Status.State = v1alpha1.ExternalIPStateReserved
 		externalIP.Status.AddressID = &res.AddressID
 		externalIP.Status.PublicIPAddress = &res.PublicIP
-		log.V(1).Info("Updating ExternalIP", "state", externalIP.Status.State, "addressID", externalIP.Status.AddressID, "PublicIPAddress", externalIP.Status.PublicIPAddress)
+		log.V(1).Info(
+			"Updating ExternalIP",
+			"state", externalIP.Status.State,
+			"addressID", externalIP.Status.AddressID,
+			"PublicIPAddress", externalIP.Status.PublicIPAddress,
+		)
 		return ctrl.Result{RequeueAfter: time.Second * 5}, r.Status().Update(ctx, externalIP)
 	}
 
@@ -171,10 +176,21 @@ func (r *ExternalIPReconciler) reconcileExternalIP(ctx context.Context, log logr
 				AddressID:          *externalIP.Status.AddressID,
 				NetworkInterfaceID: networkInterface.NetworkInterfaceID,
 			}); err != nil {
-				log.Error(err, "Failed to associate address", "addressID", *externalIP.Status.AddressID, "instanceID", instanceID, "networkInterfaceID", networkInterface.NetworkInterfaceID)
+				log.Error(
+					err,
+					"Failed to associate address",
+					"addressID", *externalIP.Status.AddressID,
+					"instanceID", instanceID,
+					"networkInterfaceID", networkInterface.NetworkInterfaceID,
+				)
 				return ctrl.Result{}, err
 			}
-			log.Info("Associated address", "addressID", *externalIP.Status.AddressID, "instanceID", instanceID, "networkInterfaceID", networkInterface.NetworkInterfaceID)
+			log.Info(
+				"Associated address",
+				"addressID", *externalIP.Status.AddressID,
+				"instanceID", instanceID,
+				"networkInterfaceID", networkInterface.NetworkInterfaceID,
+			)
 
 			// Update status
 			externalIP.Status.State = v1alpha1.ExternalIPStateAssociated
@@ -258,7 +274,11 @@ func (r *ExternalIPReconciler) reconcileExternalIP(ctx context.Context, log logr
 	return ctrl.Result{}, nil
 }
 
-func (r *ExternalIPReconciler) reconcileExternalIPDeletion(ctx context.Context, log logr.Logger, externalIP *v1alpha1.ExternalIP) (ctrl.Result, error) {
+func (r *ExternalIPReconciler) reconcileExternalIPDeletion(
+	ctx context.Context,
+	log logr.Logger,
+	externalIP *v1alpha1.ExternalIP,
+) (ctrl.Result, error) {
 	// 1st STEP
 	//
 	// Reconciliation of a possible external IP associated with the instance.
@@ -305,7 +325,12 @@ func (r *ExternalIPReconciler) reconcileExternalIPDeletion(ctx context.Context, 
 }
 
 // disassociateAddress performs address disassociation tasks
-func (r *ExternalIPReconciler) disassociateAddress(ctx context.Context, pvd provider.Provider, log logr.Logger, externalIP *v1alpha1.ExternalIP) (ctrl.Result, error) {
+func (r *ExternalIPReconciler) disassociateAddress(
+	ctx context.Context,
+	pvd provider.Provider,
+	log logr.Logger,
+	externalIP *v1alpha1.ExternalIP,
+) (ctrl.Result, error) {
 	// Get address and disassociate it
 	if externalIP.Status.AddressID != nil {
 		res, err := pvd.GetAddress(ctx, *externalIP.Status.AddressID)

@@ -112,7 +112,7 @@ func applyPermissions(
 	return nil
 }
 
-// containsPermission returns if given Permisssion slice contains Permission.
+// containsPermission returns if given Permission slice contains Permission.
 func containsPermission(slice []*IPPermission, elem *IPPermission) bool {
 	for _, e := range slice {
 		if reflect.DeepEqual(e, elem) {

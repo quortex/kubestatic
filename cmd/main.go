@@ -42,7 +42,7 @@ import (
 	"github.com/quortex/kubestatic/internal/controller"
 	"github.com/quortex/kubestatic/internal/provider"
 	"github.com/quortex/kubestatic/internal/provider/aws"
-	//+kubebuilder:scaffold:imports
+	// +kubebuilder:scaffold:imports
 )
 
 const (
@@ -62,7 +62,7 @@ func init() {
 	utilruntime.Must(clientgoscheme.AddToScheme(scheme))
 
 	utilruntime.Must(kubestaticquortexiov1alpha1.AddToScheme(scheme))
-	//+kubebuilder:scaffold:scheme
+	// +kubebuilder:scaffold:scheme
 }
 
 func main() {
@@ -85,10 +85,14 @@ func main() {
 		"If set, the metrics endpoint is served securely via HTTPS. Use --metrics-secure=false to use HTTP instead.")
 	flag.BoolVar(&enableHTTP2, "enable-http2", false,
 		"If set, HTTP/2 will be enabled for the metrics and webhook servers")
-	flag.StringVar(&cloudProvider, "cloud-provider", "aws", "Cloud provider type. Available values: ["+strings.Join(availableProviders, ",")+"]")
-	flag.BoolVar(&preventEIPDeallocation, "prevent-eip-deallocation", false, "Prevent EIP deallocation on nodes auto-assigned ExternalIPs.")
-	flag.DurationVar(&nodeMinReconciliationInterval, "node-min-reconciliation-interval", 10*time.Second, "The minimum duration to wait between two reconciliations for the same node.")
-	flag.DurationVar(&nodeReconciliationRequeueInterval, "node-reconciliation-requeue-interval", 1*time.Minute, "The duration for which nodes are automatically reconciled.")
+	flag.StringVar(&cloudProvider, "cloud-provider", "aws",
+		"Cloud provider type. Available values: ["+strings.Join(availableProviders, ",")+"]")
+	flag.BoolVar(&preventEIPDeallocation, "prevent-eip-deallocation", false,
+		"Prevent EIP deallocation on nodes auto-assigned ExternalIPs.")
+	flag.DurationVar(&nodeMinReconciliationInterval, "node-min-reconciliation-interval", 10*time.Second,
+		"The minimum duration to wait between two reconciliations for the same node.")
+	flag.DurationVar(&nodeReconciliationRequeueInterval, "node-reconciliation-requeue-interval", 1*time.Minute,
+		"The duration for which nodes are automatically reconciled.")
 	opts := zap.Options{
 		Development: true,
 	}
@@ -180,7 +184,7 @@ func main() {
 		os.Exit(1)
 	}
 
-	if err = (&controllers.ExternalIPReconciler{
+	if err = (&controller.ExternalIPReconciler{
 		Client:   mgr.GetClient(),
 		Log:      ctrl.Log.WithName("controllers").WithName("ExternalIP"),
 		Scheme:   mgr.GetScheme(),
@@ -189,7 +193,7 @@ func main() {
 		setupLog.Error(err, "Unable to create controller", "controller", "ExternalIP")
 		os.Exit(1)
 	}
-	if err = (&controllers.NodeReconciler{
+	if err = (&controller.NodeReconciler{
 		Client:                        mgr.GetClient(),
 		Log:                           ctrl.Log.WithName("controllers").WithName("Node"),
 		Scheme:                        mgr.GetScheme(),
@@ -200,7 +204,7 @@ func main() {
 		setupLog.Error(err, "unable to create controller", "controller", "Node")
 		os.Exit(1)
 	}
-	if err = (&controllers.FirewallRuleReconciler{
+	if err = (&controller.FirewallRuleReconciler{
 		Client:   mgr.GetClient(),
 		Log:      ctrl.Log.WithName("controllers").WithName("FirewallRule"),
 		Scheme:   mgr.GetScheme(),

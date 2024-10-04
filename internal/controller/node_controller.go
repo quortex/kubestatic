@@ -14,7 +14,7 @@ See the License for the specific language governing permissions and
 limitations under the License.
 */
 
-package controllers
+package controller
 
 import (
 	"context"
@@ -54,9 +54,9 @@ type NodeReconciler struct {
 	lastReconciliation            map[string]time.Time
 }
 
-//+kubebuilder:rbac:groups=core,resources=nodes,verbs=get;list;watch;update;patch
-//+kubebuilder:rbac:groups=core,resources=pods,verbs=get;list;watch
-//+kubebuilder:rbac:groups=kubestatic.quortex.io,resources=externalips,verbs=get;list;watch;create;update;patch;delete
+// +kubebuilder:rbac:groups=core,resources=nodes,verbs=get;list;watch;update;patch
+// +kubebuilder:rbac:groups=core,resources=pods,verbs=get;list;watch
+// +kubebuilder:rbac:groups=kubestatic.quortex.io,resources=externalips,verbs=get;list;watch;create;update;patch;delete
 
 // Reconcile is part of the main kubernetes reconciliation loop which aims to
 // move the current state of the cluster closer to the desired state.
@@ -82,7 +82,7 @@ func (r *NodeReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.
 
 	// RequeueAfter can lead to node reconciliation which may not have the
 	// externalip-auto-assign label, in this case we end the reconciliation.
-	if node.Labels[externalIPAutoAssignLabel] != "true" {
+	if !isNodeWithAutoAssign(node) {
 		log.V(1).Info("externalip-auto-assign label removed, stopping reconciliation")
 		delete(r.lastReconciliation, req.Name)
 		return ctrl.Result{}, nil
@@ -171,6 +171,10 @@ func (r *NodeReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.
 	return ctrl.Result{RequeueAfter: r.ReconciliationRequeueInterval}, nil
 }
 
+func isNodeWithAutoAssign(node *corev1.Node) bool {
+	return node.Labels[externalIPAutoAssignLabel] == "true"
+}
+
 // SetupWithManager sets up the controller with the Manager.
 func (r *NodeReconciler) SetupWithManager(mgr ctrl.Manager) error {
 	r.lastReconciliation = map[string]time.Time{}
@@ -197,7 +201,7 @@ func (r *NodeReconciler) nodeReconciliationPredicates() builder.Predicates {
 // shouldReconcileNode returns if given Node should be reconciled by the controller.
 func (r *NodeReconciler) shouldReconcileNode(obj *corev1.Node) bool {
 	// We should consider reconciliation for nodes with automatic IP assignment label.
-	if obj.ObjectMeta.Labels[externalIPAutoAssignLabel] != "true" {
+	if !isNodeWithAutoAssign(obj) {
 		return false
 	}
 

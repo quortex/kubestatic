@@ -1,0 +1,63 @@
+run:
+  timeout: 5m
+  allow-parallel-runners: true
+
+linters-settings:
+  dupl:
+    # Increased from 150 because this operator contain a lot of boilerplate.
+    threshold: 200
+  gocyclo:
+    # Increased from 30 because existing reconcile functions are complex.
+    min-complexity: 40
+  lll:
+    line-length: 150
+
+linters:
+  disable-all: true
+  enable:
+    - dupl
+    - errcheck
+    - exportloopref
+    - goconst
+    - gocyclo
+    - gofmt
+    - goimports
+    - gosimple
+    - govet
+    - ineffassign
+    - lll
+    - misspell
+    - nakedret
+    - prealloc
+    - staticcheck
+    - typecheck
+    - unconvert
+    - unparam
+    - unused
+
+issues:
+  # Don't exclude the default set of lint
+  exclude-use-default: false
+  # Excluding configuration per-path, per-linter, per-text and per-source
+  exclude-rules:
+    # Exclude `lll` issues for long comments starting with `go:generate` or `+kubebuilder`.
+    - source: "^//(go:generate|\\+kubebuilder)"
+      linters:
+        - lll
+    # Exclude dupl since controllers have a lot of boilerplate code, and exclude
+    # dynamic and unwrapped errors issues in controllers since they will only be logged.
+    - path: controllers/
+      linters:
+        - dupl
+        - goerr113
+        - wrapcheck
+    # Exclude some linters from running on tests files.
+    - path: _test\.go
+      linters:
+        - dupl
+        - goconst
+        - gocyclo
+        - gomnd
+        - funlen
+        - lll
+        - varnamelen
