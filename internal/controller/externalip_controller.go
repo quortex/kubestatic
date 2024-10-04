@@ -31,11 +31,11 @@ import (
 	"k8s.io/apimachinery/pkg/util/strategicpatch"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
+	"sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
 	"sigs.k8s.io/controller-runtime/pkg/handler"
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 
 	"github.com/quortex/kubestatic/api/v1alpha1"
-	"github.com/quortex/kubestatic/internal/helper"
 	"github.com/quortex/kubestatic/internal/provider"
 )
 
@@ -96,8 +96,8 @@ func (r *ExternalIPReconciler) reconcileExternalIP(ctx context.Context, log logr
 	// 1st STEP
 	//
 	// Add finalizer
-	if !helper.ContainsString(externalIP.ObjectMeta.Finalizers, externalIPFinalizer) {
-		externalIP.ObjectMeta.Finalizers = append(externalIP.ObjectMeta.Finalizers, externalIPFinalizer)
+	if !controllerutil.ContainsFinalizer(externalIP, externalIPFinalizer) {
+		controllerutil.AddFinalizer(externalIP, externalIPFinalizer)
 		log.V(1).Info("Updating ExternalIP", "finalizer", externalIPFinalizer)
 		return ctrl.Result{}, r.Update(ctx, externalIP)
 	}
@@ -295,8 +295,8 @@ func (r *ExternalIPReconciler) reconcileExternalIPDeletion(ctx context.Context, 
 	//
 	// Remove finalizer to release ExternalIP
 	if externalIP.Status.State == v1alpha1.ExternalIPStateNone {
-		if helper.ContainsString(externalIP.Finalizers, externalIPFinalizer) {
-			externalIP.Finalizers = helper.RemoveString(externalIP.Finalizers, externalIPFinalizer)
+		if controllerutil.ContainsFinalizer(externalIP, externalIPFinalizer) {
+			controllerutil.RemoveFinalizer(externalIP, externalIPFinalizer)
 			return ctrl.Result{}, r.Update(ctx, externalIP)
 		}
 	}

@@ -176,7 +176,7 @@ KUSTOMIZE ?= $(LOCALBIN)/kustomize
 CONTROLLER_GEN ?= $(LOCALBIN)/controller-gen
 ENVTEST ?= $(LOCALBIN)/setup-envtest
 CRD_REF_DOCS ?= $(LOCALBIN)/crd-ref-docs
-GOLANG_CI_LINT?= $(LOCALBIN)/golangci-lint
+GOLANGCI_LINT?= $(LOCALBIN)/golangci-lint
 YQ ?= $(LOCALBIN)/yq
 HELM_DOCS ?= $(LOCALBIN)/helm-docs
 

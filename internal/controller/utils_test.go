@@ -20,10 +20,11 @@ import (
 	"reflect"
 	"testing"
 
-	"github.com/quortex/kubestatic/api/v1alpha1"
-	"github.com/quortex/kubestatic/internal/helper"
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/utils/ptr"
+
+	"github.com/quortex/kubestatic/api/v1alpha1"
 )
 
 func Test_publicIPAddresses(t *testing.T) {
@@ -61,12 +62,12 @@ func Test_publicIPAddresses(t *testing.T) {
 				eips: []v1alpha1.ExternalIP{
 					{
 						Status: v1alpha1.ExternalIPStatus{
-							PublicIPAddress: helper.StringPointer("foo"),
+							PublicIPAddress: ptr.To("foo"),
 						},
 					},
 					{
 						Status: v1alpha1.ExternalIPStatus{
-							PublicIPAddress: helper.StringPointer("bar"),
+							PublicIPAddress: ptr.To("bar"),
 						},
 					},
 				},
@@ -205,19 +206,19 @@ func Test_getMostReferencedIP(t *testing.T) {
 				eips: []v1alpha1.ExternalIP{
 					{
 						Status: v1alpha1.ExternalIPStatus{
-							PublicIPAddress: helper.StringPointer("foo"),
+							PublicIPAddress: ptr.To("foo"),
 						},
 					},
 					{
 						Status: v1alpha1.ExternalIPStatus{
-							PublicIPAddress: helper.StringPointer("bar"),
+							PublicIPAddress: ptr.To("bar"),
 						},
 					},
 				},
 			},
 			want: &v1alpha1.ExternalIP{
 				Status: v1alpha1.ExternalIPStatus{
-					PublicIPAddress: helper.StringPointer("foo"),
+					PublicIPAddress: ptr.To("foo"),
 				},
 			},
 		},

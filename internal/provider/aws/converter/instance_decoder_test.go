@@ -7,7 +7,8 @@ import (
 
 	"github.com/aws/aws-sdk-go/aws"
 	"github.com/aws/aws-sdk-go/service/ec2"
-	"github.com/quortex/kubestatic/internal/helper"
+	"k8s.io/utils/ptr"
+
 	"github.com/quortex/kubestatic/internal/provider"
 )
 
@@ -47,7 +48,7 @@ func TestDecodeInstance(t *testing.T) {
 								PublicIp: aws.String("FooPublicIp"),
 							},
 							Attachment: &ec2.InstanceNetworkInterfaceAttachment{
-								DeviceIndex: helper.Int64Pointer(1),
+								DeviceIndex: ptr.To(int64(1)),
 							},
 						},
 						{
@@ -56,7 +57,7 @@ func TestDecodeInstance(t *testing.T) {
 								PublicIp: aws.String("BarPublicIp"),
 							},
 							Attachment: &ec2.InstanceNetworkInterfaceAttachment{
-								DeviceIndex: helper.Int64Pointer(0),
+								DeviceIndex: ptr.To(int64(0)),
 							},
 						},
 					},
@@ -69,12 +70,12 @@ func TestDecodeInstance(t *testing.T) {
 					{
 						NetworkInterfaceID: "FooNetworkInterfaceId",
 						PublicIP:           aws.String("FooPublicIp"),
-						DeviceID:           helper.Int64Pointer(1),
+						DeviceID:           ptr.To(int64(1)),
 					},
 					{
 						NetworkInterfaceID: "BarNetworkInterfaceId",
 						PublicIP:           aws.String("BarPublicIp"),
-						DeviceID:           helper.Int64Pointer(0),
+						DeviceID:           ptr.To(int64(0)),
 					},
 				},
 			},

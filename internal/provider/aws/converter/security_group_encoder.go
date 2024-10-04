@@ -2,9 +2,12 @@
 package converter
 
 import (
+	"slices"
+
 	"github.com/aws/aws-sdk-go/aws"
 	"github.com/aws/aws-sdk-go/service/ec2"
-	"github.com/quortex/kubestatic/internal/helper"
+	"k8s.io/utils/ptr"
+
 	"github.com/quortex/kubestatic/internal/provider"
 )
 
@@ -17,14 +20,16 @@ func EncodeIPPermission(req provider.IPPermission) *ec2.IpPermission {
 
 	// fromport / toport must be specified for the tcp / udp protocol even if they are zero.
 	// On the contrary, they must be omitted for the other protocols if they are zero.
-	if helper.ContainsString([]string{"udp", "tcp", "UDP", "TCP"}, req.Protocol) {
+	if slices.Contains([]string{"udp", "tcp", "UDP", "TCP"}, req.Protocol) {
 		res.FromPort = aws.Int64(req.FromPort)
 		res.ToPort = req.ToPort
 		if res.ToPort == nil {
 			res.ToPort = aws.Int64(req.FromPort)
 		}
 	} else {
-		res.FromPort = helper.Int64PointerOrNil(req.FromPort)
+		if req.FromPort != 0 {
+			res.FromPort = ptr.To(req.FromPort)
+		}
 		res.ToPort = req.ToPort
 	}
 
@@ -37,10 +42,13 @@ func EncodeIpRange(data *provider.IPRange) *ec2.IpRange {
 		return nil
 	}
 
-	return &ec2.IpRange{
-		CidrIp:      aws.String(data.CIDR),
-		Description: helper.StringPointerOrNil(data.Description),
+	res := &ec2.IpRange{
+		CidrIp: aws.String(data.CIDR),
 	}
+	if data.Description != "" {
+		res.Description = ptr.To(data.Description)
+	}
+	return res
 }
 
 // EncodeIpRanges converts an IPRange slice to an ec2 IpRange slice.

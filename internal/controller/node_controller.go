@@ -23,7 +23,6 @@ import (
 	"github.com/go-logr/logr"
 	"github.com/google/uuid"
 	"github.com/quortex/kubestatic/api/v1alpha1"
-	"github.com/quortex/kubestatic/internal/helper"
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -83,7 +82,7 @@ func (r *NodeReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.
 
 	// RequeueAfter can lead to node reconciliation which may not have the
 	// externalip-auto-assign label, in this case we end the reconciliation.
-	if !helper.ContainsElements(node.Labels, map[string]string{externalIPAutoAssignLabel: "true"}) {
+	if node.Labels[externalIPAutoAssignLabel] != "true" {
 		log.V(1).Info("externalip-auto-assign label removed, stopping reconciliation")
 		delete(r.lastReconciliation, req.Name)
 		return ctrl.Result{}, nil
@@ -198,7 +197,7 @@ func (r *NodeReconciler) nodeReconciliationPredicates() builder.Predicates {
 // shouldReconcileNode returns if given Node should be reconciled by the controller.
 func (r *NodeReconciler) shouldReconcileNode(obj *corev1.Node) bool {
 	// We should consider reconciliation for nodes with automatic IP assignment label.
-	if !helper.ContainsElements(obj.ObjectMeta.Labels, map[string]string{externalIPAutoAssignLabel: "true"}) {
+	if obj.ObjectMeta.Labels[externalIPAutoAssignLabel] != "true" {
 		return false
 	}
 

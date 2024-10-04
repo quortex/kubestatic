@@ -30,12 +30,12 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/types"
-	"k8s.io/utils/pointer"
+	"k8s.io/utils/ptr"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
+	"sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
 
 	"github.com/quortex/kubestatic/api/v1alpha1"
-	"github.com/quortex/kubestatic/internal/helper"
 	"github.com/quortex/kubestatic/internal/provider"
 )
 
@@ -117,7 +117,7 @@ func (r *FirewallRuleReconciler) reconcileFirewallRule(ctx context.Context, log 
 	// 1st STEP
 	//
 	// Add finalizer
-	if !helper.ContainsString(rule.ObjectMeta.Finalizers, firewallRuleFinalizer) {
+	if !controllerutil.ContainsFinalizer(rule, firewallRuleFinalizer) {
 		rule.ObjectMeta.Finalizers = append(rule.ObjectMeta.Finalizers, firewallRuleFinalizer)
 		log.V(1).Info("Updating FirewallRule", "finalizer", firewallRuleFinalizer)
 		return ctrl.Result{}, r.Update(ctx, rule)
@@ -155,7 +155,7 @@ func (r *FirewallRuleReconciler) reconcileFirewallRule(ctx context.Context, log 
 			}
 
 			if len(rulesAssociated) > 0 {
-				firewallRuleID := helper.StringValue(rulesAssociated[0].Status.FirewallRuleID)
+				firewallRuleID := ptr.Deref(rulesAssociated[0].Status.FirewallRuleID, "")
 				log.V(1).Info("Updating FirewallRule group", "firewallRuleID", firewallRuleID)
 				id, err = r.Provider.UpdateFirewallRuleGroup(ctx, encodeUpdateFirewallRuleGroupRequest(firewallRuleID, frs.Items))
 				if err != nil {
@@ -194,7 +194,10 @@ func (r *FirewallRuleReconciler) reconcileFirewallRule(ctx context.Context, log 
 		if err != nil {
 			return ctrl.Result{}, fmt.Errorf("Failed to marshal last applied firewallrule: %w", err)
 		}
-		rule.Status.LastApplied = helper.StringPointerOrNil(string(lastApplied))
+		rule.Status.LastApplied = nil
+		if len(lastApplied) > 0 {
+			rule.Status.LastApplied = ptr.To(string(lastApplied))
+		}
 		log.V(1).Info("Updating FirewallRule", "state", rule.Status.State, "firewallRuleID", rule.Status.FirewallRuleID)
 		if err = r.Status().Update(ctx, rule); err != nil {
 			log.Error(err, "Failed to update FirewallRule status", "firewallRule", rule.Name, "status", rule.Status.State)
@@ -205,7 +208,7 @@ func (r *FirewallRuleReconciler) reconcileFirewallRule(ctx context.Context, log 
 
 	} else if rule.Spec.NodeName != nil {
 		lastApplied := &v1alpha1.FirewallRuleSpec{}
-		if err := json.Unmarshal([]byte(helper.StringValue(rule.Status.LastApplied)), lastApplied); err != nil {
+		if err := json.Unmarshal([]byte(ptr.Deref(rule.Status.LastApplied, "")), lastApplied); err != nil {
 			return ctrl.Result{}, fmt.Errorf("Failed to unmarshal last applied firewallrule: %w", err)
 		}
 
@@ -214,7 +217,7 @@ func (r *FirewallRuleReconciler) reconcileFirewallRule(ctx context.Context, log 
 		// otherwise, we update the group dedicated to the node.
 		if !reflect.DeepEqual(rule.Spec, *lastApplied) {
 			// Update firewall rule
-			firewallRuleID := helper.StringValue(rule.Status.FirewallRuleID)
+			firewallRuleID := ptr.Deref(rule.Status.FirewallRuleID, "")
 			var err error
 			if r.Provider.HasGroupedFirewallRules() {
 				// List FirewallRules with identical nodeName
@@ -251,7 +254,10 @@ func (r *FirewallRuleReconciler) reconcileFirewallRule(ctx context.Context, log 
 				return ctrl.Result{}, fmt.Errorf("Failed to marshal last applied firewallrule: %w", err)
 			}
 			rule.Status.LastTransitionTime = metav1.Now()
-			rule.Status.LastApplied = helper.StringPointerOrNil(string(lastApplied))
+			rule.Status.LastApplied = nil
+			if len(lastApplied) > 0 {
+				rule.Status.LastApplied = ptr.To(string(lastApplied))
+			}
 			log.V(1).Info("Updating FirewallRule", "state", rule.Status.State, "firewallRuleID", rule.Status.FirewallRuleID)
 			if err = r.Status().Update(ctx, rule); err != nil {
 				log.Error(err, "Failed to update FirewallRule status", "firewallRule", rule.Name, "status", rule.Status.State)
@@ -361,7 +367,7 @@ func (r *FirewallRuleReconciler) reconcileFirewallRule(ctx context.Context, log 
 
 			// If the node is not being deleted and has an instance corresponding to its node name, the reconciliation is done
 			// This check exist to disassociate the rule of the old instance if the node name change
-			if node.ObjectMeta.DeletionTimestamp.IsZero() && pointer.StringPtrDerefOr(rule.Status.InstanceID, "") == r.Provider.GetInstanceID(node) {
+			if node.ObjectMeta.DeletionTimestamp.IsZero() && ptr.Deref(rule.Status.InstanceID, "") == r.Provider.GetInstanceID(node) {
 				return ctrl.Result{}, nil
 			}
 		}
@@ -386,8 +392,8 @@ func (r *FirewallRuleReconciler) reconcileFirewallRuleDeletion(ctx context.Conte
 	// 2nd STEP
 	//
 	// Remove finalizer to release FirewallRule
-	if helper.ContainsString(rule.Finalizers, firewallRuleFinalizer) {
-		rule.Finalizers = helper.RemoveString(rule.Finalizers, firewallRuleFinalizer)
+	if controllerutil.ContainsFinalizer(rule, firewallRuleFinalizer) {
+		controllerutil.RemoveFinalizer(rule, firewallRuleFinalizer)
 		return ctrl.Result{}, r.Update(ctx, rule)
 	}
 
@@ -401,7 +407,7 @@ func (r *FirewallRuleReconciler) clearFirewallRule(ctx context.Context, log logr
 	log = log.WithValues("ruleName", rule.Name)
 
 	if rule.Status.FirewallRuleID != nil {
-		firewallRuleID := helper.StringValue(rule.Status.FirewallRuleID)
+		firewallRuleID := ptr.Deref(rule.Status.FirewallRuleID, "")
 
 		toDelete := false
 		if r.Provider.HasGroupedFirewallRules() {
@@ -421,7 +427,7 @@ func (r *FirewallRuleReconciler) clearFirewallRule(ctx context.Context, log logr
 					log.V(1).Info("FirewallRule LastTransitionTime inconsistency, requeuing in 1 second", "firewallRuleName", fr.Name)
 					return ctrl.Result{RequeueAfter: time.Second}, nil
 				}
-				if fr.Name != rule.Name && helper.StringValue(fr.Status.FirewallRuleID) == helper.StringValue(rule.Status.FirewallRuleID) {
+				if fr.Name != rule.Name && ptr.Deref(fr.Status.FirewallRuleID, "") == ptr.Deref(rule.Status.FirewallRuleID, "") {
 					rules = append(rules, fr)
 				}
 			}
@@ -488,7 +494,7 @@ func (r *FirewallRuleReconciler) SetupWithManager(mgr ctrl.Manager) error {
 	// Index FirewallRule NodeName to list FirewallRules by node.
 	if err := mgr.GetFieldIndexer().IndexField(context.Background(), &v1alpha1.FirewallRule{}, firewallRuleNodeNameKey, func(o client.Object) []string {
 		fr := o.(*v1alpha1.FirewallRule)
-		return []string{helper.StringValue(fr.Spec.NodeName)}
+		return []string{ptr.Deref(fr.Spec.NodeName, "")}
 	}); err != nil {
 		return err
 	}
