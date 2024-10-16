@@ -200,7 +200,9 @@ spec:
                   description: The instance identifier
                   type: string
                 lastApplied:
-                  description: The latest FirewallRule specification applied, used to make API requests to cloud providers only if the resource has been changed to avoid throttling issues.
+                  description: |-
+                    The latest FirewallRule specification applied, used to make API requests to cloud providers
+                    only if the resource has been changed to avoid throttling issues.
                   type: string
                 lastTransitionTime:
                   description: lastTransitionTime is the last time the status transitioned from one status to another.

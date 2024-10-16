@@ -1,6 +1,6 @@
 # kubestatic
 
-![Version: 0.11.0](https://img.shields.io/badge/Version-0.11.0-informational?style=flat-square) ![Type: application](https://img.shields.io/badge/Type-application-informational?style=flat-square) ![AppVersion: 0.11.0](https://img.shields.io/badge/AppVersion-0.11.0-informational?style=flat-square)
+![Version: 0.12.0](https://img.shields.io/badge/Version-0.12.0-informational?style=flat-square) ![Type: application](https://img.shields.io/badge/Type-application-informational?style=flat-square) ![AppVersion: 0.12.0](https://img.shields.io/badge/AppVersion-0.12.0-informational?style=flat-square)
 
 An operator to manage the lifecycle of public cloud providers resources needed to expose endpoints on public nodes.
 
@@ -93,4 +93,10 @@ helm install kubestatic kubestatic/kubestatic -n kubestatic-system
 | affinity | object | `{}` | Affinity for Kubestitute pod assignment. |
 | serviceAccount | object | `{"annotations":{}}` | ServiceAccount setup |
 | serviceAccount.annotations | object | `{}` | Annotations added to the ServiceAccount. |
+| serviceMonitor.enabled | bool | `false` | Create a prometheus operator ServiceMonitor. |
+| serviceMonitor.additionalLabels | object | `{}` | Labels added to the ServiceMonitor. |
+| serviceMonitor.annotations | object | `{}` | Annotations added to the ServiceMonitor. |
+| serviceMonitor.interval | string | `""` | Override prometheus operator scrapping interval. |
+| serviceMonitor.scrapeTimeout | string | `""` | Override prometheus operator scrapping timeout. |
+| serviceMonitor.relabelings | list | `[]` | Relabellings to apply to samples before scraping. |
 
