@@ -29,14 +29,15 @@ import (
 
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
-	"github.com/quortex/kubestatic/api/v1alpha1"
-	"github.com/quortex/kubestatic/internal/helper"
-	"github.com/quortex/kubestatic/internal/provider"
 	appsv1 "k8s.io/api/apps/v1"
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/types"
+	"k8s.io/utils/ptr"
+
+	"github.com/quortex/kubestatic/api/v1alpha1"
+	"github.com/quortex/kubestatic/internal/provider"
 )
 
 var _ = Describe("FirewallRule Controller", func() {
@@ -161,7 +162,7 @@ var _ = Describe("FirewallRule Controller", func() {
 					Namespace: echoDepKey.Namespace,
 				},
 				Spec: appsv1.DeploymentSpec{
-					Replicas: helper.Int32Pointer(1),
+					Replicas: ptr.To(int32(1)),
 					Selector: &metav1.LabelSelector{
 						MatchLabels: echoLabels,
 					},
@@ -170,7 +171,7 @@ var _ = Describe("FirewallRule Controller", func() {
 							Labels: echoLabels,
 						},
 						Spec: corev1.PodSpec{
-							TerminationGracePeriodSeconds: helper.Int64Pointer(0),
+							TerminationGracePeriodSeconds: ptr.To(int64(0)),
 							Containers: []corev1.Container{
 								{
 									Name:  "echo",

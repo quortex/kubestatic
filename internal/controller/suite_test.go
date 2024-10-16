@@ -42,7 +42,7 @@ import (
 
 	"github.com/quortex/kubestatic/api/v1alpha1"
 	"github.com/quortex/kubestatic/internal/provider"
-	"github.com/quortex/kubestatic/internalprovider/aws"
+	"github.com/quortex/kubestatic/internal/provider/aws"
 	//+kubebuilder:scaffold:imports
 )
 
