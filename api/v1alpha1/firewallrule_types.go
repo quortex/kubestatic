@@ -51,7 +51,7 @@ type FirewallRuleSpec struct {
 	Description string `json:"description"`
 
 	// The traffic direction. Ingress applies to incoming traffic. Egress applies to outbound traffic.
-	//+kubebuilder:validation:Enum:={"Ingress","Egress"}
+	// +kubebuilder:validation:Enum:={"Ingress","Egress"}
 	Direction Direction `json:"direction"`
 
 	// The start of port range for the TCP and UDP protocols, or an ICMP/ICMPv6
@@ -70,8 +70,8 @@ type FirewallRuleSpec struct {
 	ToPort *int64 `json:"toPort,omitempty"`
 
 	// Whether to disable reconciliation of this resource for development purpose
-	//+kubebuilder:validation:Optional
-	//+kubebuilder:default:=false
+	// +kubebuilder:validation:Optional
+	// +kubebuilder:default:=false
 	DisableReconciliation bool `json:"disableReconciliation"`
 }
 
@@ -90,7 +90,8 @@ type FirewallRuleStatus struct {
 	// The current state of the FirewallRule
 	State FirewallRuleState `json:"state,omitempty"`
 
-	// The latest FirewallRule specification applied, used to make API requests to cloud providers only if the resource has been changed to avoid throttling issues.
+	// The latest FirewallRule specification applied, used to make API requests to cloud providers
+	// only if the resource has been changed to avoid throttling issues.
 	LastApplied *string `json:"lastApplied,omitempty"`
 
 	// lastTransitionTime is the last time the status transitioned from one status to another.
@@ -109,12 +110,12 @@ type FirewallRuleStatus struct {
 	NetworkInterfaceID *string `json:"networkInterfaceID,omitempty"`
 }
 
-//+kubebuilder:object:root=true
-//+kubebuilder:subresource:status
-//+kubebuilder:resource:scope=Cluster
-//+kubebuilder:printcolumn:name="Direction",type=string,JSONPath=`.spec.direction`
-//+kubebuilder:printcolumn:name="State",type=string,JSONPath=`.status.state`
-//+kubebuilder:printcolumn:name="Node",type=string,JSONPath=`.spec.nodeName`
+// +kubebuilder:object:root=true
+// +kubebuilder:subresource:status
+// +kubebuilder:resource:scope=Cluster
+// +kubebuilder:printcolumn:name="Direction",type=string,JSONPath=`.spec.direction`
+// +kubebuilder:printcolumn:name="State",type=string,JSONPath=`.status.state`
+// +kubebuilder:printcolumn:name="Node",type=string,JSONPath=`.spec.nodeName`
 
 // FirewallRule is the Schema for the firewallrules API
 type FirewallRule struct {
@@ -135,7 +136,7 @@ func (f *FirewallRule) IsAssociated() bool {
 	return f.Status.State == FirewallRuleStateAssociated
 }
 
-//+kubebuilder:object:root=true
+// +kubebuilder:object:root=true
 
 // FirewallRuleList contains a list of FirewallRule
 type FirewallRuleList struct {

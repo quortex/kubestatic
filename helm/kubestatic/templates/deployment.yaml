@@ -36,6 +36,7 @@ spec:
             - /manager
           args:
             - --metrics-bind-address={{ ternary "127.0.0.1:8080" "0.0.0.0:8080" $.Values.kubeRBACProxy.enabled }}
+            - --metrics-secure=false
             - --leader-elect
             - --cloud-provider={{ required "A valid .Values.cloudProvider entry required!" $.Values.cloudProvider }}
             - --node-min-reconciliation-interval={{ $.Values.nodeMinReconciliationInterval }}
@@ -73,7 +74,7 @@ spec:
           {{- if not $.Values.kubeRBACProxy.enabled }}
           ports:
             - containerPort: 8080
-              name: metrics
+              name: http-metrics
           {{- end }}
           resources:
             {{- toYaml .resources | nindent 12 }}
@@ -90,7 +91,7 @@ spec:
           imagePullPolicy: {{ .image.pullPolicy }}
           ports:
             - containerPort: 8443
-              name: https
+              name: https-metrics
           resources:
             {{- toYaml .resources | nindent 12 }}
         {{- end }}

@@ -23,17 +23,17 @@ import (
 // ExternalIPSpec defines the desired state of ExternalIP
 type ExternalIPSpec struct {
 	// NodeName is the node's instance on which the address must be attached
-	// +optional
+	// +kubebuilder:validation:Optional
 	NodeName string `json:"nodeName,omitempty"`
 
 	// Whether to disable reconciliation of this resource for development purpose
-	//+kubebuilder:validation:Optional
-	//+kubebuilder:default:=false
+	// +kubebuilder:validation:Optional
+	// +kubebuilder:default:=false
 	DisableReconciliation bool `json:"disableReconciliation"`
 
 	// PreventDeallocation tells if EIP should be deallocated on ExternalIP deletion
-	//+kubebuilder:validation:Optional
-	//+kubebuilder:default:=false
+	// +kubebuilder:validation:Optional
+	// +kubebuilder:default:=false
 	PreventEIPDeallocation bool `json:"preventEIPDeallocation,omitempty"`
 }
 
@@ -62,12 +62,12 @@ type ExternalIPStatus struct {
 	InstanceID *string `json:"instanceID,omitempty"`
 }
 
-//+kubebuilder:object:root=true
-//+kubebuilder:subresource:status
-//+kubebuilder:resource:scope=Cluster
-//+kubebuilder:printcolumn:name="State",type=string,JSONPath=`.status.state`
-//+kubebuilder:printcolumn:name="Public IP",type=string,JSONPath=`.status.publicIPAddress`
-//+kubebuilder:printcolumn:name="Node",type=string,JSONPath=`.spec.nodeName`
+// +kubebuilder:object:root=true
+// +kubebuilder:subresource:status
+// +kubebuilder:resource:scope=Cluster
+// +kubebuilder:printcolumn:name="State",type=string,JSONPath=`.status.state`
+// +kubebuilder:printcolumn:name="Public IP",type=string,JSONPath=`.status.publicIPAddress`
+// +kubebuilder:printcolumn:name="Node",type=string,JSONPath=`.spec.nodeName`
 
 // ExternalIP is the Schema for the externalips API
 type ExternalIP struct {
@@ -88,7 +88,7 @@ func (e *ExternalIP) IsAssociated() bool {
 	return e.Status.State == ExternalIPStateAssociated
 }
 
-//+kubebuilder:object:root=true
+// +kubebuilder:object:root=true
 
 // ExternalIPList contains a list of ExternalIP
 type ExternalIPList struct {

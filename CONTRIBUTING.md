@@ -1,6 +1,6 @@
 # How to contribute
 
-This project is maintained with **golang v1.19** and **kubebuilder v3.7.0**, please use these versions to ensure the integrity of the project.
+In order to set up a working environment to contribute to this project, you can use [mise](https://github.com/jdx/mise). The development tools needed to work on this project are declared in the [.mise.toml](/.mise.toml) file, please use these versions to ensure the integrity of the project.
 
 ## Introduction to Kubebuilder
 

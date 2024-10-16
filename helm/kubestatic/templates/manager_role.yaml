@@ -26,31 +26,6 @@ rules:
       - kubestatic.quortex.io
     resources:
       - externalips
-    verbs:
-      - create
-      - delete
-      - get
-      - list
-      - patch
-      - update
-      - watch
-  - apiGroups:
-      - kubestatic.quortex.io
-    resources:
-      - externalips/finalizers
-    verbs:
-      - update
-  - apiGroups:
-      - kubestatic.quortex.io
-    resources:
-      - externalips/status
-    verbs:
-      - get
-      - patch
-      - update
-  - apiGroups:
-      - kubestatic.quortex.io
-    resources:
       - firewallrules
     verbs:
       - create
@@ -63,12 +38,14 @@ rules:
   - apiGroups:
       - kubestatic.quortex.io
     resources:
+      - externalips/finalizers
       - firewallrules/finalizers
     verbs:
       - update
   - apiGroups:
       - kubestatic.quortex.io
     resources:
+      - externalips/status
       - firewallrules/status
     verbs:
       - get

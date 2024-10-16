@@ -1,0 +1,22 @@
+{{- if or .Values.kubeRBACProxy.enabled .Values.serviceMonitor.enabled }}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ include "kubestatic.fullname" . }}-metrics-service
+  labels:
+    {{- include "kubestatic.labels" . | nindent 4 }}
+spec:
+  ports:
+    {{- if .Values.kubeRBACProxy.enabled }}
+    - port: 8443
+      targetPort: https-metrics
+      name: https-metrics
+    {{- else }}
+    - port: 8080
+      targetPort: http-metrics
+      name: http-metrics
+    {{- end }}
+  selector:
+    {{- include "kubestatic.selectorLabels" . | nindent 4 }}
+{{- end }}
