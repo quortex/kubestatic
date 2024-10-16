@@ -5,6 +5,7 @@ import (
 	"fmt"
 
 	"github.com/aws/aws-sdk-go/aws/awserr"
+
 	"github.com/quortex/kubestatic/internal/provider"
 )
 
