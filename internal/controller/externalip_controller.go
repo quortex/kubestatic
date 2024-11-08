@@ -20,7 +20,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"time"
+	"reflect"
 
 	"github.com/go-logr/logr"
 	"github.com/google/uuid"
@@ -83,285 +83,110 @@ func (r *ExternalIPReconciler) Reconcile(ctx context.Context, req ctrl.Request) 
 		return ctrl.Result{}, nil
 	}
 
-	// Lifecycle reconciliation
-	if externalIP.ObjectMeta.DeletionTimestamp.IsZero() {
-		return r.reconcileExternalIP(ctx, log, externalIP)
-	}
-
-	// Deletion reconciliation
-	return r.reconcileExternalIPDeletion(ctx, log, externalIP)
-}
-
-func (r *ExternalIPReconciler) reconcileExternalIP(ctx context.Context, log logr.Logger, externalIP *v1alpha1.ExternalIP) (ctrl.Result, error) {
-	// 1st STEP
-	//
-	// Add finalizer
-	if !controllerutil.ContainsFinalizer(externalIP, externalIPFinalizer) {
-		controllerutil.AddFinalizer(externalIP, externalIPFinalizer)
-		log.V(1).Info("Updating ExternalIP", "finalizer", externalIPFinalizer)
-		return ctrl.Result{}, r.Update(ctx, externalIP)
-	}
-
-	// 2nd STEP
-	//
-	// Reserve external IP address
-	if externalIP.Status.State == v1alpha1.ExternalIPStateNone {
-		// Create external address
-		res, err := r.Provider.CreateAddress(ctx)
-		if err != nil {
-			log.Error(err, "Failed to create address")
-			return ctrl.Result{}, err
-		}
-		log.Info("Created address", "id", res.AddressID, "publicIP", res.PublicIP)
-
-		// Update status
-		externalIP.Status.State = v1alpha1.ExternalIPStateReserved
-		externalIP.Status.AddressID = &res.AddressID
-		externalIP.Status.PublicIPAddress = &res.PublicIP
-		log.V(1).Info(
-			"Updating ExternalIP",
-			"state", externalIP.Status.State,
-			"addressID", externalIP.Status.AddressID,
-			"PublicIPAddress", externalIP.Status.PublicIPAddress,
-		)
-		return ctrl.Result{RequeueAfter: time.Second * 5}, r.Status().Update(ctx, externalIP)
-	}
-
-	// 3rd STEP
-	//
-	// Finally associate external ip to instance network interface.
-	// This must be the last step, since this exposes the instance on the outside.
-	if externalIP.IsReserved() {
-		if externalIP.Spec.NodeName != "" {
-			// Get node from ExternalIP spec
-			var node corev1.Node
-			if err := r.Get(ctx, types.NamespacedName{Name: externalIP.Spec.NodeName}, &node); err != nil {
-				if errors.IsNotFound(err) {
-					// Invalid nodeName, remove ExternalIP nodeName attribute.
-					log.Info("Node not found. Removing it from ExternalIP spec", "nodeName", externalIP.Spec.NodeName)
-					externalIP.Spec.NodeName = ""
-					return ctrl.Result{}, r.Update(ctx, externalIP)
-				}
-				// Error reading the object - requeue the request.
-				log.Error(err, "Failed to get Node")
-				return ctrl.Result{}, err
-			}
-
-			// Retrieve node instance
-			instanceID := r.Provider.GetInstanceID(node)
-			res, err := r.Provider.GetInstance(ctx, instanceID)
-			if err != nil {
-				log.Error(err, "Failed to get instance", "id", instanceID)
-				return ctrl.Result{}, err
-			}
-
-			// Interface with index 0 is the first attached to node, the one we're interested in.
-			// Each instance has a default network interface, called the primary network interface.
-			// You cannot detach a primary network interface from an instance.
-			var networkInterface *provider.NetworkInterface
-			for _, elem := range res.NetworkInterfaces {
-				if elem != nil && *elem.DeviceID == 0 {
-					networkInterface = elem
-					break
-				}
-			}
-			if networkInterface == nil {
-				err := fmt.Errorf("no network interface with public IP found for instance %s", instanceID)
-				log.Error(err, "Cannot associate an address with this instance", "instanceID", instanceID)
-				return ctrl.Result{}, err
-			}
-
-			// Finally, associate address to instance network interface, then update status.
-			if err := r.Provider.AssociateAddress(ctx, provider.AssociateAddressRequest{
-				AddressID:          *externalIP.Status.AddressID,
-				NetworkInterfaceID: networkInterface.NetworkInterfaceID,
-			}); err != nil {
-				log.Error(
-					err,
-					"Failed to associate address",
-					"addressID", *externalIP.Status.AddressID,
-					"instanceID", instanceID,
-					"networkInterfaceID", networkInterface.NetworkInterfaceID,
-				)
-				return ctrl.Result{}, err
-			}
-			log.Info(
-				"Associated address",
-				"addressID", *externalIP.Status.AddressID,
-				"instanceID", instanceID,
-				"networkInterfaceID", networkInterface.NetworkInterfaceID,
-			)
-
-			// Update status
-			externalIP.Status.State = v1alpha1.ExternalIPStateAssociated
-			externalIP.Status.InstanceID = &instanceID
-			log.V(1).Info("Updating ExternalIP", "state", externalIP.Status.State, "InstanceID", externalIP.Status.InstanceID)
-			return ctrl.Result{RequeueAfter: time.Second * 5}, r.Status().Update(ctx, externalIP)
-		}
-
-		// No spec.nodeName, no association, end reconciliation for ExternalIP.
-		log.V(1).Info("No No spec.nodeName, no association, end reconciliation for ExternalIP.")
+	// TODO: Check what to do with the case where the nodeName is nil.
+	if externalIP.Spec.NodeName == "" {
 		return ctrl.Result{}, nil
 	}
 
-	// ExternalIP reliability check
-	//
-	// Check if the associated node still exists and disassociate it if it does not.
-	// No nodeName or no living node, set state back to "Reserved"
-	if externalIP.IsAssociated() {
-		if externalIP.Spec.NodeName != "" {
-			// Get node from ExternalIP spec
-			var node corev1.Node
-			if err := r.Get(ctx, types.NamespacedName{Name: externalIP.Spec.NodeName}, &node); err != nil {
-				if errors.IsNotFound(err) {
-					// Invalid nodeName, remove ExternalIP nodeName attribute.
-					log.Info("Node not found. Removing it from ExternalIP spec", "nodeName", externalIP.Spec.NodeName)
-
-					// Set status back to Reserved
-					externalIP.Status.State = v1alpha1.ExternalIPStateReserved
-					log.V(1).Info("Updating ExternalIP", "state", externalIP.Status.State, "InstanceID", externalIP.Status.InstanceID)
-					if err = r.Status().Update(ctx, externalIP); err != nil {
-						log.Error(err, "Failed to update ExternalIP status", "externalIP", externalIP.Name, "status", externalIP.Status.State)
-						return ctrl.Result{}, err
-					}
-
-					externalIP.Spec.NodeName = ""
-					return ctrl.Result{}, r.Update(ctx, externalIP)
-				}
-				// Error reading the object - requeue the request.
-				log.Error(err, "Failed to get Node")
-				return ctrl.Result{}, err
-			}
-
-			// Node not being deleted, reconcile externalip label
-			if node.ObjectMeta.DeletionTimestamp.IsZero() {
-				// Marshal node, ...
-				old, err := json.Marshal(node)
-				if err != nil {
-					log.Error(err, "Failed to marshal node")
-					return ctrl.Result{}, err
-				}
-
-				// ... then compute new node to marshal it...
-				node.Labels[externalIPLabel] = *externalIP.Status.PublicIPAddress
-				new, err := json.Marshal(node)
-				if err != nil {
-					log.Error(err, "Failed to marshal new node")
-					return ctrl.Result{}, err
-				}
-
-				// ... and create a patch.
-				patch, err := strategicpatch.CreateTwoWayMergePatch(old, new, node)
-				if err != nil {
-					log.Error(err, "Failed to create patch for node")
-					return ctrl.Result{}, err
-				}
-
-				// Apply patch to set node's wanted labels.
-				if err = r.Client.Patch(ctx, &node, client.RawPatch(types.MergePatchType, patch)); err != nil {
-					log.Error(err, "Failed to patch node")
-					return ctrl.Result{}, err
-				}
-
-				return ctrl.Result{}, nil
-			}
-		}
-
-		// Set state back to "Reserved", disassociate address and end reconciliation
-		return r.disassociateAddress(ctx, r.Provider, log, externalIP)
-	}
-
-	return ctrl.Result{}, nil
-}
-
-func (r *ExternalIPReconciler) reconcileExternalIPDeletion(
-	ctx context.Context,
-	log logr.Logger,
-	externalIP *v1alpha1.ExternalIP,
-) (ctrl.Result, error) {
-	// 1st STEP
-	//
-	// Reconciliation of a possible external IP associated with the instance.
-	// If an IP is associated with the instance, disassociate it.
-	if externalIP.IsAssociated() {
-		return r.disassociateAddress(ctx, r.Provider, log, externalIP)
-	}
-
-	// 2nd STEP
-	//
-	// Release unassociated address.
-	if externalIP.IsReserved() {
-		// Do not delete EIP if flag PreventEIPDeallocation is set
-		if externalIP.Status.AddressID != nil && !externalIP.Spec.PreventEIPDeallocation {
-			if err := r.Provider.DeleteAddress(ctx, *externalIP.Status.AddressID); err != nil {
-				if !provider.IsErrNotFound(err) {
-					log.Error(err, "Failed to delete Address", "addressID", *externalIP.Status.AddressID)
-					return ctrl.Result{}, err
-				}
-				log.V(1).Info("Address not found", "addressID", *externalIP.Status.AddressID)
-			}
-			log.Info("Deleted Address", "addressID", *externalIP.Status.AddressID)
-
-			// Update status
-			externalIP.Status.AddressID = nil
-		}
-		// set State to None for finalizer to delete externalIP object
-		externalIP.Status.State = v1alpha1.ExternalIPStateNone
-		log.V(1).Info("Updating ExternalIP", "state", externalIP.Status.State)
-		return ctrl.Result{RequeueAfter: time.Second * 5}, r.Status().Update(ctx, externalIP)
-	}
-
-	// 3rd STEP
-	//
-	// Remove finalizer to release ExternalIP
-	if externalIP.Status.State == v1alpha1.ExternalIPStateNone {
-		if controllerutil.ContainsFinalizer(externalIP, externalIPFinalizer) {
-			controllerutil.RemoveFinalizer(externalIP, externalIPFinalizer)
-			return ctrl.Result{}, r.Update(ctx, externalIP)
-		}
-	}
-
-	return ctrl.Result{}, nil
-}
-
-// disassociateAddress performs address disassociation tasks
-func (r *ExternalIPReconciler) disassociateAddress(
-	ctx context.Context,
-	pvd provider.Provider,
-	log logr.Logger,
-	externalIP *v1alpha1.ExternalIP,
-) (ctrl.Result, error) {
-	// Get address and disassociate it
-	if externalIP.Status.AddressID != nil {
-		res, err := pvd.GetAddress(ctx, *externalIP.Status.AddressID)
-		if err != nil {
-			log.Error(err, "Failed to retrieve address", "addressID", *externalIP.Status.AddressID)
+	// Add finalizer
+	if !controllerutil.ContainsFinalizer(externalIP, externalIPFinalizer) {
+		externalIP.ObjectMeta.Finalizers = append(externalIP.ObjectMeta.Finalizers, externalIPFinalizer)
+		if err := r.Update(ctx, externalIP); err != nil {
+			log.Error(err, "Failed to add finalizer")
 			return ctrl.Result{}, err
 		}
+		log.Info("Successfully added finalizer")
+		return ctrl.Result{}, nil
+	}
 
-		if res.AssociationID != nil {
-			if err := pvd.DisassociateAddress(ctx, provider.DisassociateAddressRequest{
-				AssociationID: *res.AssociationID,
-			}); err != nil {
-				log.Error(err, "Failed to disassociate address", "addressID", *externalIP.Status.AddressID, "instanceID", *externalIP.Status.InstanceID)
+	// Get node from ExternalIP spec
+	var node corev1.Node
+	var instanceID string
+	if externalIP.Spec.NodeName != "" {
+		if err := r.Get(ctx, types.NamespacedName{Name: externalIP.Spec.NodeName}, &node); err != nil {
+			if errors.IsNotFound(err) {
+				// Invalid nodeName, remove ExternalIP nodeName attribute.
+				log.Info("Node not found. Removing it from ExternalIP spec", "nodeName", externalIP.Spec.NodeName)
+				externalIP.Spec.NodeName = ""
+				return ctrl.Result{}, r.Update(ctx, externalIP)
+			}
+			// Error reading the object - requeue the request.
+			log.Error(err, "Failed to get Node")
+			return ctrl.Result{}, err
+		}
+		// Retrieve node instance
+		instanceID = r.Provider.GetInstanceID(node)
+	}
+
+	var status v1alpha1.ExternalIPStatus
+	var err error
+	if externalIP.ObjectMeta.DeletionTimestamp.IsZero() {
+		status, err = r.Provider.ReconcileExternalIP(ctx, log, instanceID, externalIP)
+		if err != nil {
+			log.Error(err, "Failed to reconcile ExternalIP")
+			return ctrl.Result{}, err
+		}
+		// Node not being deleted, reconcile externalip label
+		if externalIP.Spec.NodeName != "" && node.ObjectMeta.DeletionTimestamp.IsZero() {
+			// Marshal node, ...
+			old, err := json.Marshal(node)
+			if err != nil {
+				log.Error(err, "Failed to marshal node")
 				return ctrl.Result{}, err
 			}
-			log.Info("Disassociated address", "addressID", *externalIP.Status.AddressID, "instanceID", *externalIP.Status.InstanceID)
+
+			// ... then compute new node to marshal it...
+			node.Labels[externalIPLabel] = *status.PublicIPAddress
+			new, err := json.Marshal(node)
+			if err != nil {
+				log.Error(err, "Failed to marshal new node")
+				return ctrl.Result{}, err
+			}
+
+			// ... and create a patch.
+			patch, err := strategicpatch.CreateTwoWayMergePatch(old, new, node)
+			if err != nil {
+				log.Error(err, "Failed to create patch for node")
+				return ctrl.Result{}, err
+			}
+
+			// Apply patch to set node's wanted labels.
+			if err = r.Client.Patch(ctx, &node, client.RawPatch(types.MergePatchType, patch)); err != nil {
+				log.Error(err, "Failed to patch node")
+				return ctrl.Result{}, err
+			}
+		}
+	} else {
+		if err := r.Provider.ReconcileExternalIPDeletion(ctx, log, externalIP); err != nil {
+			log.Error(err, "Failed to reconcile ExternalIP deletion")
+			return ctrl.Result{}, err
 		}
 	}
 
-	// Update status
-	externalIP.Status.State = v1alpha1.ExternalIPStateReserved
-	externalIP.Status.InstanceID = nil
-	log.V(1).Info("Updating ExternalIP", "state", externalIP.Status.State)
-	if err := r.Status().Update(ctx, externalIP); err != nil {
-		log.Error(err, "Failed to update ExternalIP state", "externalIP", externalIP.Name)
-		return ctrl.Result{}, err
+	if !externalIP.DeletionTimestamp.IsZero() && controllerutil.ContainsFinalizer(externalIP, externalIPFinalizer) {
+		controllerutil.RemoveFinalizer(externalIP, externalIPFinalizer)
+		if err := r.Update(ctx, externalIP); err != nil {
+			log.Error(err, "Failed to remove finalizer")
+			return ctrl.Result{}, err
+		}
+		log.Info("Successfully removed finalizer")
+		return ctrl.Result{}, nil
 	}
 
-	log.V(1).Info("Removing ExternalIP NodeName", "externalIP", externalIP.Name)
-	externalIP.Spec.NodeName = ""
-	return ctrl.Result{}, r.Update(ctx, externalIP)
+	// Copy the existing ExternalIP to avoid mutating the original
+	existingExternalIP := externalIP.DeepCopy()
+
+	// Patch the Pool status if it differs from the desired status
+	externalIP.Status = status
+	if !reflect.DeepEqual(externalIP.Status, existingExternalIP.Status) {
+		err := r.Status().Patch(ctx, externalIP, client.MergeFrom(existingExternalIP))
+		if err != nil {
+			log.Error(err, "Failed to patch ExternalIP status")
+			return ctrl.Result{}, fmt.Errorf("failed to patch ExternalIP status: %w", err)
+		}
+	}
+
+	return ctrl.Result{}, nil
 }
 
 // SetupWithManager sets up the controller with the Manager.

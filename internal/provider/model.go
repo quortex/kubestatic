@@ -1,56 +1,7 @@
 // Package provider contains the cloud providers related interfaces and models.
 package provider
 
-// Instance is a cloud provider compute instance.
-type Instance struct {
-	// The ID of the instance.
-	InstanceID string
-
-	// The ID of the VPC in which the instance is running.
-	VpcID string
-
-	// The network interfaces for the instance.
-	NetworkInterfaces []*NetworkInterface
-}
-
-// NetworkInterface describes a network interface.
-type NetworkInterface struct {
-	// The ID of the network interface.
-	NetworkInterfaceID string
-
-	// The public IP address bound to the network interface.
-	PublicIP *string
-
-	// DeviceID of the network interface.
-	DeviceID *int64
-}
-
-// Describes an external IP address.
-type Address struct {
-	// The ID of the address.
-	AddressID string
-
-	// The ID representing the association of the address with a network interface
-	AssociationID *string
-
-	// The address public IP.
-	PublicIP string
-}
-
-// AssociateAddressRequest wraps parameters required to associate an Address to a Network interface.
-type AssociateAddressRequest struct {
-	// The ID of the address.
-	AddressID string
-
-	// The ID of the network interface that the address is associated with.
-	NetworkInterfaceID string
-}
-
-// DisassociateAddressRequest wraps parameters required to disassociate an Address to a Network interface.
-type DisassociateAddressRequest struct {
-	// The association identifier.
-	AssociationID string
-}
+import "github.com/quortex/kubestatic/api/v1alpha1"
 
 // Direction describes the traffic direction.
 // Ingress applies to incoming traffic. Egress applies to outbound traffic.
@@ -109,54 +60,6 @@ type FirewallRuleSpec struct {
 	IPPermission *IPPermission
 }
 
-// FirewallRule describes a set of permissions for a firewall.
-type FirewallRule struct {
-	// The ID of the firewall rule.
-	FirewallRuleID string
-
-	// The ID of the VPC.
-	VpcID string
-
-	FirewallRuleSpec
-}
-
-// FirewallRuleGroup describes a group of firewall rules.
-type FirewallRuleGroup struct {
-	// The name of the firewall rule group.
-	Name string
-
-	// A description for the firewall rule group. This is informational only.
-	Description string
-
-	// The FirewallRules list.
-	FirewallRules []FirewallRuleSpec
-}
-
-// CreateFirewallRuleRequest wraps parameters required to create a firewall rule.
-type CreateFirewallRuleRequest struct {
-	FirewallRuleSpec
-}
-
-// CreateFirewallRuleGroupRequest wraps parameters required to create a firewall rule group.
-type CreateFirewallRuleGroupRequest struct {
-	// The name of the firewall rule group.
-	Name string
-
-	// A description for the firewall rule group. This is informational only.
-	Description string
-
-	// The FirewallRules list.
-	FirewallRules []FirewallRuleSpec
-}
-
-// UpdateFirewallRuleRequest wraps parameters required to update a firewall rule.
-type UpdateFirewallRuleRequest struct {
-	FirewallRuleSpec
-
-	// The ID of the firewall rule.
-	FirewallRuleID string
-}
-
 // UpdateFirewallRuleRequest wraps parameters required to update a firewall rule group.
 type UpdateFirewallRuleGroupRequest struct {
 	// The ID of the firewall rule group.
@@ -166,11 +69,66 @@ type UpdateFirewallRuleGroupRequest struct {
 	FirewallRules []FirewallRuleSpec
 }
 
-// AssociateFirewallRuleRequest wraps parameters required to associate a firewall rule to a Network interface.
-type AssociateFirewallRuleRequest struct {
-	// The ID of the firewall rule.
-	FirewallRuleID string
+// EncodeFirewallRuleSpecs converts an api FirewallRule slice to a FirewallRuleSpec slice.
+func EncodeFirewallRuleSpecs(data []v1alpha1.FirewallRule) []FirewallRuleSpec {
+	if data == nil {
+		return make([]FirewallRuleSpec, 0)
+	}
 
-	// The ID of the network interface that the firewall rule is associated with.
-	NetworkInterfaceID string
+	res := make([]FirewallRuleSpec, len(data))
+	for i, e := range data {
+		res[i] = encodeFirewallRuleSpec(&e)
+	}
+	return res
+}
+
+// encodeFirewallRuleSpec converts an api FirewallRule to a FirewallRuleSpec.
+func encodeFirewallRuleSpec(data *v1alpha1.FirewallRule) FirewallRuleSpec {
+	return FirewallRuleSpec{
+		Name:        data.Name,
+		Description: data.Spec.Description,
+		Direction:   encodeDirection(data.Spec.Direction),
+		IPPermission: &IPPermission{
+			FromPort: data.Spec.FromPort,
+			Protocol: data.Spec.Protocol,
+			IPRanges: encodeIPRanges(data.Spec.IPRanges),
+			ToPort:   data.Spec.ToPort,
+		},
+	}
+}
+
+// encodeIPRange converts an api IPRange to an IPRange.
+func encodeIPRange(data *v1alpha1.IPRange) *IPRange {
+	if data == nil {
+		return nil
+	}
+
+	return &IPRange{
+		CIDR:        data.CIDR,
+		Description: data.Description,
+	}
+}
+
+// encodeIPRange converts an api IPRange slice to an IPRange slice.
+func encodeIPRanges(data []*v1alpha1.IPRange) []*IPRange {
+	if data == nil {
+		return make([]*IPRange, 0)
+	}
+
+	res := make([]*IPRange, len(data))
+	for i, e := range data {
+		res[i] = encodeIPRange(e)
+	}
+	return res
+}
+
+// encodeDirection converts an api Direction to a Direction.
+func encodeDirection(data v1alpha1.Direction) Direction {
+	switch data {
+	case v1alpha1.DirectionEgress:
+		return DirectionEgress
+	case v1alpha1.DirectionIngress:
+		return DirectionIngress
+	}
+	return Direction("")
 }
