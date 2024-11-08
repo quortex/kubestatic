@@ -5,12 +5,15 @@ import (
 	"context"
 	"reflect"
 	"sync"
+
+	"github.com/go-logr/logr"
 )
 
 // ReconcilePermissions perform create / delete on given permissions
-// to to reach the desired state of firewall rules.
+// to reach the desired state of firewall rules.
 func ReconcilePermissions(
 	ctx context.Context,
+	log logr.Logger,
 	firewallRuleID string,
 	addFunc, delFunc PermFunc,
 	want, get []*IPPermission,
@@ -20,14 +23,14 @@ func ReconcilePermissions(
 
 	// First we delete extra permissions to avoid conflicts.
 	if len(toDel) != 0 {
-		if err := applyPermissions(ctx, firewallRuleID, delFunc, toDel); err != nil {
+		if err := applyPermissions(ctx, log, firewallRuleID, delFunc, toDel); err != nil {
 			return err
 		}
 	}
 
 	// Then, create new permissions.
 	if len(toAdd) != 0 {
-		if err := applyPermissions(ctx, firewallRuleID, addFunc, toAdd); err != nil {
+		if err := applyPermissions(ctx, log, firewallRuleID, addFunc, toAdd); err != nil {
 			return err
 		}
 	}
@@ -70,12 +73,13 @@ func computePermissionRequests(want, get []*IPPermission) (toDel, toAdd []IPPerm
 }
 
 // PermFunc describes a permission function authorize / revoke ingress / egress
-type PermFunc func(ctx context.Context, firewallRuleID string, req IPPermission) error
+type PermFunc func(ctx context.Context, log logr.Logger, firewallRuleID string, req IPPermission) error
 
 // applyPermissions perform asynchronous calls on given PermFunc to
 // authorize / revoke ingress / egress permissions by batch.
 func applyPermissions(
 	ctx context.Context,
+	log logr.Logger,
 	firewallRuleID string,
 	permFunc PermFunc,
 	permissions []IPPermission,
@@ -88,7 +92,7 @@ func applyPermissions(
 		wg.Add(1)
 		go func(ctx context.Context, id string, req IPPermission) {
 			defer wg.Done()
-			if err := permFunc(ctx, id, req); err != nil {
+			if err := permFunc(ctx, log, id, req); err != nil {
 				cErr <- err
 			}
 		}(ctx, firewallRuleID, e)

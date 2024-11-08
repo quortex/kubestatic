@@ -94,9 +94,7 @@ func main() {
 		"The minimum duration to wait between two reconciliations for the same node.")
 	flag.DurationVar(&nodeReconciliationRequeueInterval, "node-reconciliation-requeue-interval", 1*time.Minute,
 		"The duration for which nodes are automatically reconciled.")
-	opts := zap.Options{
-		Development: true,
-	}
+	opts := zap.Options{}
 	opts.BindFlags(flag.CommandLine)
 	flag.Parse()
 
