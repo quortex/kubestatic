@@ -4,9 +4,9 @@ package provider
 import (
 	"context"
 	"reflect"
-	"sync"
 
 	"github.com/go-logr/logr"
+	"golang.org/x/sync/errgroup"
 )
 
 // ReconcilePermissions perform create / delete on given permissions
@@ -84,36 +84,16 @@ func applyPermissions(
 	permFunc PermFunc,
 	permissions []IPPermission,
 ) error {
-	var wg sync.WaitGroup
-	cDone := make(chan bool)
-	cErr := make(chan error)
-
+	eg, egCtx := errgroup.WithContext(ctx)
 	for _, e := range permissions {
-		wg.Add(1)
-		go func(ctx context.Context, id string, req IPPermission) {
-			defer wg.Done()
-			if err := permFunc(ctx, log, id, req); err != nil {
-				cErr <- err
-			}
-		}(ctx, firewallRuleID, e)
+		func(p IPPermission) {
+			eg.Go(func() error {
+				return permFunc(egCtx, log, firewallRuleID, p)
+			})
+		}(e)
 	}
 
-	// Final goroutine to wait until WaitGroup is done
-	go func() {
-		wg.Wait()
-		close(cDone)
-	}()
-
-	// Wait until either WaitGroup is done or an error is received through the channel
-	select {
-	case <-cDone:
-		break
-	case err := <-cErr:
-		close(cErr)
-		return err
-	}
-
-	return nil
+	return eg.Wait()
 }
 
 // containsPermission returns if given Permission slice contains Permission.
