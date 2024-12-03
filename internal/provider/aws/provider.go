@@ -11,6 +11,7 @@ import (
 	"github.com/aws/aws-sdk-go-v2/service/ec2"
 	"github.com/aws/aws-sdk-go-v2/service/ec2/types"
 	"github.com/aws/aws-sdk-go/aws"
+	"github.com/aws/smithy-go/metrics/smithyotelmetrics"
 	"github.com/go-logr/logr"
 	corev1 "k8s.io/api/core/v1"
 
@@ -143,8 +144,16 @@ func NewProvider() (provider.Provider, error) {
 		panic(err)
 	}
 
+	meterProvider, err := NewMeterProvider()
+	if err != nil {
+		panic(err)
+	}
+
 	return &awsProvider{
-		ec2: ec2.NewFromConfig(cfg),
+		ec2: ec2.NewFromConfig(cfg, func(o *ec2.Options) {
+			// https://github.com/aws/aws-sdk-go-v2/discussions/2810
+			o.MeterProvider = smithyotelmetrics.Adapt(meterProvider)
+		}),
 	}, nil
 }
 
