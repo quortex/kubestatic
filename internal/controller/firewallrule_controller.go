@@ -23,7 +23,6 @@ import (
 	"slices"
 
 	"github.com/go-logr/logr"
-	"github.com/google/uuid"
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -33,6 +32,7 @@ import (
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
+	"sigs.k8s.io/controller-runtime/pkg/log"
 
 	"github.com/quortex/kubestatic/api/v1alpha1"
 	"github.com/quortex/kubestatic/internal/provider"
@@ -49,7 +49,6 @@ const (
 // FirewallRuleReconciler reconciles a FirewallRule object
 type FirewallRuleReconciler struct {
 	client.Client
-	Log      logr.Logger
 	Scheme   *runtime.Scheme
 	Provider provider.Provider
 }
@@ -61,10 +60,9 @@ type FirewallRuleReconciler struct {
 // Reconcile is part of the main kubernetes reconciliation loop which aims to
 // move the current state of the cluster closer to the desired state.
 func (r *FirewallRuleReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Result, error) {
-	log := r.Log.WithValues("firewallrule", req.NamespacedName, "reconciliationID", uuid.New().String())
+	log := log.FromContext(ctx)
 
 	log.V(1).Info("FirewallRule reconciliation started")
-	defer log.V(1).Info("FirewallRule reconciliation done")
 
 	firewallRule := &v1alpha1.FirewallRule{}
 	if err := r.Get(ctx, req.NamespacedName, firewallRule); err != nil {
@@ -85,14 +83,19 @@ func (r *FirewallRuleReconciler) Reconcile(ctx context.Context, req ctrl.Request
 	}
 
 	if firewallRule.Spec.NodeName == nil {
+		log.V(1).Info("No nodename found on the FirewallRule")
 		return ctrl.Result{}, nil
 	}
 
 	// Add finalizer
 	if !controllerutil.ContainsFinalizer(firewallRule, firewallRuleFinalizer) {
 		firewallRule.ObjectMeta.Finalizers = append(firewallRule.ObjectMeta.Finalizers, firewallRuleFinalizer)
-		log.V(1).Info("Updating FirewallRule", "finalizer", firewallRuleFinalizer)
-		return ctrl.Result{}, r.Update(ctx, firewallRule)
+		if err := r.Update(ctx, firewallRule); err != nil {
+			log.Error(err, "Failed to add finalizer")
+			return ctrl.Result{}, err
+		}
+		log.V(1).Info("Successfully added finalizer")
+		return ctrl.Result{}, nil
 	}
 
 	previousNodeName := firewallRule.Annotations[annNodeName]
@@ -112,7 +115,13 @@ func (r *FirewallRuleReconciler) Reconcile(ctx context.Context, req ctrl.Request
 			firewallRule.Annotations = make(map[string]string, 1)
 		}
 		firewallRule.Annotations[annNodeName] = currentNodeName
-		return ctrl.Result{}, r.Client.Patch(ctx, firewallRule, existingFR)
+
+		if err := r.Client.Patch(ctx, firewallRule, existingFR); err != nil {
+			log.Error(err, "Failed to add annotation node name")
+			return ctrl.Result{}, err
+		}
+		log.V(1).Info("Successfully added annotation node name")
+		return ctrl.Result{}, nil
 	}
 
 	// Node name has changed, reconcile FirewallRules for the previous node,
@@ -125,7 +134,12 @@ func (r *FirewallRuleReconciler) Reconcile(ctx context.Context, req ctrl.Request
 
 		existingFR := client.MergeFrom(firewallRule.DeepCopy())
 		delete(firewallRule.Annotations, annNodeName)
-		return ctrl.Result{}, r.Client.Patch(ctx, firewallRule, existingFR)
+		if err := r.Client.Patch(ctx, firewallRule, existingFR); err != nil {
+			log.Error(err, "Failed to remove annotation node name")
+			return ctrl.Result{}, err
+		}
+		log.V(1).Info("Successfully removed annotation node name")
+		return ctrl.Result{}, nil
 	}
 
 	// Node name has not changed, reconcile FirewallRules for the current node
@@ -143,7 +157,10 @@ func (r *FirewallRuleReconciler) Reconcile(ctx context.Context, req ctrl.Request
 			log.Error(err, "Failed to remove finalizer")
 			return ctrl.Result{}, err
 		}
+		log.V(1).Info("Successfully removed finalizer")
 	}
+
+	log.Info("FirewallRule successfully reconciled")
 
 	return ctrl.Result{}, nil
 }
