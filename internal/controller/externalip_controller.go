@@ -22,8 +22,6 @@ import (
 	"fmt"
 	"reflect"
 
-	"github.com/go-logr/logr"
-	"github.com/google/uuid"
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/runtime"
@@ -33,6 +31,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
 	"sigs.k8s.io/controller-runtime/pkg/handler"
+	"sigs.k8s.io/controller-runtime/pkg/log"
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 
 	"github.com/quortex/kubestatic/api/v1alpha1"
@@ -47,7 +46,6 @@ const (
 // ExternalIPReconciler reconciles a ExternalIP object
 type ExternalIPReconciler struct {
 	client.Client
-	Log      logr.Logger
 	Scheme   *runtime.Scheme
 	Provider provider.Provider
 }
@@ -60,10 +58,8 @@ type ExternalIPReconciler struct {
 // Reconcile is part of the main kubernetes reconciliation loop which aims to
 // move the current state of the cluster closer to the desired state.
 func (r *ExternalIPReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Result, error) {
-	log := r.Log.WithValues("externalip", req.NamespacedName, "reconciliationID", uuid.New().String())
-
+	log := log.FromContext(ctx)
 	log.V(1).Info("ExternalIP reconciliation started")
-	defer log.V(1).Info("ExternalIP reconciliation done")
 
 	externalIP := &v1alpha1.ExternalIP{}
 	if err := r.Get(ctx, req.NamespacedName, externalIP); err != nil {
@@ -90,7 +86,7 @@ func (r *ExternalIPReconciler) Reconcile(ctx context.Context, req ctrl.Request) 
 			log.Error(err, "Failed to add finalizer")
 			return ctrl.Result{}, err
 		}
-		log.Info("Successfully added finalizer")
+		log.V(1).Info("Successfully added finalizer")
 		return ctrl.Result{}, nil
 	}
 
@@ -168,7 +164,7 @@ func (r *ExternalIPReconciler) Reconcile(ctx context.Context, req ctrl.Request) 
 			log.Error(err, "Failed to remove finalizer")
 			return ctrl.Result{}, err
 		}
-		log.Info("Successfully removed finalizer")
+		log.V(1).Info("Successfully removed finalizer")
 		return ctrl.Result{}, nil
 	}
 
@@ -185,6 +181,8 @@ func (r *ExternalIPReconciler) Reconcile(ctx context.Context, req ctrl.Request) 
 		}
 	}
 
+	log.Info("ExternalIP successfully reconciled")
+
 	return ctrl.Result{}, nil
 }
 
@@ -195,7 +193,7 @@ func (r *ExternalIPReconciler) SetupWithManager(mgr ctrl.Manager) error {
 		Watches(
 			&corev1.Node{},
 			handler.EnqueueRequestsFromMapFunc(func(ctx context.Context, o client.Object) []reconcile.Request {
-				log := r.Log.WithName("nodemapper")
+				log := mgr.GetLogger().WithName("nodemapper")
 				node := o.(*corev1.Node)
 
 				log.V(1).Info("List all ExternalIP")

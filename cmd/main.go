@@ -185,7 +185,6 @@ func main() {
 
 	if err = (&controller.ExternalIPReconciler{
 		Client:   mgr.GetClient(),
-		Log:      ctrl.Log.WithName("controllers").WithName("ExternalIP"),
 		Scheme:   mgr.GetScheme(),
 		Provider: pvd,
 	}).SetupWithManager(mgr); err != nil {
@@ -194,7 +193,6 @@ func main() {
 	}
 	if err = (&controller.NodeReconciler{
 		Client:                        mgr.GetClient(),
-		Log:                           ctrl.Log.WithName("controllers").WithName("Node"),
 		Scheme:                        mgr.GetScheme(),
 		PreventEIPDeallocation:        preventEIPDeallocation,
 		MinReconciliationInterval:     nodeMinReconciliationInterval,
@@ -205,7 +203,6 @@ func main() {
 	}
 	if err = (&controller.FirewallRuleReconciler{
 		Client:   mgr.GetClient(),
-		Log:      ctrl.Log.WithName("controllers").WithName("FirewallRule"),
 		Scheme:   mgr.GetScheme(),
 		Provider: pvd,
 	}).SetupWithManager(mgr); err != nil {
