@@ -2,9 +2,12 @@
 package converter
 
 import (
+	"errors"
 	"fmt"
 
-	"github.com/aws/aws-sdk-go/aws/awserr"
+	"github.com/aws/smithy-go"
+	//smithyhttp "github.com/aws/smithy-go/transport/http"
+	//awshttp "github.com/aws/aws-sdk-go-v2/aws/transport/http"
 
 	"github.com/quortex/kubestatic/internal/provider"
 )
@@ -15,8 +18,8 @@ func DecodeEC2Error(msg string, err error) error {
 		return nil
 	}
 
-	if aerr, ok := err.(awserr.Error); ok {
-		switch aerr.Code() {
+	if serr, ok := err.(*smithy.OperationError); ok { // TODO: check if this is the right type
+		switch serr.Err.Error() {
 		case
 			"InvalidAddress.NotFound",
 			"InvalidAddressID.NotFound",
@@ -40,8 +43,9 @@ func DecodeCommonError(msg string, err error) error {
 
 	msg = fmt.Sprintf("%s: %s", msg, err.Error())
 
-	if aerr, ok := err.(awserr.Error); ok {
-		switch aerr.Code() {
+	var genErr *smithy.GenericAPIError
+	if errors.As(err, &genErr) {
+		switch genErr.ErrorCode() {
 		case
 			"AuthFailure",
 			"UnauthorizedOperation",
@@ -58,7 +62,13 @@ func DecodeCommonError(msg string, err error) error {
 			"MalformedQueryString",
 			"ValidationError":
 			return &provider.Error{Code: provider.BadRequestError, Msg: msg}
+		case
+			"RulesPerSecurityGroupLimitExceeded",
+			"Throttling":
+			return &provider.Error{Code: provider.RulesPerSecurityGroupLimitExceededError, Msg: msg}
 		}
+
 	}
+
 	return &provider.Error{Code: provider.InternalError, Msg: msg}
 }
