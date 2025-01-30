@@ -442,7 +442,7 @@ func (p *awsProvider) ReconcileFirewallRules(
 	firewallRules []v1alpha1.FirewallRule,
 ) (v1alpha1.FirewallRuleStatus, []kmetav1.Condition, error) {
 	status := v1alpha1.FirewallRuleStatus{
-		State: v1alpha1.FirewallRuleStateNotAuthorized,
+		State: v1alpha1.FirewallRuleStatePending,
 	}
 
 	conditions := []kmetav1.Condition{}
@@ -465,7 +465,7 @@ func (p *awsProvider) ReconcileFirewallRules(
 			conditions = append(conditions, kmetav1.Condition{
 				Type:    v1alpha1.FirewallRuleConditionTypeSecurityGroupCreated,
 				Status:  kmetav1.ConditionFalse,
-				Reason:  "SecurityGroupNotFound",
+				Reason:  v1alpha1.FirewallRuleConditionReasonSecurityGroupNotFound,
 				Message: "Security group not found",
 			})
 			return status, conditions, fmt.Errorf("failed to create security group: %w", err)
@@ -629,7 +629,7 @@ func (p *awsProvider) ReconcileFirewallRules(
 		return status, conditions, fmt.Errorf("failed to apply security group egress permissions: %w", err)
 	}
 
-	status.State = v1alpha1.FirewallRuleStateAuthorized
+	status.State = v1alpha1.FirewallRuleStateApplied
 	conditions = append(
 		conditions,
 		kmetav1.Condition{
@@ -663,7 +663,7 @@ func (p *awsProvider) ReconcileFirewallRulesDeletion(
 	securityGroup, err := p.getSecurityGroup(ctx, Managed(), WithNodeName(nodeName))
 	if err != nil {
 		// The security group does not exist, end of reconciliation
-		if err.(*provider.Error).Code != provider.NotFoundError {
+		if err.(*provider.Error).Code == provider.NotFoundError {
 			return nil
 		}
 		return fmt.Errorf("failed to get security group: %w", err)

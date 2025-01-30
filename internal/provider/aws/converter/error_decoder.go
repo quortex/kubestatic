@@ -6,8 +6,6 @@ import (
 	"fmt"
 
 	"github.com/aws/smithy-go"
-	//smithyhttp "github.com/aws/smithy-go/transport/http"
-	//awshttp "github.com/aws/aws-sdk-go-v2/aws/transport/http"
 
 	"github.com/quortex/kubestatic/internal/provider"
 )
@@ -18,8 +16,9 @@ func DecodeEC2Error(msg string, err error) error {
 		return nil
 	}
 
-	if serr, ok := err.(*smithy.OperationError); ok { // TODO: check if this is the right type
-		switch serr.Err.Error() {
+	var genErr *smithy.GenericAPIError
+	if errors.As(err, &genErr) {
+		switch genErr.ErrorCode() {
 		case
 			"InvalidAddress.NotFound",
 			"InvalidAddressID.NotFound",

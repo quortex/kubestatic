@@ -80,8 +80,8 @@ type FirewallRuleState string
 
 // All defined FirewallRuleStates
 const (
-	FirewallRuleStateAuthorized    FirewallRuleState = "Authorized"
-	FirewallRuleStateNotAuthorized FirewallRuleState = "NotAuthorized"
+	FirewallRuleStateApplied FirewallRuleState = "Applied"
+	FirewallRuleStatePending FirewallRuleState = "Pending"
 )
 
 // The list of condition types.
@@ -94,6 +94,7 @@ const (
 // The list of condition reasons.
 const (
 	FirewallRuleConditionReasonSecurityGroupCreated                   = "SecurityGroupCreated"
+	FirewallRuleConditionReasonSecurityGroupNotFound                  = "SecurityGroupCreated"
 	FirewallRuleConditionReasonNetworkInterfaceAssociated             = "NetworkInterfaceAssociated"
 	FirewallRuleConditionReasonNetworkInterfaceNotAssociated          = "NetworkInterfaceNotAssociated"
 	FirewallRuleConditionReasonSecurityGroupIngressInputNotAuthorized = "SecurityGroupIngressInputNotAuthorized"

@@ -18,13 +18,14 @@ package controller
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"reflect"
 	"slices"
 
 	"github.com/go-logr/logr"
 	corev1 "k8s.io/api/core/v1"
-	"k8s.io/apimachinery/pkg/api/errors"
+	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/api/meta"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
@@ -67,7 +68,7 @@ func (r *FirewallRuleReconciler) Reconcile(ctx context.Context, req ctrl.Request
 
 	firewallRule := &v1alpha1.FirewallRule{}
 	if err := r.Get(ctx, req.NamespacedName, firewallRule); err != nil {
-		if errors.IsNotFound(err) {
+		if apierrors.IsNotFound(err) {
 			// Request object not found, could have been deleted after reconcile request.
 			// Return and don't requeue
 			log.Info("FirewallRule resource not found. Ignoring since object must be deleted")
@@ -227,10 +228,9 @@ func (r *FirewallRuleReconciler) reconcileFirewallRules(
 	nodeName string,
 	firewallRules []v1alpha1.FirewallRule,
 ) error {
-
 	var node corev1.Node
 	if err := r.Get(ctx, types.NamespacedName{Name: nodeName}, &node); err != nil {
-		if errors.IsNotFound(err) {
+		if apierrors.IsNotFound(err) {
 			if err := r.Provider.ReconcileFirewallRulesDeletion(ctx, log, nodeName); err != nil {
 				log.Error(err, "Failed to reconcile FirewallRule deletion")
 				return err
@@ -246,18 +246,18 @@ func (r *FirewallRuleReconciler) reconcileFirewallRules(
 	if err != nil {
 		for _, fr := range firewallRules {
 			for _, condition := range conditions {
+				condition.ObservedGeneration = fr.Generation
 				meta.SetStatusCondition(&status.Conditions, condition)
-				condition.ObservedGeneration = fr.GetGeneration()
 			}
 			existingFR := fr.DeepCopy()
 			fr.Status = status
 			fr.Status.LastTransitionTime = existingFR.Status.LastTransitionTime
 			if !reflect.DeepEqual(fr.Status, existingFR.Status) {
 				fr.Status.LastTransitionTime = metav1.Now()
-				err := r.Status().Patch(ctx, &fr, client.MergeFrom(existingFR))
-				if err != nil {
-					log.Error(err, "Failed to patch FirewallRule status")
-					return fmt.Errorf("failed to patch FirewallRule status: %w", err)
+				patchErr := r.Status().Patch(ctx, &fr, client.MergeFrom(existingFR))
+				if patchErr != nil {
+					log.Error(errors.Join(patchErr, err), "Failed to patch FirewallRule status during error handling")
+					return fmt.Errorf("failed to patch FirewallRule status during error handling: %w", errors.Join(patchErr, err))
 				}
 			}
 		}

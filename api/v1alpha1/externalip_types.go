@@ -60,10 +60,6 @@ type ExternalIPStatus struct {
 
 	// The instance identifier
 	InstanceID *string `json:"instanceID,omitempty"`
-
-	// Current conditions of the externalip.
-	// +kubebuilder:validation:Optional
-	Conditions []metav1.Condition `json:"conditions,omitempty"`
 }
 
 // +kubebuilder:object:root=true
