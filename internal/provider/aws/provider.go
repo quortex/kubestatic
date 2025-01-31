@@ -456,18 +456,18 @@ func (p *awsProvider) ReconcileFirewallRules(
 	// Get the security group associated with the instance
 	securityGroup, err := p.getSecurityGroup(ctx, Managed(), WithVPCID(aws.StringValue(instance.VpcId)), WithNodeName(nodeName))
 	if err != nil && err.(*provider.Error).Code != provider.NotFoundError {
+		conditions = append(conditions, kmetav1.Condition{
+			Type:    v1alpha1.FirewallRuleConditionTypeSecurityGroupCreated,
+			Status:  kmetav1.ConditionFalse,
+			Reason:  v1alpha1.FirewallRuleConditionReasonSecurityGroupNotFound,
+			Message: "Security group not found",
+		})
 		return status, conditions, fmt.Errorf("failed to get security group: %w", err)
 	}
 
 	if securityGroup == nil {
 		securityGroupID, err := p.createSecurityGroup(ctx, aws.StringValue(instance.VpcId), nodeName, instanceID)
 		if err != nil {
-			conditions = append(conditions, kmetav1.Condition{
-				Type:    v1alpha1.FirewallRuleConditionTypeSecurityGroupCreated,
-				Status:  kmetav1.ConditionFalse,
-				Reason:  v1alpha1.FirewallRuleConditionReasonSecurityGroupNotFound,
-				Message: "Security group not found",
-			})
 			return status, conditions, fmt.Errorf("failed to create security group: %w", err)
 		}
 
