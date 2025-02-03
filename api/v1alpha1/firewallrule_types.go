@@ -86,20 +86,17 @@ const (
 
 // The list of condition types.
 const (
-	FirewallRuleConditionTypeSecurityGroupCreated         = "SecurityGroupCreated"
-	FirewallRuleConditionTypeNetworkInterfaceAssociated   = "NetworkInterfaceAssociated"
-	FirewallRuleConditionTypeAuthorizeRuleInSecurityGroup = "AuthorizedRuleInSecurityGroup"
+	FirewallRuleConditionTypeSecurityGroupCreated        = "SecurityGroupCreated"
+	FirewallRuleConditionTypeNetworkInterfaceAssociated  = "NetworkInterfaceAssociated"
+	FirewallRuleConditionTypeSecurityGroupRuleAuthorized = "SecurityGroupRuleAuthorized"
 )
 
 // The list of condition reasons.
 const (
-	FirewallRuleConditionReasonSecurityGroupCreated                   = "SecurityGroupCreated"
-	FirewallRuleConditionReasonSecurityGroupNotFound                  = "SecurityGroupCreated"
-	FirewallRuleConditionReasonNetworkInterfaceAssociated             = "NetworkInterfaceAssociated"
-	FirewallRuleConditionReasonNetworkInterfaceNotAssociated          = "NetworkInterfaceNotAssociated"
-	FirewallRuleConditionReasonSecurityGroupIngressInputNotAuthorized = "SecurityGroupIngressInputNotAuthorized"
-	FirewallRuleConditionReasonSecurityGroupEgressInputNotAuthorized  = "SecurityGroupEgressInputNotAuthorized"
-	FirewallRuleConditionReasonSecurityGroupRuleAuthorized            = "SecurityGroupRuleAuthorized"
+	FirewallRuleConditionReasonProviderError               = "ProviderError"
+	FirewallRuleConditionReasonSecurityGroupCreated        = "SecurityGroupCreated"
+	FirewallRuleConditionReasonNetworkInterfaceAssociated  = "NetworkInterfaceAssociated"
+	FirewallRuleConditionReasonSecurityGroupRuleAuthorized = "SecurityGroupRuleAuthorized"
 )
 
 // FirewallRuleStatus defines the observed state of FirewallRule
