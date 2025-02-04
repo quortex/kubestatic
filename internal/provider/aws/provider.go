@@ -14,6 +14,7 @@ import (
 	"github.com/aws/smithy-go/metrics/smithyotelmetrics"
 	"github.com/go-logr/logr"
 	corev1 "k8s.io/api/core/v1"
+	kmetav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 
 	"github.com/quortex/kubestatic/api/v1alpha1"
 	"github.com/quortex/kubestatic/internal/provider"
@@ -439,28 +440,43 @@ func (p *awsProvider) ReconcileFirewallRules(
 	log logr.Logger,
 	nodeName, instanceID string,
 	firewallRules []v1alpha1.FirewallRule,
-) (v1alpha1.FirewallRuleStatus, error) {
+) (v1alpha1.FirewallRuleStatus, []kmetav1.Condition, error) {
 	status := v1alpha1.FirewallRuleStatus{
-		State: v1alpha1.FirewallRuleStateNone,
+		State: v1alpha1.FirewallRuleStatePending,
 	}
+
+	conditions := []kmetav1.Condition{}
 
 	// Get the instance
 	instance, err := p.getInstance(ctx, instanceID)
 	if err != nil {
-		return status, fmt.Errorf("failed to get instance: %w", err)
+		return status, conditions, fmt.Errorf("failed to get instance: %w", err)
 	}
 
 	// Get the security group associated with the instance
 	securityGroup, err := p.getSecurityGroup(ctx, Managed(), WithVPCID(aws.StringValue(instance.VpcId)), WithNodeName(nodeName))
 	if err != nil && err.(*provider.Error).Code != provider.NotFoundError {
-		return status, fmt.Errorf("failed to get security group: %w", err)
+		conditions = append(conditions, kmetav1.Condition{
+			Type:    v1alpha1.FirewallRuleConditionTypeSecurityGroupCreated,
+			Status:  kmetav1.ConditionUnknown,
+			Reason:  v1alpha1.FirewallRuleConditionReasonProviderError,
+			Message: fmt.Sprintf("Fail to get security group from AWS : %s", err),
+		})
+		return status, conditions, fmt.Errorf("failed to get security group: %w", err)
 	}
 
 	if securityGroup == nil {
 		securityGroupID, err := p.createSecurityGroup(ctx, aws.StringValue(instance.VpcId), nodeName, instanceID)
 		if err != nil {
-			return status, fmt.Errorf("failed to create security group: %w", err)
+			conditions = append(conditions, kmetav1.Condition{
+				Type:    v1alpha1.FirewallRuleConditionTypeSecurityGroupCreated,
+				Status:  kmetav1.ConditionFalse,
+				Reason:  v1alpha1.FirewallRuleConditionReasonProviderError,
+				Message: fmt.Sprintf("Failed to create security group: %s", err),
+			})
+			return status, conditions, fmt.Errorf("failed to create security group: %w", err)
 		}
+
 		log.Info("Security group created", "securityGroupID", securityGroupID)
 
 		securityGroup, err = p.getSecurityGroup(
@@ -471,23 +487,51 @@ func (p *awsProvider) ReconcileFirewallRules(
 			WithSecurityGroupID(securityGroupID),
 		)
 		if err != nil {
-			return status, fmt.Errorf("failed to get security group: %w", err)
+			conditions = append(conditions, kmetav1.Condition{
+				Type:    v1alpha1.FirewallRuleConditionTypeNetworkInterfaceAssociated,
+				Status:  kmetav1.ConditionUnknown,
+				Reason:  v1alpha1.FirewallRuleConditionReasonProviderError,
+				Message: fmt.Sprintf("Failed to get security group: %s", err),
+			})
+			return status, conditions, fmt.Errorf("failed to get security group: %w", err)
 		}
 	}
+
+	conditions = append(
+		conditions,
+		kmetav1.Condition{
+			Type:    v1alpha1.FirewallRuleConditionTypeSecurityGroupCreated,
+			Status:  kmetav1.ConditionTrue,
+			Reason:  v1alpha1.FirewallRuleConditionReasonSecurityGroupCreated,
+			Message: fmt.Sprintf("Security group created with nodename %s in %s", nodeName, aws.StringValue(instance.VpcId)),
+		},
+	)
+
 	securityGroupID := aws.StringValue(securityGroup.GroupId)
-	status.State = v1alpha1.FirewallRuleStateReserved
 	status.FirewallRuleID = securityGroup.GroupId
 
 	// Get the first network interface with a public IP address
 	networkInterface, err := eniWithPublicIP(instance)
 	if err != nil {
-		return status, fmt.Errorf("failed to get network interface with public IP: %w", err)
+		conditions = append(conditions, kmetav1.Condition{
+			Type:    v1alpha1.FirewallRuleConditionTypeNetworkInterfaceAssociated,
+			Status:  kmetav1.ConditionUnknown,
+			Reason:  v1alpha1.FirewallRuleConditionReasonProviderError,
+			Message: fmt.Sprintf("Failed to get network interface with public IP: %s", err),
+		})
+		return status, conditions, fmt.Errorf("failed to get network interface with public IP: %w", err)
 	}
 
 	// Get all network interfaces associated with the security group
 	networkInterfaces, err := p.getNetworkInterfaces(ctx, securityGroupID)
 	if err != nil {
-		return status, fmt.Errorf("failed to list network interfaces: %w", err)
+		conditions = append(conditions, kmetav1.Condition{
+			Type:    v1alpha1.FirewallRuleConditionTypeNetworkInterfaceAssociated,
+			Status:  kmetav1.ConditionUnknown,
+			Reason:  v1alpha1.FirewallRuleConditionReasonProviderError,
+			Message: fmt.Sprintf("Failed to list network interfaces: %s", err),
+		})
+		return status, conditions, fmt.Errorf("failed to list network interfaces: %w", err)
 	}
 
 	isAssociated := false
@@ -509,7 +553,13 @@ func (p *awsProvider) ReconcileFirewallRules(
 			Groups:             groups,
 		})
 		if err != nil {
-			return status, fmt.Errorf("failed to modify network interface attribute: %w", err)
+			conditions = append(conditions, kmetav1.Condition{
+				Type:    v1alpha1.FirewallRuleConditionTypeNetworkInterfaceAssociated,
+				Status:  kmetav1.ConditionFalse,
+				Reason:  v1alpha1.FirewallRuleConditionReasonProviderError,
+				Message: fmt.Sprintf("Failed to modify network interface attribute: %s", err),
+			})
+			return status, conditions, fmt.Errorf("failed to modify network interface attribute: %w", err)
 		}
 		log.Info("Security group disassociated from network interface", "securityGroupID", securityGroupID, "networkInterfaceID", ni.NetworkInterfaceId)
 	}
@@ -529,16 +579,35 @@ func (p *awsProvider) ReconcileFirewallRules(
 			Groups:             groups,
 		})
 		if err != nil {
-			return status, fmt.Errorf("failed to modify network interface attribute: %w", err)
+			conditions = append(
+				conditions,
+				kmetav1.Condition{
+					Type:    v1alpha1.FirewallRuleConditionTypeNetworkInterfaceAssociated,
+					Status:  kmetav1.ConditionFalse,
+					Reason:  v1alpha1.FirewallRuleConditionReasonProviderError,
+					Message: fmt.Sprintf("Security group not associated with network interface %s: %s", aws.StringValue(networkInterface.NetworkInterfaceId), err),
+				},
+			)
+			return status, conditions, fmt.Errorf("failed to modify network interface attribute: %w", err)
 		}
 		log.Info("Security group associated with network interface",
 			"securityGroupID", securityGroupID,
 			"networkInterfaceID", networkInterface.NetworkInterfaceId,
 		)
 	}
+
+	conditions = append(
+		conditions,
+		kmetav1.Condition{
+			Type:    v1alpha1.FirewallRuleConditionTypeNetworkInterfaceAssociated,
+			Status:  kmetav1.ConditionTrue,
+			Reason:  v1alpha1.FirewallRuleConditionReasonNetworkInterfaceAssociated,
+			Message: fmt.Sprintf("Security group associated with network interface %s", aws.StringValue(networkInterface.NetworkInterfaceId)),
+		},
+	)
+
 	status.InstanceID = &instanceID
 	status.NetworkInterfaceID = networkInterface.NetworkInterfaceId
-	status.State = v1alpha1.FirewallRuleStateAssociated
 
 	frSpecs := provider.EncodeFirewallRuleSpecs(firewallRules)
 
@@ -552,7 +621,28 @@ func (p *awsProvider) ReconcileFirewallRules(
 		provider.GetIngressIPPermissions(frSpecs),
 		converter.DecodeIpPermissions(securityGroup.IpPermissions),
 	); err != nil {
-		return status, fmt.Errorf("failed to apply security group ingress permissions: %w", err)
+		if provider.IsErrRulesPerSecurityGroupLimitExceeded(err) {
+			conditions = append(
+				conditions,
+				kmetav1.Condition{
+					Type:    v1alpha1.FirewallRuleConditionTypeSecurityGroupRuleAuthorized,
+					Status:  kmetav1.ConditionFalse,
+					Reason:  v1alpha1.FirewallRuleConditionReasonProviderError,
+					Message: "Could not created ingress rule: the maximum number of rules per security group has been reached",
+				},
+			)
+		} else {
+			conditions = append(
+				conditions,
+				kmetav1.Condition{
+					Type:    v1alpha1.FirewallRuleConditionTypeSecurityGroupRuleAuthorized,
+					Status:  kmetav1.ConditionFalse,
+					Reason:  v1alpha1.FirewallRuleConditionReasonProviderError,
+					Message: fmt.Sprintf("Failed to reconcile permissions : %s", err),
+				},
+			)
+		}
+		return status, conditions, fmt.Errorf("failed to apply security group ingress permissions: %w", err)
 	}
 
 	// Apply Egress permissions reconciliation
@@ -565,10 +655,42 @@ func (p *awsProvider) ReconcileFirewallRules(
 		provider.GetEgressIPPermissions(frSpecs),
 		converter.DecodeIpPermissions(securityGroup.IpPermissionsEgress),
 	); err != nil {
-		return status, fmt.Errorf("failed to apply security group egress permissions: %w", err)
+		if provider.IsErrRulesPerSecurityGroupLimitExceeded(err) {
+			conditions = append(
+				conditions,
+				kmetav1.Condition{
+					Type:    v1alpha1.FirewallRuleConditionTypeSecurityGroupRuleAuthorized,
+					Status:  kmetav1.ConditionFalse,
+					Reason:  v1alpha1.FirewallRuleConditionReasonProviderError,
+					Message: "Could not created egress rule: the maximum number of rules per security group has been reached",
+				},
+			)
+		} else {
+			conditions = append(
+				conditions,
+				kmetav1.Condition{
+					Type:    v1alpha1.FirewallRuleConditionTypeSecurityGroupRuleAuthorized,
+					Status:  kmetav1.ConditionFalse,
+					Reason:  v1alpha1.FirewallRuleConditionReasonProviderError,
+					Message: fmt.Sprintf("Failed to reconcile permissions : %s", err),
+				},
+			)
+		}
+		return status, conditions, fmt.Errorf("failed to apply security group egress permissions: %w", err)
 	}
 
-	return status, nil
+	status.State = v1alpha1.FirewallRuleStateApplied
+	conditions = append(
+		conditions,
+		kmetav1.Condition{
+			Type:    v1alpha1.FirewallRuleConditionTypeSecurityGroupRuleAuthorized,
+			Status:  kmetav1.ConditionTrue,
+			Reason:  v1alpha1.FirewallRuleConditionReasonSecurityGroupRuleAuthorized,
+			Message: "The rule has been successfully authorized in the security group",
+		},
+	)
+
+	return status, conditions, nil
 }
 
 // ReconcileFirewallRulesDeletion reconciles the deletion of firewall rules for a given node.
@@ -591,7 +713,7 @@ func (p *awsProvider) ReconcileFirewallRulesDeletion(
 	securityGroup, err := p.getSecurityGroup(ctx, Managed(), WithNodeName(nodeName))
 	if err != nil {
 		// The security group does not exist, end of reconciliation
-		if err.(*provider.Error).Code != provider.NotFoundError {
+		if err.(*provider.Error).Code == provider.NotFoundError {
 			return nil
 		}
 		return fmt.Errorf("failed to get security group: %w", err)

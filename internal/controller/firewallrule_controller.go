@@ -18,13 +18,15 @@ package controller
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"reflect"
 	"slices"
 
 	"github.com/go-logr/logr"
 	corev1 "k8s.io/api/core/v1"
-	"k8s.io/apimachinery/pkg/api/errors"
+	apierrors "k8s.io/apimachinery/pkg/api/errors"
+	"k8s.io/apimachinery/pkg/api/meta"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/types"
@@ -62,11 +64,11 @@ type FirewallRuleReconciler struct {
 func (r *FirewallRuleReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Result, error) {
 	log := log.FromContext(ctx)
 
-	log.V(1).Info("FirewallRule reconciliation started")
+	log.Info("FirewallRule reconciliation started")
 
 	firewallRule := &v1alpha1.FirewallRule{}
 	if err := r.Get(ctx, req.NamespacedName, firewallRule); err != nil {
-		if errors.IsNotFound(err) {
+		if apierrors.IsNotFound(err) {
 			// Request object not found, could have been deleted after reconcile request.
 			// Return and don't requeue
 			log.Info("FirewallRule resource not found. Ignoring since object must be deleted")
@@ -228,7 +230,7 @@ func (r *FirewallRuleReconciler) reconcileFirewallRules(
 ) error {
 	var node corev1.Node
 	if err := r.Get(ctx, types.NamespacedName{Name: nodeName}, &node); err != nil {
-		if errors.IsNotFound(err) {
+		if apierrors.IsNotFound(err) {
 			if err := r.Provider.ReconcileFirewallRulesDeletion(ctx, log, nodeName); err != nil {
 				log.Error(err, "Failed to reconcile FirewallRule deletion")
 				return err
@@ -240,13 +242,34 @@ func (r *FirewallRuleReconciler) reconcileFirewallRules(
 		return err
 	}
 
-	status, err := r.Provider.ReconcileFirewallRules(ctx, log, nodeName, r.Provider.GetInstanceID(node), firewallRules)
+	status, conditions, err := r.Provider.ReconcileFirewallRules(ctx, log, nodeName, r.Provider.GetInstanceID(node), firewallRules)
 	if err != nil {
+		for _, fr := range firewallRules {
+			for _, condition := range conditions {
+				condition.ObservedGeneration = fr.Generation
+				meta.SetStatusCondition(&status.Conditions, condition)
+			}
+			existingFR := fr.DeepCopy()
+			fr.Status = status
+			fr.Status.LastTransitionTime = existingFR.Status.LastTransitionTime
+			if !reflect.DeepEqual(fr.Status, existingFR.Status) {
+				fr.Status.LastTransitionTime = metav1.Now()
+				patchErr := r.Status().Patch(ctx, &fr, client.MergeFrom(existingFR))
+				if patchErr != nil {
+					log.Error(errors.Join(patchErr, err), "Failed to patch FirewallRule status during error handling")
+					return fmt.Errorf("failed to patch FirewallRule status during error handling: %w", errors.Join(patchErr, err))
+				}
+			}
+		}
 		log.Error(err, "Failed to reconcile FirewallRule")
 		return err
 	}
 
 	for _, fr := range firewallRules {
+		for _, condition := range conditions {
+			meta.SetStatusCondition(&status.Conditions, condition)
+			condition.ObservedGeneration = fr.GetGeneration()
+		}
 		existingFR := fr.DeepCopy()
 		fr.Status = status
 		fr.Status.LastTransitionTime = existingFR.Status.LastTransitionTime

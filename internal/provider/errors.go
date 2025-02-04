@@ -17,6 +17,8 @@ const (
 	NotFoundError ErrorCode = "NotFoundError"
 	// ConflictError indicates that the request could not be processed because of conflict in the current state of the resource
 	ConflictError ErrorCode = "ConflictError"
+	// RulesPerSecurityGroupLimitExceededError is when the request could not be processed because of a limit exceeded
+	RulesPerSecurityGroupLimitExceededError ErrorCode = "RulesPerSecurityGroupLimitExceeded"
 	// InternalError is when there was an unexpected error in the server
 	InternalError ErrorCode = "InternalError"
 )
@@ -67,6 +69,14 @@ func IsErrConflict(err error) bool {
 func IsErrInternal(err error) bool {
 	if e, ok := err.(*Error); ok {
 		return e.Code == InternalError
+	}
+	return false
+}
+
+// IsErrRulesPerSecurityGroupLimitExceeded returns if error is kind InternalError
+func IsErrRulesPerSecurityGroupLimitExceeded(err error) bool {
+	if e, ok := err.(*Error); ok {
+		return e.Code == RulesPerSecurityGroupLimitExceededError
 	}
 	return false
 }
