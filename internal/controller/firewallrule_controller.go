@@ -107,7 +107,7 @@ func (r *FirewallRuleReconciler) Reconcile(ctx context.Context, req ctrl.Request
 	// reconcile FirewallRules for the current node and update the
 	// FirewallRule with the node annotation
 	if previousNodeName == "" && currentNodeName != "" {
-		if err := r.reconcileNodeFirewallRules(ctx, log, currentNodeName); err != nil {
+		if err := r.reconcileNodeFirewallRules(ctx, log, currentNodeName, firewallRule); err != nil {
 			log.Error(err, "Failed to reconcile node FirewallRules")
 			return ctrl.Result{}, err
 		}
@@ -129,7 +129,7 @@ func (r *FirewallRuleReconciler) Reconcile(ctx context.Context, req ctrl.Request
 	// Node name has changed, reconcile FirewallRules for the previous node,
 	// then update the FirewallRule to remove the node annotation
 	if previousNodeName != "" && currentNodeName != previousNodeName {
-		if err := r.reconcileNodeFirewallRules(ctx, log, previousNodeName); err != nil {
+		if err := r.reconcileNodeFirewallRules(ctx, log, previousNodeName, firewallRule); err != nil {
 			log.Error(err, "Failed to reconcile node FirewallRules")
 			return ctrl.Result{}, err
 		}
@@ -146,7 +146,7 @@ func (r *FirewallRuleReconciler) Reconcile(ctx context.Context, req ctrl.Request
 
 	// Node name has not changed, reconcile FirewallRules for the current node
 	if previousNodeName != "" && currentNodeName == previousNodeName {
-		if err := r.reconcileNodeFirewallRules(ctx, log, currentNodeName); err != nil {
+		if err := r.reconcileNodeFirewallRules(ctx, log, currentNodeName, firewallRule); err != nil {
 			log.Error(err, "Failed to reconcile node FirewallRules")
 			return ctrl.Result{}, err
 		}
@@ -183,6 +183,7 @@ func (r *FirewallRuleReconciler) reconcileNodeFirewallRules(
 	ctx context.Context,
 	log logr.Logger,
 	nodeName string,
+	firewallrule *v1alpha1.FirewallRule,
 ) error {
 	var firewallRuleList v1alpha1.FirewallRuleList
 	if err := r.List(ctx, &firewallRuleList, client.MatchingFields{firewallRuleNodeNameKey: nodeName}); err != nil {
@@ -200,7 +201,7 @@ func (r *FirewallRuleReconciler) reconcileNodeFirewallRules(
 			return err
 		}
 	} else {
-		if err := r.reconcileFirewallRules(ctx, log, nodeName, firewallRuleList.Items); err != nil {
+		if err := r.reconcileFirewallRule(ctx, log, nodeName, firewallrule); err != nil {
 			log.Error(err, "Failed to reconcile FirewallRules")
 			return err
 		}
@@ -222,13 +223,15 @@ func (r *FirewallRuleReconciler) reconcileNodeFirewallRules(
 //
 // Returns:
 //   - error: An error if the reconciliation process fails, otherwise nil.
-func (r *FirewallRuleReconciler) reconcileFirewallRules(
+func (r *FirewallRuleReconciler) reconcileFirewallRule(
 	ctx context.Context,
 	log logr.Logger,
 	nodeName string,
-	firewallRules []v1alpha1.FirewallRule,
+	firewallRule *v1alpha1.FirewallRule,
 ) error {
 	var node corev1.Node
+	var firewallRuleList v1alpha1.FirewallRuleList
+
 	if err := r.Get(ctx, types.NamespacedName{Name: nodeName}, &node); err != nil {
 		if apierrors.IsNotFound(err) {
 			if err := r.Provider.ReconcileFirewallRulesDeletion(ctx, log, nodeName); err != nil {
@@ -242,44 +245,45 @@ func (r *FirewallRuleReconciler) reconcileFirewallRules(
 		return err
 	}
 
-	status, conditions, err := r.Provider.ReconcileFirewallRules(ctx, log, nodeName, r.Provider.GetInstanceID(node), firewallRules)
+	if err := r.List(ctx, &firewallRuleList, client.MatchingFields{firewallRuleNodeNameKey: nodeName}); err != nil {
+		log.Error(err, "Unable to list FirewallRules")
+		return err
+	}
+
+	status, conditions, err := r.Provider.ReconcileFirewallRule(ctx, log, nodeName, r.Provider.GetInstanceID(node), firewallRule, firewallRuleList.Items)
 	if err != nil {
-		for _, fr := range firewallRules {
-			for _, condition := range conditions {
-				condition.ObservedGeneration = fr.Generation
-				meta.SetStatusCondition(&status.Conditions, condition)
-			}
-			existingFR := fr.DeepCopy()
-			fr.Status = status
-			fr.Status.LastTransitionTime = existingFR.Status.LastTransitionTime
-			if !reflect.DeepEqual(fr.Status, existingFR.Status) {
-				fr.Status.LastTransitionTime = metav1.Now()
-				patchErr := r.Status().Patch(ctx, &fr, client.MergeFrom(existingFR))
-				if patchErr != nil {
-					log.Error(errors.Join(patchErr, err), "Failed to patch FirewallRule status during error handling")
-					return fmt.Errorf("failed to patch FirewallRule status during error handling: %w", errors.Join(patchErr, err))
-				}
+		for _, condition := range conditions {
+			condition.ObservedGeneration = firewallRule.Generation
+			meta.SetStatusCondition(&status.Conditions, condition)
+		}
+		existingFR := firewallRule.DeepCopy()
+		firewallRule.Status = status
+		firewallRule.Status.LastTransitionTime = existingFR.Status.LastTransitionTime
+		if !reflect.DeepEqual(firewallRule.Status, existingFR.Status) {
+			firewallRule.Status.LastTransitionTime = metav1.Now()
+			patchErr := r.Status().Patch(ctx, firewallRule, client.MergeFrom(existingFR))
+			if patchErr != nil {
+				log.Error(errors.Join(patchErr, err), "Failed to patch FirewallRule status during error handling")
+				return fmt.Errorf("failed to patch FirewallRule status during error handling: %w", errors.Join(patchErr, err))
 			}
 		}
 		log.Error(err, "Failed to reconcile FirewallRule")
 		return err
 	}
 
-	for _, fr := range firewallRules {
-		for _, condition := range conditions {
-			meta.SetStatusCondition(&status.Conditions, condition)
-			condition.ObservedGeneration = fr.GetGeneration()
-		}
-		existingFR := fr.DeepCopy()
-		fr.Status = status
-		fr.Status.LastTransitionTime = existingFR.Status.LastTransitionTime
-		if !reflect.DeepEqual(fr.Status, existingFR.Status) {
-			fr.Status.LastTransitionTime = metav1.Now()
-			err := r.Status().Patch(ctx, &fr, client.MergeFrom(existingFR))
-			if err != nil {
-				log.Error(err, "Failed to patch FirewallRule status")
-				return fmt.Errorf("failed to patch FirewallRule status: %w", err)
-			}
+	for _, condition := range conditions {
+		condition.ObservedGeneration = firewallRule.GetGeneration()
+		meta.SetStatusCondition(&status.Conditions, condition)
+	}
+	existingFR := firewallRule.DeepCopy()
+	firewallRule.Status = status
+	firewallRule.Status.LastTransitionTime = existingFR.Status.LastTransitionTime
+	if !reflect.DeepEqual(firewallRule.Status, existingFR.Status) {
+		firewallRule.Status.LastTransitionTime = metav1.Now()
+		err := r.Status().Patch(ctx, firewallRule, client.MergeFrom(existingFR))
+		if err != nil {
+			log.Error(err, "Failed to patch FirewallRule status")
+			return fmt.Errorf("failed to patch FirewallRule status: %w", err)
 		}
 	}
 

@@ -435,11 +435,12 @@ func (p *awsProvider) deleteAddress(ctx context.Context, addressID string) error
 // Returns:
 //   - v1alpha1.FirewallRuleStatus: The status of the firewall rule reconciliation.
 //   - error: An error if the reconciliation fails.
-func (p *awsProvider) ReconcileFirewallRules(
+func (p *awsProvider) ReconcileFirewallRule(
 	ctx context.Context,
 	log logr.Logger,
 	nodeName, instanceID string,
-	firewallRules []v1alpha1.FirewallRule,
+	firewallRule *v1alpha1.FirewallRule,
+	firewallrules []v1alpha1.FirewallRule,
 ) (v1alpha1.FirewallRuleStatus, []kmetav1.Condition, error) {
 	status := v1alpha1.FirewallRuleStatus{
 		State: v1alpha1.FirewallRuleStatePending,
@@ -609,74 +610,98 @@ func (p *awsProvider) ReconcileFirewallRules(
 	status.InstanceID = &instanceID
 	status.NetworkInterfaceID = networkInterface.NetworkInterfaceId
 
-	frSpecs := provider.EncodeFirewallRuleSpecs(firewallRules)
+	frSpec := provider.EncodeFirewallRuleSpec(firewallRule)
+	frSpecs := provider.EncodeFirewallRuleSpecs(firewallrules)
 
-	// Apply Ingress permissions reconciliation
-	if err := provider.ReconcilePermissions(
-		ctx,
-		log,
-		securityGroupID,
-		p.authorizeSecurityGroupIngress,
-		p.revokeSecurityGroupIngress,
-		provider.GetIngressIPPermissions(frSpecs),
-		converter.DecodeIpPermissions(securityGroup.IpPermissions),
-	); err != nil {
-		if provider.IsErrRulesPerSecurityGroupLimitExceeded(err) {
-			conditions = append(
-				conditions,
-				kmetav1.Condition{
-					Type:    v1alpha1.FirewallRuleConditionTypeSecurityGroupRuleAuthorized,
-					Status:  kmetav1.ConditionFalse,
-					Reason:  v1alpha1.FirewallRuleConditionReasonProviderError,
-					Message: "Could not created ingress rule: the maximum number of rules per security group has been reached",
-				},
-			)
-		} else {
-			conditions = append(
-				conditions,
-				kmetav1.Condition{
-					Type:    v1alpha1.FirewallRuleConditionTypeSecurityGroupRuleAuthorized,
-					Status:  kmetav1.ConditionFalse,
-					Reason:  v1alpha1.FirewallRuleConditionReasonProviderError,
-					Message: fmt.Sprintf("Failed to reconcile permissions : %s", err),
-				},
-			)
+	if !firewallRule.DeletionTimestamp.IsZero() {
+		if frSpec.Direction == provider.DirectionIngress && !provider.IsPermissionDuplicate(provider.GetIngressIPPermissions(frSpecs), frSpec.IPPermission) {
+			// Revoke Ingress permission reconciliation
+			if err := p.revokeSecurityGroupIngress(ctx, log, securityGroupID, *frSpec.IPPermission); err != nil {
+				return status, conditions, fmt.Errorf("failed to delete security group ingress permission: %w", err)
+			}
 		}
-		return status, conditions, fmt.Errorf("failed to apply security group ingress permissions: %w", err)
+
+		if frSpec.Direction == provider.DirectionEgress && !provider.IsPermissionDuplicate(provider.GetEgressIPPermissions(frSpecs), frSpec.IPPermission) {
+			// Revoke Egress permissions reconciliation
+			if err := p.revokeSecurityGroupEgress(ctx, log, securityGroupID, *frSpec.IPPermission); err != nil {
+				return status, conditions, fmt.Errorf("failed to delete security group ingress permission: %w", err)
+			}
+		}
+
+		return status, conditions, nil
 	}
 
-	// Apply Egress permissions reconciliation
-	if err := provider.ReconcilePermissions(
-		ctx,
-		log,
-		securityGroupID,
-		p.authorizeSecurityGroupEgress,
-		p.revokeSecurityGroupEgress,
-		provider.GetEgressIPPermissions(frSpecs),
-		converter.DecodeIpPermissions(securityGroup.IpPermissionsEgress),
-	); err != nil {
-		if provider.IsErrRulesPerSecurityGroupLimitExceeded(err) {
-			conditions = append(
-				conditions,
-				kmetav1.Condition{
-					Type:    v1alpha1.FirewallRuleConditionTypeSecurityGroupRuleAuthorized,
-					Status:  kmetav1.ConditionFalse,
-					Reason:  v1alpha1.FirewallRuleConditionReasonProviderError,
-					Message: "Could not created egress rule: the maximum number of rules per security group has been reached",
-				},
-			)
-		} else {
-			conditions = append(
-				conditions,
-				kmetav1.Condition{
-					Type:    v1alpha1.FirewallRuleConditionTypeSecurityGroupRuleAuthorized,
-					Status:  kmetav1.ConditionFalse,
-					Reason:  v1alpha1.FirewallRuleConditionReasonProviderError,
-					Message: fmt.Sprintf("Failed to reconcile permissions : %s", err),
-				},
-			)
+	// Apply Ingress permissions reconciliation
+	if frSpec.Direction == provider.DirectionIngress {
+		// Apply Ingress permissions reconciliation
+		if err := provider.ReconcilePermissions(
+			ctx,
+			log,
+			securityGroupID,
+			p.authorizeSecurityGroupIngress,
+			p.revokeSecurityGroupIngress,
+			frSpec.IPPermission,
+			converter.DecodeIpPermissions(securityGroup.IpPermissions),
+		); err != nil {
+			if provider.IsErrRulesPerSecurityGroupLimitExceeded(err) {
+				conditions = append(
+					conditions,
+					kmetav1.Condition{
+						Type:    v1alpha1.FirewallRuleConditionTypeSecurityGroupRuleAuthorized,
+						Status:  kmetav1.ConditionFalse,
+						Reason:  v1alpha1.FirewallRuleConditionReasonProviderError,
+						Message: "Could not created egress rule: the maximum number of rules per security group has been reached",
+					},
+				)
+			} else {
+				conditions = append(
+					conditions,
+					kmetav1.Condition{
+						Type:    v1alpha1.FirewallRuleConditionTypeSecurityGroupRuleAuthorized,
+						Status:  kmetav1.ConditionFalse,
+						Reason:  v1alpha1.FirewallRuleConditionReasonProviderError,
+						Message: fmt.Sprintf("Failed to reconcile permissions : %s", err),
+					},
+				)
+			}
+			return status, conditions, fmt.Errorf("failed to apply security group ingress permissions: %w", err)
 		}
-		return status, conditions, fmt.Errorf("failed to apply security group egress permissions: %w", err)
+	}
+
+	if frSpec.Direction == provider.DirectionEgress {
+		// Apply Egress permissions reconciliation
+		if err := provider.ReconcilePermissions(
+			ctx,
+			log,
+			securityGroupID,
+			p.authorizeSecurityGroupEgress,
+			p.revokeSecurityGroupEgress,
+			frSpec.IPPermission,
+			converter.DecodeIpPermissions(securityGroup.IpPermissionsEgress),
+		); err != nil {
+			if provider.IsErrRulesPerSecurityGroupLimitExceeded(err) {
+				conditions = append(
+					conditions,
+					kmetav1.Condition{
+						Type:    v1alpha1.FirewallRuleConditionTypeSecurityGroupRuleAuthorized,
+						Status:  kmetav1.ConditionFalse,
+						Reason:  v1alpha1.FirewallRuleConditionReasonProviderError,
+						Message: "Could not created egress rule: the maximum number of rules per security group has been reached",
+					},
+				)
+			} else {
+				conditions = append(
+					conditions,
+					kmetav1.Condition{
+						Type:    v1alpha1.FirewallRuleConditionTypeSecurityGroupRuleAuthorized,
+						Status:  kmetav1.ConditionFalse,
+						Reason:  v1alpha1.FirewallRuleConditionReasonProviderError,
+						Message: fmt.Sprintf("Failed to reconcile permissions : %s", err),
+					},
+				)
+			}
+			return status, conditions, fmt.Errorf("failed to apply security group egress permissions: %w", err)
+		}
 	}
 
 	status.State = v1alpha1.FirewallRuleStateApplied

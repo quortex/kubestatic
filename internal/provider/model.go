@@ -77,13 +77,13 @@ func EncodeFirewallRuleSpecs(data []v1alpha1.FirewallRule) []FirewallRuleSpec {
 
 	res := make([]FirewallRuleSpec, len(data))
 	for i, e := range data {
-		res[i] = encodeFirewallRuleSpec(&e)
+		res[i] = EncodeFirewallRuleSpec(&e)
 	}
 	return res
 }
 
 // encodeFirewallRuleSpec converts an api FirewallRule to a FirewallRuleSpec.
-func encodeFirewallRuleSpec(data *v1alpha1.FirewallRule) FirewallRuleSpec {
+func EncodeFirewallRuleSpec(data *v1alpha1.FirewallRule) FirewallRuleSpec {
 	return FirewallRuleSpec{
 		Name:        data.Name,
 		Description: data.Spec.Description,

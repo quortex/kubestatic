@@ -19,11 +19,12 @@ type Provider interface {
 
 // The necessary methods for a provider client are described here.
 type Client interface {
-	ReconcileFirewallRules(ctx context.Context,
+	ReconcileFirewallRule(ctx context.Context,
 		log logr.Logger,
 		nodeName,
 		instanceID string,
-		firewallRules []v1alpha1.FirewallRule,
+		firewallRule *v1alpha1.FirewallRule,
+		firewallrules []v1alpha1.FirewallRule,
 	) (v1alpha1.FirewallRuleStatus, []kmetav1.Condition, error)
 	ReconcileFirewallRulesDeletion(ctx context.Context, log logr.Logger, nodeName string) error
 	ReconcileExternalIP(ctx context.Context, log logr.Logger, instanceID string, externalIP *v1alpha1.ExternalIP) (v1alpha1.ExternalIPStatus, error)
