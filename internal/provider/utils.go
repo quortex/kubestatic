@@ -14,21 +14,11 @@ func ReconcilePermissions(
 	ctx context.Context,
 	log logr.Logger,
 	firewallRuleID string,
-	addFunc, delFunc PermFunc,
+	addFunc PermFunc,
 	rule *IPPermission,
 	get []*IPPermission,
 ) error {
-	// Compute which permissions to add and delete
-	//toDel, toAdd := computePermissionRequests(want, get)
-
-	// First we delete extra permissions to avoid conflicts.
-	//if len(toDel) != 0 {
-	//	if err := applyPermissions(ctx, log, firewallRuleID, delFunc, toDel); err != nil {
-	//		return err
-	//	}
-	//}
-
-	if !containsPermission(get, rule) {
+	if !ContainsPermission(get, rule) {
 		toAdd := IPPermission{
 			IPRanges: rule.IPRanges,
 			FromPort: rule.FromPort,
@@ -41,40 +31,6 @@ func ReconcilePermissions(
 	}
 
 	return nil
-}
-
-// computePermissionRequests takes in parameters the desired permissions
-// and the current permissions and returns the permissions to add and the
-// permissions to destroy to reach the desired state
-func computePermissionRequests(want, get []*IPPermission) (toDel, toAdd []IPPermission) {
-	// Compute which permissions to add.
-	for i := len(want) - 1; i >= 0; i-- {
-		p := want[i]
-		if !containsPermission(get, p) {
-			toAdd = append(toAdd, IPPermission{
-				IPRanges: p.IPRanges,
-				FromPort: p.FromPort,
-				Protocol: p.Protocol,
-				ToPort:   p.ToPort,
-			})
-
-			want = append(want[:i], want[i+1:]...)
-		}
-	}
-
-	// Compute which permissions to revoke.
-	for _, e := range get {
-		if !containsPermission(want, e) {
-			toDel = append(toDel, IPPermission{
-				IPRanges: e.IPRanges,
-				FromPort: e.FromPort,
-				Protocol: e.Protocol,
-				ToPort:   e.ToPort,
-			})
-		}
-	}
-
-	return
 }
 
 // PermFunc describes a permission function authorize / revoke ingress / egress
@@ -93,7 +49,7 @@ func applyPermissions(
 }
 
 // containsPermission returns if given Permission slice contains Permission.
-func containsPermission(slice []*IPPermission, elem *IPPermission) bool {
+func ContainsPermission(slice []*IPPermission, elem *IPPermission) bool {
 	for _, e := range slice {
 		if reflect.DeepEqual(e, elem) {
 			return true
@@ -102,6 +58,15 @@ func containsPermission(slice []*IPPermission, elem *IPPermission) bool {
 	return false
 }
 
+// IsPermissionDuplicate checks if the given IPPermission element appears more than once in the provided slice.
+// It returns true if the element is a duplicate, otherwise false.
+//
+// Parameters:
+//   - slice: A slice of pointers to IPPermission elements to be checked.
+//   - elem: A pointer to the IPPermission element to be checked for duplication.
+//
+// Returns:
+//   - bool: True if the element is a duplicate, otherwise false.
 func IsPermissionDuplicate(slice []*IPPermission, elem *IPPermission) bool {
 	count := 0
 	for _, e := range slice {
