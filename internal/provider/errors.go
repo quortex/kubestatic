@@ -21,6 +21,8 @@ const (
 	RulesPerSecurityGroupLimitExceededError ErrorCode = "RulesPerSecurityGroupLimitExceeded"
 	// InternalError is when there was an unexpected error in the server
 	InternalError ErrorCode = "InternalError"
+	// QuotaExceededError is when the request could not be processed because of a quota exceeded
+	QuotaExceededError ErrorCode = "QuotaExceededError"
 )
 
 // Error is the error type used internally by the backend
@@ -77,6 +79,14 @@ func IsErrInternal(err error) bool {
 func IsErrRulesPerSecurityGroupLimitExceeded(err error) bool {
 	if e, ok := err.(*Error); ok {
 		return e.Code == RulesPerSecurityGroupLimitExceededError
+	}
+	return false
+}
+
+// IsErrQuotaExceeded returns if error is kind QuotaExceededError
+func IsErrQuotaExceeded(err error) bool {
+	if e, ok := err.(*Error); ok {
+		return e.Code == QuotaExceededError
 	}
 	return false
 }

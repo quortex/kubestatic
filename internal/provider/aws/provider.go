@@ -922,7 +922,7 @@ func (p *awsProvider) ReconcileExternalIPDeletion(
 	address, err := p.getAddress(ctx, Managed(), WithExternalIPName(externalIP.Name))
 	if err != nil {
 		// The address does not exist, end of reconciliation
-		if err.(*provider.Error).Code != provider.NotFoundError {
+		if err.(*provider.Error).Code == provider.NotFoundError {
 			return nil
 		}
 		return fmt.Errorf("failed to get address: %w", err)

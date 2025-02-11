@@ -21,6 +21,7 @@ import (
 	"errors"
 	"fmt"
 	"slices"
+	"time"
 
 	"github.com/go-logr/logr"
 	corev1 "k8s.io/api/core/v1"
@@ -50,8 +51,9 @@ const (
 // FirewallRuleReconciler reconciles a FirewallRule object
 type FirewallRuleReconciler struct {
 	client.Client
-	Scheme   *runtime.Scheme
-	Provider provider.Provider
+	ReconciliationRequeueInterval time.Duration
+	Scheme                        *runtime.Scheme
+	Provider                      provider.Provider
 }
 
 //+kubebuilder:rbac:groups=kubestatic.quortex.io,resources=firewallrules,verbs=get;list;watch;create;update;patch;delete
@@ -107,6 +109,10 @@ func (r *FirewallRuleReconciler) Reconcile(ctx context.Context, req ctrl.Request
 	// FirewallRule with the node annotation
 	if previousNodeName == "" && currentNodeName != "" {
 		if err := r.reconcileNodeFirewallRules(ctx, log, currentNodeName, firewallRule); err != nil {
+			if provider.IsErrQuotaExceeded(err) {
+				log.Info("Quota exceeded, requeueing")
+				return ctrl.Result{RequeueAfter: r.ReconciliationRequeueInterval}, nil
+			}
 			log.Error(err, "Failed to reconcile node FirewallRules")
 			return ctrl.Result{}, err
 		}
@@ -129,6 +135,10 @@ func (r *FirewallRuleReconciler) Reconcile(ctx context.Context, req ctrl.Request
 	// then update the FirewallRule to remove the node annotation
 	if previousNodeName != "" && currentNodeName != previousNodeName {
 		if err := r.reconcileNodeFirewallRules(ctx, log, previousNodeName, firewallRule); err != nil {
+			if provider.IsErrQuotaExceeded(err) {
+				log.Info("Quota exceeded, requeueing")
+				return ctrl.Result{RequeueAfter: r.ReconciliationRequeueInterval}, nil
+			}
 			log.Error(err, "Failed to reconcile node FirewallRules")
 			return ctrl.Result{}, err
 		}
@@ -146,6 +156,10 @@ func (r *FirewallRuleReconciler) Reconcile(ctx context.Context, req ctrl.Request
 	// Node name has not changed, reconcile FirewallRules for the current node
 	if previousNodeName != "" && currentNodeName == previousNodeName {
 		if err := r.reconcileNodeFirewallRules(ctx, log, currentNodeName, firewallRule); err != nil {
+			if provider.IsErrQuotaExceeded(err) {
+				log.Info("Quota exceeded, requeueing")
+				return ctrl.Result{RequeueAfter: r.ReconciliationRequeueInterval}, nil
+			}
 			log.Error(err, "Failed to reconcile node FirewallRules")
 			return ctrl.Result{}, err
 		}

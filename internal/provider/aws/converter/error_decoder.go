@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 
+	"github.com/aws/aws-sdk-go-v2/aws/ratelimit"
 	"github.com/aws/smithy-go"
 
 	"github.com/quortex/kubestatic/internal/provider"
@@ -43,6 +44,7 @@ func DecodeCommonError(msg string, err error) error {
 	msg = fmt.Sprintf("%s: %s", msg, err.Error())
 
 	var genErr *smithy.GenericAPIError
+	var quotaErr ratelimit.QuotaExceededError
 	if errors.As(err, &genErr) {
 		switch genErr.ErrorCode() {
 		case
@@ -66,6 +68,8 @@ func DecodeCommonError(msg string, err error) error {
 			"Throttling":
 			return &provider.Error{Code: provider.RulesPerSecurityGroupLimitExceededError, Msg: msg}
 		}
+	} else if errors.As(err, &quotaErr) {
+		return &provider.Error{Code: provider.QuotaExceededError, Msg: msg}
 	}
 
 	return &provider.Error{Code: provider.InternalError, Msg: msg}

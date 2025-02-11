@@ -21,6 +21,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"reflect"
+	"time"
 
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/errors"
@@ -46,8 +47,9 @@ const (
 // ExternalIPReconciler reconciles a ExternalIP object
 type ExternalIPReconciler struct {
 	client.Client
-	Scheme   *runtime.Scheme
-	Provider provider.Provider
+	Scheme                        *runtime.Scheme
+	ReconciliationRequeueInterval time.Duration
+	Provider                      provider.Provider
 }
 
 //+kubebuilder:rbac:groups=kubestatic.quortex.io,resources=externalips,verbs=get;list;watch;create;update;patch;delete
@@ -118,6 +120,10 @@ func (r *ExternalIPReconciler) Reconcile(ctx context.Context, req ctrl.Request) 
 	if externalIP.ObjectMeta.DeletionTimestamp.IsZero() {
 		status, err = r.Provider.ReconcileExternalIP(ctx, log, instanceID, externalIP)
 		if err != nil {
+			if provider.IsErrQuotaExceeded(err) {
+				log.Info("Quota exceeded, requeueing")
+				return ctrl.Result{RequeueAfter: r.ReconciliationRequeueInterval}, nil
+			}
 			log.Error(err, "Failed to reconcile ExternalIP")
 			return ctrl.Result{}, err
 		}
@@ -154,6 +160,10 @@ func (r *ExternalIPReconciler) Reconcile(ctx context.Context, req ctrl.Request) 
 	} else {
 		if err := r.Provider.ReconcileExternalIPDeletion(ctx, log, externalIP); err != nil {
 			log.Error(err, "Failed to reconcile ExternalIP deletion")
+			if provider.IsErrQuotaExceeded(err) {
+				log.Info("Quota exceeded, requeueing")
+				return ctrl.Result{RequeueAfter: r.ReconciliationRequeueInterval}, nil
+			}
 			return ctrl.Result{}, err
 		}
 	}
