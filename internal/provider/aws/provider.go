@@ -418,7 +418,7 @@ func (p *awsProvider) deleteAddress(ctx context.Context, addressID string) error
 	return nil
 }
 
-// ReconcileFirewallRules ensures that the firewall rules for a given instance are correctly configured.
+// ReconcileFirewallRule ensures that the firewall rule for a given node and instance in AWS.
 // It performs the following steps:
 //  1. Retrieves the instance information using the provided instance ID.
 //  2. Retrieves or creates a security group associated with the instance.
@@ -618,7 +618,8 @@ func (p *awsProvider) ReconcileFirewallRule(
 	frSpec := provider.EncodeFirewallRuleSpec(firewallRule)
 	frSpecs := provider.EncodeFirewallRuleSpecs(firewallrules)
 
-	//deleteUnnecessaryRules
+	// Revoke useless permissions.
+	// Rules in the security group, that are not in the firewall rules list are considered useless.
 	for _, e := range converter.DecodeIpPermissions(securityGroup.IpPermissions) {
 		if !provider.ContainsPermission(provider.GetIngressIPPermissions(frSpecs), e) {
 			if err := p.revokeSecurityGroupIngress(ctx, log, securityGroupID, *e); err != nil {
@@ -636,20 +637,31 @@ func (p *awsProvider) ReconcileFirewallRule(
 
 	if !firewallRule.DeletionTimestamp.IsZero() {
 		if frSpec.Direction == provider.DirectionIngress &&
-			provider.ContainsPermission(converter.DecodeIpPermissions(securityGroup.IpPermissions), frSpec.IPPermission) &&
-			!provider.IsPermissionDuplicate(provider.GetIngressIPPermissions(frSpecs), frSpec.IPPermission) {
+			provider.ContainsPermission(converter.DecodeIpPermissions(securityGroup.IpPermissions), frSpec.IPPermission) {
 			// Revoke Ingress permission reconciliation
 			if err := p.revokeSecurityGroupIngress(ctx, log, securityGroupID, *frSpec.IPPermission); err != nil {
 				return status, fmt.Errorf("failed to delete security group ingress permission: %w", err)
 			}
+			if len(securityGroup.IpPermissions) == 1 && len(securityGroup.IpPermissionsEgress) == 0 {
+				// If the security group has only one ingress rule and no egress rule, delete the security group
+				if err := p.ReconcileFirewallRulesDeletion(ctx, log, nodeName); err != nil {
+					return status, fmt.Errorf("failed to to reconcile FirewallRule deletion: %w", err)
+				}
+			}
+
 		}
 
 		if frSpec.Direction == provider.DirectionEgress &&
-			provider.ContainsPermission(converter.DecodeIpPermissions(securityGroup.IpPermissionsEgress), frSpec.IPPermission) &&
-			!provider.IsPermissionDuplicate(provider.GetEgressIPPermissions(frSpecs), frSpec.IPPermission) {
+			provider.ContainsPermission(converter.DecodeIpPermissions(securityGroup.IpPermissionsEgress), frSpec.IPPermission) {
 			// Revoke Egress permissions reconciliation
 			if err := p.revokeSecurityGroupEgress(ctx, log, securityGroupID, *frSpec.IPPermission); err != nil {
-				return status, fmt.Errorf("failed to delete security group ingress permission: %w", err)
+				return status, fmt.Errorf("failed to delete security group egress permission: %w", err)
+			}
+			if len(securityGroup.IpPermissionsEgress) == 1 && len(securityGroup.IpPermissions) == 0 {
+				// If the security group has only one egress rule and no ingress rule, delete the security group
+				if err := p.ReconcileFirewallRulesDeletion(ctx, log, nodeName); err != nil {
+					return status, fmt.Errorf("failed to to reconcile FirewallRule deletion: %w", err)
+				}
 			}
 		}
 
