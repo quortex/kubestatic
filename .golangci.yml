@@ -13,13 +13,17 @@ linters-settings:
     min-complexity: 40
   lll:
     line-length: 150
+  revive:
+    rules:
+      - name: comment-spacings
 
 linters:
   disable-all: true
   enable:
     - dupl
     - errcheck
-    - exportloopref
+    - copyloopvar
+    - ginkgolinter
     - goconst
     - gocyclo
     - gofmt
@@ -31,6 +35,7 @@ linters:
     - misspell
     - nakedret
     - prealloc
+    - revive
     - staticcheck
     - typecheck
     - unconvert
@@ -43,12 +48,12 @@ issues:
   # Excluding configuration per-path, per-linter, per-text and per-source
   exclude-rules:
     # Exclude `lll` issues for long comments starting with `go:generate` or `+kubebuilder`.
-    - source: "^//(go:generate|\\+kubebuilder)"
+    - source: "^\\/\\/\\s(go:generate|\\+kubebuilder)"
       linters:
         - lll
     # Exclude dupl since controllers have a lot of boilerplate code, and exclude
     # dynamic and unwrapped errors issues in controllers since they will only be logged.
-    - path: controllers/
+    - path: internal/controller/
       linters:
         - dupl
         - goerr113
