@@ -331,6 +331,46 @@ func (p *awsProvider) revokeSecurityGroupEgress(ctx context.Context, log logr.Lo
 	return nil
 }
 
+// revokeUselessPermission revokes ingress and egress permissions from a security group that are
+// not present in the provided firewall rules specifications.
+//
+// Parameters:
+//   - ctx: The context for controlling cancellation and deadlines.
+//   - log: The logger for logging information and errors.
+//   - securityGroupID: The ID of the security group from which permissions will be revoked.
+//   - frSpecs: A list of firewall rule specifications to compare against existing permissions.
+//   - ingress: A list of existing ingress permissions in the security group.
+//   - egress: A list of existing egress permissions in the security group.
+//
+// Returns:
+//   - error: An error if any permission revocation fails, otherwise nil.
+func (p *awsProvider) revokeUselessPermission(
+	ctx context.Context,
+	log logr.Logger,
+	securityGroupID string,
+	frSpecs []provider.FirewallRuleSpec,
+	ingress []*provider.IPPermission,
+	egress []*provider.IPPermission,
+) error {
+	// Rules in the security group, that are not in the firewall rules list are considered useless.
+	for _, e := range ingress {
+		if !provider.ContainsPermission(provider.GetIngressIPPermissions(frSpecs), e) {
+			if err := p.revokeSecurityGroupIngress(ctx, log, securityGroupID, *e); err != nil {
+				return err
+			}
+		}
+	}
+	for _, e := range egress {
+		if !provider.ContainsPermission(provider.GetEgressIPPermissions(frSpecs), e) {
+			if err := p.revokeSecurityGroupEgress(ctx, log, securityGroupID, *e); err != nil {
+				return err
+			}
+		}
+	}
+
+	return nil
+}
+
 func (p *awsProvider) getAddress(
 	ctx context.Context,
 	opts ...FilterOption,
@@ -418,7 +458,7 @@ func (p *awsProvider) deleteAddress(ctx context.Context, addressID string) error
 	return nil
 }
 
-// ReconcileFirewallRules ensures that the firewall rules for a given instance are correctly configured.
+// ReconcileFirewallRule ensures that the firewall rule for a given node and instance in AWS.
 // It performs the following steps:
 //  1. Retrieves the instance information using the provided instance ID.
 //  2. Retrieves or creates a security group associated with the instance.
@@ -618,38 +658,45 @@ func (p *awsProvider) ReconcileFirewallRule(
 	frSpec := provider.EncodeFirewallRuleSpec(firewallRule)
 	frSpecs := provider.EncodeFirewallRuleSpecs(firewallrules)
 
-	//deleteUnnecessaryRules
-	for _, e := range converter.DecodeIpPermissions(securityGroup.IpPermissions) {
-		if !provider.ContainsPermission(provider.GetIngressIPPermissions(frSpecs), e) {
-			if err := p.revokeSecurityGroupIngress(ctx, log, securityGroupID, *e); err != nil {
-				return status, fmt.Errorf("failed to delete useless ingress permission: %w", err)
-			}
-		}
-	}
-	for _, e := range converter.DecodeIpPermissions(securityGroup.IpPermissionsEgress) {
-		if !provider.ContainsPermission(provider.GetEgressIPPermissions(frSpecs), e) {
-			if err := p.revokeSecurityGroupEgress(ctx, log, securityGroupID, *e); err != nil {
-				return status, fmt.Errorf("failed to delete useless egress permission: %w", err)
-			}
-		}
+	if err := p.revokeUselessPermission(
+		ctx,
+		log,
+		securityGroupID,
+		frSpecs,
+		converter.DecodeIpPermissions(securityGroup.IpPermissions),
+		converter.DecodeIpPermissions(securityGroup.IpPermissionsEgress),
+	); err != nil {
+		return status, fmt.Errorf("failed to revoke useless permissions: %w", err)
 	}
 
 	if !firewallRule.DeletionTimestamp.IsZero() {
 		if frSpec.Direction == provider.DirectionIngress &&
-			provider.ContainsPermission(converter.DecodeIpPermissions(securityGroup.IpPermissions), frSpec.IPPermission) &&
-			!provider.IsPermissionDuplicate(provider.GetIngressIPPermissions(frSpecs), frSpec.IPPermission) {
-			// Revoke Ingress permission reconciliation
-			if err := p.revokeSecurityGroupIngress(ctx, log, securityGroupID, *frSpec.IPPermission); err != nil {
-				return status, fmt.Errorf("failed to delete security group ingress permission: %w", err)
+			provider.ContainsPermission(converter.DecodeIpPermissions(securityGroup.IpPermissions), frSpec.IPPermission) {
+			if len(securityGroup.IpPermissions) == 1 && len(securityGroup.IpPermissionsEgress) == 0 {
+				// If the security group has only one ingress rule and no egress rule, delete the security group
+				if err := p.ReconcileFirewallRulesDeletion(ctx, log, nodeName); err != nil {
+					return status, fmt.Errorf("failed to to reconcile FirewallRule deletion: %w", err)
+				}
+			} else {
+				// Revoke Ingress permissions reconciliation
+				if err := p.revokeSecurityGroupIngress(ctx, log, securityGroupID, *frSpec.IPPermission); err != nil {
+					return status, fmt.Errorf("failed to delete security group ingress permission: %w", err)
+				}
 			}
 		}
 
 		if frSpec.Direction == provider.DirectionEgress &&
-			provider.ContainsPermission(converter.DecodeIpPermissions(securityGroup.IpPermissionsEgress), frSpec.IPPermission) &&
-			!provider.IsPermissionDuplicate(provider.GetEgressIPPermissions(frSpecs), frSpec.IPPermission) {
-			// Revoke Egress permissions reconciliation
-			if err := p.revokeSecurityGroupEgress(ctx, log, securityGroupID, *frSpec.IPPermission); err != nil {
-				return status, fmt.Errorf("failed to delete security group ingress permission: %w", err)
+			provider.ContainsPermission(converter.DecodeIpPermissions(securityGroup.IpPermissionsEgress), frSpec.IPPermission) {
+			if len(securityGroup.IpPermissionsEgress) == 1 && len(securityGroup.IpPermissions) == 0 {
+				// If the security group has only one egress rule and no ingress rule, delete the security group
+				if err := p.ReconcileFirewallRulesDeletion(ctx, log, nodeName); err != nil {
+					return status, fmt.Errorf("failed to to reconcile FirewallRule deletion: %w", err)
+				}
+			} else {
+				// Revoke Egress permissions reconciliation
+				if err := p.revokeSecurityGroupEgress(ctx, log, securityGroupID, *frSpec.IPPermission); err != nil {
+					return status, fmt.Errorf("failed to delete security group egress permission: %w", err)
+				}
 			}
 		}
 

@@ -58,25 +58,6 @@ func ContainsPermission(slice []*IPPermission, elem *IPPermission) bool {
 	return false
 }
 
-// IsPermissionDuplicate checks if the given IPPermission element appears more than once in the provided slice.
-// It returns true if the element is a duplicate, otherwise false.
-//
-// Parameters:
-//   - slice: A slice of pointers to IPPermission elements to be checked.
-//   - elem: A pointer to the IPPermission element to be checked for duplication.
-//
-// Returns:
-//   - bool: True if the element is a duplicate, otherwise false.
-func IsPermissionDuplicate(slice []*IPPermission, elem *IPPermission) bool {
-	count := 0
-	for _, e := range slice {
-		if reflect.DeepEqual(e, elem) {
-			count++
-		}
-	}
-	return count > 1
-}
-
 // GetIngressIPPermissions get ingress permissions from rule slice.
 func GetIngressIPPermissions(slice []FirewallRuleSpec) []*IPPermission {
 	res := []*IPPermission{}

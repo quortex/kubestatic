@@ -20,11 +20,11 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"reflect"
 	"slices"
 
 	"github.com/go-logr/logr"
 	corev1 "k8s.io/api/core/v1"
+	"k8s.io/apimachinery/pkg/api/equality"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
@@ -232,7 +232,7 @@ func patchFirewallRuleStatus(
 	firewallRule.Status = newStatus
 	firewallRule.Status.LastTransitionTime = existingFR.Status.LastTransitionTime
 
-	if !reflect.DeepEqual(firewallRule.Status, existingFR.Status) {
+	if !equality.Semantic.DeepEqual(firewallRule.Status, existingFR.Status) {
 		firewallRule.Status.LastTransitionTime = metav1.Now()
 		if err := r.Status().Patch(ctx, firewallRule, client.MergeFrom(existingFR)); err != nil {
 			return err
@@ -261,7 +261,6 @@ func (r *FirewallRuleReconciler) reconcileFirewallRule(
 	firewallRule *v1alpha1.FirewallRule,
 ) error {
 	var node corev1.Node
-	var firewallRules v1alpha1.FirewallRuleList
 
 	if err := r.Get(ctx, types.NamespacedName{Name: nodeName}, &node); err != nil {
 		if apierrors.IsNotFound(err) {
@@ -276,6 +275,7 @@ func (r *FirewallRuleReconciler) reconcileFirewallRule(
 		return err
 	}
 
+	var firewallRules v1alpha1.FirewallRuleList
 	if err := r.List(ctx, &firewallRules, client.MatchingFields{firewallRuleNodeNameKey: nodeName}); err != nil {
 		log.Error(err, "Unable to list FirewallRules")
 		return err
