@@ -55,9 +55,9 @@ type FirewallRuleReconciler struct {
 	Provider provider.Provider
 }
 
-//+kubebuilder:rbac:groups=kubestatic.quortex.io,resources=firewallrules,verbs=get;list;watch;create;update;patch;delete
-//+kubebuilder:rbac:groups=kubestatic.quortex.io,resources=firewallrules/status,verbs=get;update;patch
-//+kubebuilder:rbac:groups=kubestatic.quortex.io,resources=firewallrules/finalizers,verbs=update
+// +kubebuilder:rbac:groups=kubestatic.quortex.io,resources=firewallrules,verbs=get;list;watch;create;update;patch;delete
+// +kubebuilder:rbac:groups=kubestatic.quortex.io,resources=firewallrules/status,verbs=get;update;patch
+// +kubebuilder:rbac:groups=kubestatic.quortex.io,resources=firewallrules/finalizers,verbs=update
 
 // Reconcile is part of the main kubernetes reconciliation loop which aims to
 // move the current state of the cluster closer to the desired state.
