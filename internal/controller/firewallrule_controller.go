@@ -20,7 +20,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"slices"
 
 	"github.com/go-logr/logr"
 	corev1 "k8s.io/api/core/v1"
@@ -106,8 +105,8 @@ func (r *FirewallRuleReconciler) Reconcile(ctx context.Context, req ctrl.Request
 	// reconcile FirewallRules for the current node and update the
 	// FirewallRule with the node annotation
 	if previousNodeName == "" && currentNodeName != "" {
-		if err := r.reconcileNodeFirewallRules(ctx, log, currentNodeName, firewallRule); err != nil {
-			log.Error(err, "Failed to reconcile node FirewallRules")
+		if err := r.reconcileFirewallRule(ctx, log, currentNodeName, firewallRule); err != nil {
+			log.Error(err, "Failed to reconcile FirewallRule")
 			return ctrl.Result{}, err
 		}
 
@@ -128,8 +127,8 @@ func (r *FirewallRuleReconciler) Reconcile(ctx context.Context, req ctrl.Request
 	// Node name has changed, reconcile FirewallRules for the previous node,
 	// then update the FirewallRule to remove the node annotation
 	if previousNodeName != "" && currentNodeName != previousNodeName {
-		if err := r.reconcileNodeFirewallRules(ctx, log, previousNodeName, firewallRule); err != nil {
-			log.Error(err, "Failed to reconcile node FirewallRules")
+		if err := r.reconcileFirewallRule(ctx, log, previousNodeName, firewallRule); err != nil {
+			log.Error(err, "Failed to reconcile FirewallRule")
 			return ctrl.Result{}, err
 		}
 
@@ -145,8 +144,8 @@ func (r *FirewallRuleReconciler) Reconcile(ctx context.Context, req ctrl.Request
 
 	// Node name has not changed, reconcile FirewallRules for the current node
 	if previousNodeName != "" && currentNodeName == previousNodeName {
-		if err := r.reconcileNodeFirewallRules(ctx, log, currentNodeName, firewallRule); err != nil {
-			log.Error(err, "Failed to reconcile node FirewallRules")
+		if err := r.reconcileFirewallRule(ctx, log, currentNodeName, firewallRule); err != nil {
+			log.Error(err, "Failed to reconcile FirewallRule")
 			return ctrl.Result{}, err
 		}
 	}
@@ -164,49 +163,6 @@ func (r *FirewallRuleReconciler) Reconcile(ctx context.Context, req ctrl.Request
 	log.Info("FirewallRule successfully reconciled")
 
 	return ctrl.Result{}, nil
-}
-
-// reconcileNodeFirewallRules reconciles the firewall rules for a specific node.
-// It lists all FirewallRule resources associated with the given node and filters out those that are marked for deletion.
-// If no active firewall rules are found, it triggers the deletion of firewall rules on the provider side.
-// Otherwise, it reconciles the existing firewall rules.
-//
-// Parameters:
-//   - ctx: The context for the reconciliation process.
-//   - log: The logger used for logging messages.
-//   - nodeName: The name of the node for which firewall rules are being reconciled.
-//
-// Returns:
-//   - error: An error if the reconciliation process fails, otherwise nil.
-func (r *FirewallRuleReconciler) reconcileNodeFirewallRules(
-	ctx context.Context,
-	log logr.Logger,
-	nodeName string,
-	firewallrule *v1alpha1.FirewallRule,
-) error {
-	var firewallRuleList v1alpha1.FirewallRuleList
-	if err := r.List(ctx, &firewallRuleList, client.MatchingFields{firewallRuleNodeNameKey: nodeName}); err != nil {
-		log.Error(err, "Unable to list FirewallRules")
-		return err
-	}
-
-	firewallRuleList.Items = slices.DeleteFunc(firewallRuleList.Items, func(fr v1alpha1.FirewallRule) bool {
-		return !fr.DeletionTimestamp.IsZero()
-	})
-
-	if len(firewallRuleList.Items) == 0 {
-		if err := r.Provider.ReconcileFirewallRulesDeletion(ctx, log, nodeName); err != nil {
-			log.Error(err, "Failed to reconcile FirewallRule deletion")
-			return err
-		}
-	} else {
-		if err := r.reconcileFirewallRule(ctx, log, nodeName, firewallrule); err != nil {
-			log.Error(err, "Failed to reconcile FirewallRules")
-			return err
-		}
-	}
-
-	return nil
 }
 
 // patchFirewallRuleStatus updates the status of a FirewallRule resource if there are any changes.
