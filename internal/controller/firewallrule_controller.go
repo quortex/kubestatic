@@ -20,13 +20,11 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"reflect"
-	"slices"
 
 	"github.com/go-logr/logr"
 	corev1 "k8s.io/api/core/v1"
+	"k8s.io/apimachinery/pkg/api/equality"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
-	"k8s.io/apimachinery/pkg/api/meta"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/types"
@@ -107,8 +105,8 @@ func (r *FirewallRuleReconciler) Reconcile(ctx context.Context, req ctrl.Request
 	// reconcile FirewallRules for the current node and update the
 	// FirewallRule with the node annotation
 	if previousNodeName == "" && currentNodeName != "" {
-		if err := r.reconcileNodeFirewallRules(ctx, log, currentNodeName); err != nil {
-			log.Error(err, "Failed to reconcile node FirewallRules")
+		if err := r.reconcileFirewallRule(ctx, log, currentNodeName, firewallRule); err != nil {
+			log.Error(err, "Failed to reconcile FirewallRule")
 			return ctrl.Result{}, err
 		}
 
@@ -129,8 +127,8 @@ func (r *FirewallRuleReconciler) Reconcile(ctx context.Context, req ctrl.Request
 	// Node name has changed, reconcile FirewallRules for the previous node,
 	// then update the FirewallRule to remove the node annotation
 	if previousNodeName != "" && currentNodeName != previousNodeName {
-		if err := r.reconcileNodeFirewallRules(ctx, log, previousNodeName); err != nil {
-			log.Error(err, "Failed to reconcile node FirewallRules")
+		if err := r.reconcileFirewallRule(ctx, log, previousNodeName, firewallRule); err != nil {
+			log.Error(err, "Failed to reconcile FirewallRule")
 			return ctrl.Result{}, err
 		}
 
@@ -146,8 +144,8 @@ func (r *FirewallRuleReconciler) Reconcile(ctx context.Context, req ctrl.Request
 
 	// Node name has not changed, reconcile FirewallRules for the current node
 	if previousNodeName != "" && currentNodeName == previousNodeName {
-		if err := r.reconcileNodeFirewallRules(ctx, log, currentNodeName); err != nil {
-			log.Error(err, "Failed to reconcile node FirewallRules")
+		if err := r.reconcileFirewallRule(ctx, log, currentNodeName, firewallRule); err != nil {
+			log.Error(err, "Failed to reconcile FirewallRule")
 			return ctrl.Result{}, err
 		}
 	}
@@ -167,45 +165,35 @@ func (r *FirewallRuleReconciler) Reconcile(ctx context.Context, req ctrl.Request
 	return ctrl.Result{}, nil
 }
 
-// reconcileNodeFirewallRules reconciles the firewall rules for a specific node.
-// It lists all FirewallRule resources associated with the given node and filters out those that are marked for deletion.
-// If no active firewall rules are found, it triggers the deletion of firewall rules on the provider side.
-// Otherwise, it reconciles the existing firewall rules.
+// patchFirewallRuleStatus updates the status of a FirewallRule resource if there are any changes.
+// It patches the status with the new status provided and updates the LastTransitionTime if there are differences.
 //
 // Parameters:
-//   - ctx: The context for the reconciliation process.
-//   - log: The logger used for logging messages.
-//   - nodeName: The name of the node for which firewall rules are being reconciled.
+//
+//	ctx - The context for the request.
+//	r - The FirewallRuleReconciler responsible for reconciling the FirewallRule resource.
+//	firewallRule - The FirewallRule resource to be updated.
+//	newStatus - The new status to be applied to the FirewallRule resource.
 //
 // Returns:
-//   - error: An error if the reconciliation process fails, otherwise nil.
-func (r *FirewallRuleReconciler) reconcileNodeFirewallRules(
+//
+//	error - An error if the patch operation fails, otherwise nil.
+func patchFirewallRuleStatus(
 	ctx context.Context,
-	log logr.Logger,
-	nodeName string,
+	r *FirewallRuleReconciler,
+	firewallRule *v1alpha1.FirewallRule,
+	newStatus v1alpha1.FirewallRuleStatus,
 ) error {
-	var firewallRuleList v1alpha1.FirewallRuleList
-	if err := r.List(ctx, &firewallRuleList, client.MatchingFields{firewallRuleNodeNameKey: nodeName}); err != nil {
-		log.Error(err, "Unable to list FirewallRules")
-		return err
-	}
+	existingFR := firewallRule.DeepCopy()
+	firewallRule.Status = newStatus
+	firewallRule.Status.LastTransitionTime = existingFR.Status.LastTransitionTime
 
-	firewallRuleList.Items = slices.DeleteFunc(firewallRuleList.Items, func(fr v1alpha1.FirewallRule) bool {
-		return !fr.DeletionTimestamp.IsZero()
-	})
-
-	if len(firewallRuleList.Items) == 0 {
-		if err := r.Provider.ReconcileFirewallRulesDeletion(ctx, log, nodeName); err != nil {
-			log.Error(err, "Failed to reconcile FirewallRule deletion")
-			return err
-		}
-	} else {
-		if err := r.reconcileFirewallRules(ctx, log, nodeName, firewallRuleList.Items); err != nil {
-			log.Error(err, "Failed to reconcile FirewallRules")
+	if !equality.Semantic.DeepEqual(firewallRule.Status, existingFR.Status) {
+		firewallRule.Status.LastTransitionTime = metav1.Now()
+		if err := r.Status().Patch(ctx, firewallRule, client.MergeFrom(existingFR)); err != nil {
 			return err
 		}
 	}
-
 	return nil
 }
 
@@ -222,11 +210,11 @@ func (r *FirewallRuleReconciler) reconcileNodeFirewallRules(
 //
 // Returns:
 //   - error: An error if the reconciliation process fails, otherwise nil.
-func (r *FirewallRuleReconciler) reconcileFirewallRules(
+func (r *FirewallRuleReconciler) reconcileFirewallRule(
 	ctx context.Context,
 	log logr.Logger,
 	nodeName string,
-	firewallRules []v1alpha1.FirewallRule,
+	firewallRule *v1alpha1.FirewallRule,
 ) error {
 	var node corev1.Node
 	if err := r.Get(ctx, types.NamespacedName{Name: nodeName}, &node); err != nil {
@@ -242,45 +230,26 @@ func (r *FirewallRuleReconciler) reconcileFirewallRules(
 		return err
 	}
 
-	status, conditions, err := r.Provider.ReconcileFirewallRules(ctx, log, nodeName, r.Provider.GetInstanceID(node), firewallRules)
+	var firewallRules v1alpha1.FirewallRuleList
+	if err := r.List(ctx, &firewallRules, client.MatchingFields{firewallRuleNodeNameKey: nodeName}); err != nil {
+		log.Error(err, "Unable to list FirewallRules")
+		return err
+	}
+
+	status, err := r.Provider.ReconcileFirewallRule(ctx, log, nodeName, r.Provider.GetInstanceID(node), firewallRule, firewallRules.Items)
 	if err != nil {
-		for _, fr := range firewallRules {
-			for _, condition := range conditions {
-				condition.ObservedGeneration = fr.Generation
-				meta.SetStatusCondition(&status.Conditions, condition)
-			}
-			existingFR := fr.DeepCopy()
-			fr.Status = status
-			fr.Status.LastTransitionTime = existingFR.Status.LastTransitionTime
-			if !reflect.DeepEqual(fr.Status, existingFR.Status) {
-				fr.Status.LastTransitionTime = metav1.Now()
-				patchErr := r.Status().Patch(ctx, &fr, client.MergeFrom(existingFR))
-				if patchErr != nil {
-					log.Error(errors.Join(patchErr, err), "Failed to patch FirewallRule status during error handling")
-					return fmt.Errorf("failed to patch FirewallRule status during error handling: %w", errors.Join(patchErr, err))
-				}
-			}
+		if patchErr := patchFirewallRuleStatus(ctx, r, firewallRule, status); patchErr != nil {
+			log.Error(errors.Join(patchErr, err), "Failed to patch FirewallRule status during error handling")
+			return fmt.Errorf("failed to patch FirewallRule status during error handling: %w", errors.Join(patchErr, err))
 		}
+
 		log.Error(err, "Failed to reconcile FirewallRule")
 		return err
 	}
 
-	for _, fr := range firewallRules {
-		for _, condition := range conditions {
-			meta.SetStatusCondition(&status.Conditions, condition)
-			condition.ObservedGeneration = fr.GetGeneration()
-		}
-		existingFR := fr.DeepCopy()
-		fr.Status = status
-		fr.Status.LastTransitionTime = existingFR.Status.LastTransitionTime
-		if !reflect.DeepEqual(fr.Status, existingFR.Status) {
-			fr.Status.LastTransitionTime = metav1.Now()
-			err := r.Status().Patch(ctx, &fr, client.MergeFrom(existingFR))
-			if err != nil {
-				log.Error(err, "Failed to patch FirewallRule status")
-				return fmt.Errorf("failed to patch FirewallRule status: %w", err)
-			}
-		}
+	if err := patchFirewallRuleStatus(ctx, r, firewallRule, status); err != nil {
+		log.Error(err, "Failed to patch FirewallRule status")
+		return fmt.Errorf("failed to patch FirewallRule status: %w", err)
 	}
 
 	return nil
