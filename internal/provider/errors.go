@@ -19,6 +19,8 @@ const (
 	ConflictError ErrorCode = "ConflictError"
 	// RulesPerSecurityGroupLimitExceededError is when the request could not be processed because of a limit exceeded
 	RulesPerSecurityGroupLimitExceededError ErrorCode = "RulesPerSecurityGroupLimitExceeded"
+	// AddressLimitExceededError is when the request could not be processed because of a limit exceeded
+	AddressLimitExceededError ErrorCode = "AddressLimitExceeded"
 	// InternalError is when there was an unexpected error in the server
 	InternalError ErrorCode = "InternalError"
 )
@@ -77,6 +79,14 @@ func IsErrInternal(err error) bool {
 func IsErrRulesPerSecurityGroupLimitExceeded(err error) bool {
 	if e, ok := err.(*Error); ok {
 		return e.Code == RulesPerSecurityGroupLimitExceededError
+	}
+	return false
+}
+
+// IsErrAddressLimitExceeded returns if error is kind AddressLimitExceededError
+func IsErrAddressLimitExceeded(err error) bool {
+	if e, ok := err.(*Error); ok {
+		return e.Code == AddressLimitExceededError
 	}
 	return false
 }
