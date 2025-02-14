@@ -62,6 +62,9 @@ func DecodeCommonError(msg string, err error) error {
 			"ValidationError":
 			return &provider.Error{Code: provider.BadRequestError, Msg: msg}
 		case
+			"AddressLimitExceeded":
+			return &provider.Error{Code: provider.AddressLimitExceededError, Msg: msg}
+		case
 			"RulesPerSecurityGroupLimitExceeded",
 			"Throttling":
 			return &provider.Error{Code: provider.RulesPerSecurityGroupLimitExceededError, Msg: msg}
