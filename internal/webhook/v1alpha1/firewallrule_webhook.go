@@ -19,10 +19,12 @@ package v1alpha1
 import (
 	"context"
 	"fmt"
+	"slices"
 
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/util/validation/field"
+	"k8s.io/utils/ptr"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	logf "sigs.k8s.io/controller-runtime/pkg/log"
@@ -33,7 +35,6 @@ import (
 	"github.com/quortex/kubestatic/internal/provider"
 )
 
-// nolint:unused
 // log is for logging in this package.
 var firewallrulelog = logf.Log.WithName("firewallrule-resource")
 
@@ -42,15 +43,10 @@ const firewallRuleNodeNameKey = ".spec.nodeName"
 // SetupFirewallRuleWebhookWithManager registers the webhook for FirewallRule in the manager.
 func SetupFirewallRuleWebhookWithManager(mgr ctrl.Manager) error {
 	return ctrl.NewWebhookManagedBy(mgr).For(&v1alpha1.FirewallRule{}).
-		WithValidator(&FirewallRuleCustomValidator{}).
+		WithValidator(&FirewallRuleCustomValidator{Client: mgr.GetClient()}).
 		Complete()
 }
 
-// TODO(user): EDIT THIS FILE!  THIS IS SCAFFOLDING FOR YOU TO OWN!
-
-// TODO(user): change verbs to "verbs=create;update;delete" if you want to enable deletion validation.
-// NOTE: The 'path' attribute must follow a specific pattern and should not be modified directly here.
-// Modifying the path for an invalid path can cause API server errors; failing to locate the webhook.
 // +kubebuilder:webhook:path=/validate-kubestatic-quortex-io-v1alpha1-firewallrule,mutating=false,failurePolicy=fail,sideEffects=None,groups=kubestatic.quortex.io,resources=firewallrules,verbs=create;update,versions=v1alpha1,name=vfirewallrule-v1alpha1.kb.io,admissionReviewVersions=v1
 
 // FirewallRuleCustomValidator struct is responsible for validating the FirewallRule resource
@@ -99,34 +95,37 @@ func (v *FirewallRuleCustomValidator) ValidateDelete(ctx context.Context, obj ru
 	return nil, nil
 }
 
-// ValidateDelete implements webhook.CustomValidator so a webhook will be registered for the type FirewallRule.
-func (v *FirewallRuleCustomValidator) validate(ctx context.Context, firewallRule *v1alpha1.FirewallRule) (admission.Warnings, error) {
-	var firewallRules v1alpha1.FirewallRuleList
+// validate implements webhook.CustomValidator so a webhook will be registered for the type FirewallRule.
+func (v *FirewallRuleCustomValidator) validate(ctx context.Context, firewallrule *v1alpha1.FirewallRule) (admission.Warnings, error) {
 	var allErrs field.ErrorList
 
-	path := field.NewPath("spec").Child("nodeName")
-	if (firewallRule.Spec.NodeName == nil) || (firewallRule.Spec.NodeName != nil && *firewallRule.Spec.NodeName == "") {
-		allErrs = append(allErrs, field.Invalid(path, firewallRule.Spec.NodeName, "nodeName must be set."))
-	} else {
-		nodename := firewallRule.Spec.NodeName
-
-		if err := v.List(ctx, &firewallRules, client.MatchingFields{firewallRuleNodeNameKey: *nodename}); err != nil {
+	path := field.NewPath("spec")
+	nodename := ptr.Deref(firewallrule.Spec.NodeName, "")
+	if nodename != "" {
+		var firewallrules v1alpha1.FirewallRuleList
+		if err := v.List(ctx, &firewallrules, client.MatchingFields{firewallRuleNodeNameKey: nodename}); err != nil {
 			firewallrulelog.Error(err, "Unable to list FirewallRules")
 			return nil, err
 		}
 
-		frSpec := provider.EncodeFirewallRuleSpec(firewallRule)
-		frSpecs := provider.EncodeFirewallRuleSpecs(firewallRules.Items)
+		firewallrules.Items = slices.DeleteFunc(firewallrules.Items, func(fr v1alpha1.FirewallRule) bool {
+			return fr.Name == firewallrule.Name
+		})
 
-		if frSpec.Direction == provider.DirectionIngress && provider.ContainsPermission(provider.GetIngressIPPermissions(frSpecs), frSpec.IPPermission) {
-			allErrs = append(allErrs, field.Invalid(path, firewallRule.Spec.NodeName, "ingress rule already exists."))
-		} else if frSpec.Direction == provider.DirectionEgress && provider.ContainsPermission(provider.GetEgressIPPermissions(frSpecs), frSpec.IPPermission) {
-			allErrs = append(allErrs, field.Invalid(path, firewallRule.Spec.NodeName, "egress rule already exists."))
+		frSpec := provider.EncodeFirewallRuleSpec(firewallrule)
+		frSpecs := provider.EncodeFirewallRuleSpecs(firewallrules.Items)
+
+		if frSpec.Direction == provider.DirectionIngress &&
+			provider.ContainsPermission(provider.GetIngressIPPermissions(frSpecs), frSpec.IPPermission) {
+			allErrs = append(allErrs, field.Duplicate(path, firewallrule.Spec))
+		} else if frSpec.Direction == provider.DirectionEgress &&
+			provider.ContainsPermission(provider.GetEgressIPPermissions(frSpecs), frSpec.IPPermission) {
+			allErrs = append(allErrs, field.Duplicate(path, firewallrule.Spec))
 		}
 	}
 
 	if len(allErrs) > 0 {
-		return nil, apierrors.NewInvalid(v1alpha1.GroupVersion.WithKind("FirewallRule").GroupKind(), firewallRule.Name, allErrs)
+		return nil, apierrors.NewInvalid(v1alpha1.GroupVersion.WithKind("FirewallRule").GroupKind(), firewallrule.Name, allErrs)
 	}
 
 	return nil, nil

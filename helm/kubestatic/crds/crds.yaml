@@ -2,6 +2,7 @@ apiVersion: apiextensions.k8s.io/v1
 kind: CustomResourceDefinition
 metadata:
   annotations:
+    cert-manager.io/inject-ca-from: kubestatic-system/kubestatic-serving-cert
     controller-gen.kubebuilder.io/version: v0.16.1
   name: externalips.kubestatic.quortex.io
 spec:
@@ -86,6 +87,7 @@ apiVersion: apiextensions.k8s.io/v1
 kind: CustomResourceDefinition
 metadata:
   annotations:
+    cert-manager.io/inject-ca-from: kubestatic-system/kubestatic-serving-cert
     controller-gen.kubebuilder.io/version: v0.16.1
   name: firewallrules.kubestatic.quortex.io
 spec:
