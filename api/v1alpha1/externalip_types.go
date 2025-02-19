@@ -42,21 +42,9 @@ type ExternalIPState string
 
 // All defined ExternalIPStates
 const (
-	ExternalIPStatePending    ExternalIPState = "Pending"
+	ExternalIPStateNone       ExternalIPState = ""
+	ExternalIPStateReserved   ExternalIPState = "Reserved"
 	ExternalIPStateAssociated ExternalIPState = "Associated"
-)
-
-// The list of condition types.
-const (
-	ExternalIPConditionTypeIPCreated                  = "IPCreated"
-	ExternalIPConditionTypeNetworkInterfaceAssociated = "NetworkInterfaceAssociated"
-)
-
-// The list of condition reasons.
-const (
-	ExternalIPConditionReasonProviderError              = "ProviderError"
-	ExternalIPConditionReasonIPCreated                  = "IPCreated"
-	ExternalIPConditionReasonNetworkInterfaceAssociated = "NetworkInterfaceAssociated"
 )
 
 // ExternalIPStatus defines the observed state of ExternalIP
@@ -72,10 +60,6 @@ type ExternalIPStatus struct {
 
 	// The instance identifier
 	InstanceID *string `json:"instanceID,omitempty"`
-
-	// Current conditions of the ExternalIP.
-	// +kubebuilder:validation:Optional
-	Conditions []metav1.Condition `json:"conditions,omitempty"`
 }
 
 // +kubebuilder:object:root=true
@@ -92,6 +76,11 @@ type ExternalIP struct {
 
 	Spec   ExternalIPSpec   `json:"spec,omitempty"`
 	Status ExternalIPStatus `json:"status,omitempty"`
+}
+
+// IsReserved returns if externalIP is reserved
+func (e *ExternalIP) IsReserved() bool {
+	return e.Status.State == ExternalIPStateReserved
 }
 
 // IsAssociated returns if externalIP is associated

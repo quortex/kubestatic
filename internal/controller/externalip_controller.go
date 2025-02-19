@@ -19,12 +19,11 @@ package controller
 import (
 	"context"
 	"encoding/json"
-	"errors"
 	"fmt"
+	"reflect"
 
 	corev1 "k8s.io/api/core/v1"
-	"k8s.io/apimachinery/pkg/api/equality"
-	apierrors "k8s.io/apimachinery/pkg/api/errors"
+	"k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/apimachinery/pkg/util/strategicpatch"
@@ -64,7 +63,7 @@ func (r *ExternalIPReconciler) Reconcile(ctx context.Context, req ctrl.Request) 
 
 	externalIP := &v1alpha1.ExternalIP{}
 	if err := r.Get(ctx, req.NamespacedName, externalIP); err != nil {
-		if apierrors.IsNotFound(err) {
+		if errors.IsNotFound(err) {
 			// Request object not found, could have been deleted after reconcile request.
 			// Return and don't requeue
 			log.Info("ExternalIP resource not found. Ignoring since object must be deleted")
@@ -96,7 +95,7 @@ func (r *ExternalIPReconciler) Reconcile(ctx context.Context, req ctrl.Request) 
 	var instanceID string
 	if externalIP.Spec.NodeName != "" {
 		if err := r.Get(ctx, types.NamespacedName{Name: externalIP.Spec.NodeName}, &node); err != nil {
-			if apierrors.IsNotFound(err) {
+			if errors.IsNotFound(err) {
 				// Invalid nodeName, remove ExternalIP nodeName attribute.
 				externalIP.Spec.NodeName = ""
 				if err != r.Update(ctx, externalIP) {
@@ -119,10 +118,6 @@ func (r *ExternalIPReconciler) Reconcile(ctx context.Context, req ctrl.Request) 
 	if externalIP.ObjectMeta.DeletionTimestamp.IsZero() {
 		status, err = r.Provider.ReconcileExternalIP(ctx, log, instanceID, externalIP)
 		if err != nil {
-			if patchErr := patchExternalIPStatus(ctx, r, externalIP, status); patchErr != nil {
-				log.Error(errors.Join(patchErr, err), "Failed to patch ExternalIP status during error handling")
-				return ctrl.Result{}, fmt.Errorf("failed to patch ExternalIP status during error handling: %w", errors.Join(patchErr, err))
-			}
 			log.Error(err, "Failed to reconcile ExternalIP")
 			return ctrl.Result{}, err
 		}
@@ -173,9 +168,17 @@ func (r *ExternalIPReconciler) Reconcile(ctx context.Context, req ctrl.Request) 
 		return ctrl.Result{}, nil
 	}
 
-	if err := patchExternalIPStatus(ctx, r, externalIP, status); err != nil {
-		log.Error(err, "Failed to patch ExternalIP status")
-		return ctrl.Result{}, fmt.Errorf("failed to patch ExternalIP status: %w", err)
+	// Copy the existing ExternalIP to avoid mutating the original
+	existingExternalIP := externalIP.DeepCopy()
+
+	// Patch the Pool status if it differs from the desired status
+	externalIP.Status = status
+	if !reflect.DeepEqual(externalIP.Status, existingExternalIP.Status) {
+		err := r.Status().Patch(ctx, externalIP, client.MergeFrom(existingExternalIP))
+		if err != nil {
+			log.Error(err, "Failed to patch ExternalIP status")
+			return ctrl.Result{}, fmt.Errorf("failed to patch ExternalIP status: %w", err)
+		}
 	}
 
 	log.Info("ExternalIP successfully reconciled")
@@ -211,34 +214,4 @@ func (r *ExternalIPReconciler) SetupWithManager(mgr ctrl.Manager) error {
 			}),
 		).
 		Complete(r)
-}
-
-// patchExternalIPStatus updates the status of a ExternalIP resource if there are any changes.
-// It patches the status with the new status provided and updates the LastTransitionTime if there are differences.
-//
-// Parameters:
-//
-//	ctx - The context for the request.
-//	r - The ExternalIPReconciler responsible for reconciling the ExternalIP resource.
-//	externalIP - The ExternalIP resource to be updated.
-//	newStatus - The new status to be applied to the ExternalIP resource.
-//
-// Returns:
-//
-//	error - An error if the patch operation fails, otherwise nil.
-func patchExternalIPStatus(
-	ctx context.Context,
-	r *ExternalIPReconciler,
-	externalIP *v1alpha1.ExternalIP,
-	newStatus v1alpha1.ExternalIPStatus,
-) error {
-	existingEIP := externalIP.DeepCopy()
-	externalIP.Status = newStatus
-
-	if !equality.Semantic.DeepEqual(externalIP.Status, existingEIP.Status) {
-		if err := r.Status().Patch(ctx, externalIP, client.MergeFrom(existingEIP)); err != nil {
-			return err
-		}
-	}
-	return nil
 }
