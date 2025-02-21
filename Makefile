@@ -90,9 +90,12 @@ charts: yq helm-docs kustomize ## Generate helm charts and their documentations
 	@$(YQ) '.metadata.name = ("PREFIX-" + .metadata.name)' config/rbac/role.yaml | \
 		sed "s/PREFIX/{{ include \"kubestatic.fullname\" . }}/" > helm/kubestatic/templates/manager_role.yaml
 	@$(KUSTOMIZE) build config/default/ > $(TMP)/result.yaml
-	${YQ} 'select(.kind=="CustomResourceDefinition")' $${TMPFILE} > helm/kubestatic/crds/crds.yaml && \
-	rm -rf $${TMPFILE}
+	@$(YQ) 'select(.kind=="ValidatingWebhookConfiguration" or .kind=="MutatingWebhookConfiguration")' $(TMP)/result.yaml | \
+		sed -e 's|name: kubestatic|name: {{ include \"kubestatic.fullname\" . }}|' \
+			-e 's|cert-manager.io/inject-ca-from: .*|cert-manager.io/inject-ca-from: {{ .Release.Namespace }}/{{ include \"kubestatic.fullname\" . }}-serving-cert|' \
+			-e 's|namespace: .*|namespace: {{ .Release.Namespace }}|' > helm/kubestatic/templates/webhooks.yaml
 	@$(YQ) 'select(.kind=="CustomResourceDefinition")' $(TMP)/result.yaml > helm/kubestatic/crds/crds.yaml
+	@rm -rf $(TMP)
 	@$(HELM_DOCS) -s file
 
 
