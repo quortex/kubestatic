@@ -1,0 +1,27 @@
+apiVersion: admissionregistration.k8s.io/v1
+kind: ValidatingWebhookConfiguration
+metadata:
+  annotations:
+    cert-manager.io/inject-ca-from: {{ .Release.Namespace }}/{{ include "kubestatic.fullname" . }}-serving-cert
+  name: {{ include "kubestatic.fullname" . }}-validating-webhook-configuration
+webhooks:
+  - admissionReviewVersions:
+      - v1
+    clientConfig:
+      service:
+        name: {{ include "kubestatic.fullname" . }}-webhook-service
+        namespace: {{ .Release.Namespace }}
+        path: /validate-kubestatic-quortex-io-v1alpha1-firewallrule
+    failurePolicy: Fail
+    name: vfirewallrule-v1alpha1.kb.io
+    rules:
+      - apiGroups:
+          - kubestatic.quortex.io
+        apiVersions:
+          - v1alpha1
+        operations:
+          - CREATE
+          - UPDATE
+        resources:
+          - firewallrules
+    sideEffects: None
