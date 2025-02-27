@@ -7,6 +7,8 @@ import (
 	"fmt"
 	"path"
 	"slices"
+	"sync"
+	"time"
 
 	"github.com/aws/aws-sdk-go-v2/config"
 	"github.com/aws/aws-sdk-go-v2/service/ec2"
@@ -14,6 +16,8 @@ import (
 	"github.com/aws/aws-sdk-go/aws"
 	"github.com/aws/smithy-go/metrics/smithyotelmetrics"
 	"github.com/go-logr/logr"
+	"github.com/mitchellh/hashstructure/v2"
+	"github.com/patrickmn/go-cache"
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/meta"
 	kmetav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -33,6 +37,13 @@ const (
 	TagKeyNodeName       TagKey = TagKeyDomain + "/node-name"        // Tag key for node name
 	TagKeyInstanceID     TagKey = TagKeyDomain + "/instance-id"      // Tag key for instance ID
 	TagKeyExternalIPName TagKey = TagKeyDomain + "/external-ip-name" // Tag key for external IP name
+)
+
+const (
+	// The duration for the items in the cache to expire (by default)
+	DefaultTTL = 15 * time.Minute
+	// DefaultCleanupInterval triggers cache cleanup (lazy eviction) at this interval.
+	DefaultCleanupInterval = time.Minute
 )
 
 // FilterOption is a filter option for AWS API calls.
@@ -136,7 +147,9 @@ func WithAddressID(addressID string) AddressIDFilter {
 
 // awsProvider is an AWS provider implementation for the provider.Provider interface
 type awsProvider struct {
-	ec2 *ec2.Client
+	sync.Mutex
+	ec2   *ec2.Client
+	cache *cache.Cache
 }
 
 // NewProvider instantiate a Provider implementation for AWS
@@ -157,6 +170,7 @@ func NewProvider() (provider.Provider, error) {
 			// https://github.com/aws/aws-sdk-go-v2/discussions/2810
 			o.MeterProvider = smithyotelmetrics.Adapt(meterProvider)
 		}),
+		cache: cache.New(DefaultTTL, DefaultCleanupInterval),
 	}, nil
 }
 
@@ -166,6 +180,14 @@ func (p *awsProvider) GetInstanceID(node corev1.Node) string {
 }
 
 func (p *awsProvider) getInstance(ctx context.Context, instanceID string) (*types.Instance, error) {
+	p.Lock()
+	defer p.Unlock()
+
+	// Check cache first
+	if cachedInstance, ok := p.cache.Get(instanceID); ok {
+		return cachedInstance.(*types.Instance), nil
+	}
+
 	res, err := p.ec2.DescribeInstances(ctx, &ec2.DescribeInstancesInput{
 		InstanceIds: []string{instanceID},
 	})
@@ -178,10 +200,21 @@ func (p *awsProvider) getInstance(ctx context.Context, instanceID string) (*type
 			Msg:  fmt.Sprintf("failed to get instance: instance with instance-id %s not found", instanceID),
 		}
 	}
+
+	// Add instance to cache
+	p.cache.SetDefault(instanceID, &res.Reservations[0].Instances[0])
+
 	return &res.Reservations[0].Instances[0], nil
 }
 
 func (p *awsProvider) getNetworkInterfaces(ctx context.Context, securityGroupID string) ([]types.NetworkInterface, error) {
+	p.Lock()
+	defer p.Unlock()
+
+	// Check cache first
+	if cachedENI, ok := p.cache.Get(securityGroupID); ok {
+		return cachedENI.([]types.NetworkInterface), nil
+	}
 	res, err := p.ec2.DescribeNetworkInterfaces(ctx, &ec2.DescribeNetworkInterfacesInput{
 		Filters: []types.Filter{
 			{
@@ -193,6 +226,8 @@ func (p *awsProvider) getNetworkInterfaces(ctx context.Context, securityGroupID 
 	if err != nil {
 		return nil, converter.DecodeEC2Error("failed to list network interfaces", err)
 	}
+	// Add NetworkInterfaces to cache
+	p.cache.SetDefault(securityGroupID, res.NetworkInterfaces)
 	return res.NetworkInterfaces, nil
 }
 
@@ -210,9 +245,21 @@ func (p *awsProvider) getSecurityGroup(
 	ctx context.Context,
 	opts ...FilterOption,
 ) (*types.SecurityGroup, error) {
+	p.Lock()
+	defer p.Unlock()
+
 	filters := make([]types.Filter, len(opts))
 	for _, opt := range opts {
 		filters = append(filters, opt.Filter())
+	}
+
+	hash, err := hashstructure.Hash(filters, hashstructure.FormatV2, &hashstructure.HashOptions{SlicesAsSets: true})
+	if err != nil {
+		return nil, converter.DecodeEC2Error("failed to hash filters", err)
+	}
+
+	if sg, ok := p.cache.Get(fmt.Sprint(hash)); ok {
+		return sg.(*types.SecurityGroup), nil
 	}
 
 	res, err := p.ec2.DescribeSecurityGroups(ctx, &ec2.DescribeSecurityGroupsInput{Filters: filters})
@@ -226,6 +273,10 @@ func (p *awsProvider) getSecurityGroup(
 			Msg:  "failed to get security group: security group not found",
 		}
 	}
+
+	// Add securityGroup to cache
+	p.cache.SetDefault(fmt.Sprint(hash), &res.SecurityGroups[0])
+
 	return &res.SecurityGroups[0], nil
 }
 
@@ -376,9 +427,21 @@ func (p *awsProvider) getAddress(
 	ctx context.Context,
 	opts ...FilterOption,
 ) (*types.Address, error) {
+	p.Lock()
+	defer p.Unlock()
+
 	filters := make([]types.Filter, len(opts))
 	for _, opt := range opts {
 		filters = append(filters, opt.Filter())
+	}
+
+	hash, err := hashstructure.Hash(filters, hashstructure.FormatV2, &hashstructure.HashOptions{SlicesAsSets: true})
+	if err != nil {
+		return nil, converter.DecodeEC2Error("failed to hash filters", err)
+	}
+
+	if sg, ok := p.cache.Get(fmt.Sprint(hash)); ok {
+		return sg.(*types.Address), nil
 	}
 
 	res, err := p.ec2.DescribeAddresses(ctx, &ec2.DescribeAddressesInput{Filters: filters})
@@ -392,6 +455,9 @@ func (p *awsProvider) getAddress(
 			Msg:  "failed to get address: address not found",
 		}
 	}
+
+	// Add address to cache
+	p.cache.SetDefault(fmt.Sprint(hash), &res.Addresses[0])
 	return &res.Addresses[0], nil
 }
 
@@ -491,7 +557,7 @@ func (p *awsProvider) ReconcileFirewallRule(
 	}
 
 	// Get the instance
-	instance, err := p.getInstance(ctx, instanceID)
+	instance, err := p.getInstance(ctx, instanceID) // Why a pointer I see no modification of the object
 	if err != nil {
 		return status, fmt.Errorf("failed to get instance: %w", err)
 	}
