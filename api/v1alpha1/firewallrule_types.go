@@ -97,6 +97,7 @@ const (
 	FirewallRuleConditionReasonSecurityGroupCreated        = "SecurityGroupCreated"
 	FirewallRuleConditionReasonNetworkInterfaceAssociated  = "NetworkInterfaceAssociated"
 	FirewallRuleConditionReasonSecurityGroupRuleAuthorized = "SecurityGroupRuleAuthorized"
+	FirewallRuleConditionReasonNodeRetrievalError          = "NodeRetrievalError"
 )
 
 // FirewallRuleStatus defines the observed state of FirewallRule

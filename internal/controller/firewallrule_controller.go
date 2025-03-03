@@ -25,7 +25,8 @@ import (
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/equality"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
-	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/api/meta"
+	kmetav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/utils/ptr"
@@ -84,6 +85,20 @@ func (r *FirewallRuleReconciler) Reconcile(ctx context.Context, req ctrl.Request
 
 	if firewallRule.Spec.NodeName == nil {
 		log.V(1).Info("No nodename found on the FirewallRule")
+		status := v1alpha1.FirewallRuleStatus{
+			State: v1alpha1.FirewallRuleStatePending,
+		}
+		meta.SetStatusCondition(&status.Conditions, kmetav1.Condition{
+			Type:               v1alpha1.FirewallRuleConditionTypeSecurityGroupRuleAuthorized,
+			Status:             kmetav1.ConditionFalse,
+			ObservedGeneration: firewallRule.Generation,
+			Reason:             v1alpha1.FirewallRuleConditionReasonNodeRetrievalError,
+			Message:            "The node name is empty",
+		})
+		if err := patchFirewallRuleStatus(ctx, r, firewallRule, status); err != nil {
+			log.Error(err, "Failed to patch FirewallRule status")
+			return ctrl.Result{}, fmt.Errorf("failed to patch FirewallRule status: %w", err)
+		}
 		return ctrl.Result{}, nil
 	}
 
@@ -189,7 +204,7 @@ func patchFirewallRuleStatus(
 	firewallRule.Status.LastTransitionTime = existingFR.Status.LastTransitionTime
 
 	if !equality.Semantic.DeepEqual(firewallRule.Status, existingFR.Status) {
-		firewallRule.Status.LastTransitionTime = metav1.Now()
+		firewallRule.Status.LastTransitionTime = kmetav1.Now()
 		if err := r.Status().Patch(ctx, firewallRule, client.MergeFrom(existingFR)); err != nil {
 			return err
 		}
@@ -218,6 +233,22 @@ func (r *FirewallRuleReconciler) reconcileFirewallRule(
 ) error {
 	var node corev1.Node
 	if err := r.Get(ctx, types.NamespacedName{Name: nodeName}, &node); err != nil {
+		status := v1alpha1.FirewallRuleStatus{
+			State: v1alpha1.FirewallRuleStatePending,
+		}
+
+		meta.SetStatusCondition(&status.Conditions, kmetav1.Condition{
+			Type:               v1alpha1.FirewallRuleConditionTypeSecurityGroupRuleAuthorized,
+			Status:             kmetav1.ConditionFalse,
+			ObservedGeneration: firewallRule.Generation,
+			Reason:             v1alpha1.FirewallRuleConditionReasonNodeRetrievalError,
+			Message:            fmt.Sprintf("Failed to get Node: %s", err),
+		})
+		if patchErr := patchFirewallRuleStatus(ctx, r, firewallRule, status); patchErr != nil {
+			log.Error(errors.Join(patchErr, err), "Failed to patch FirewallRule status during error handling")
+			return fmt.Errorf("failed to patch FirewallRule status during error handling: %w", errors.Join(patchErr, err))
+		}
+
 		if apierrors.IsNotFound(err) {
 			if err := r.Provider.ReconcileFirewallRulesDeletion(ctx, log, nodeName); err != nil {
 				log.Error(err, "Failed to reconcile FirewallRule deletion")
