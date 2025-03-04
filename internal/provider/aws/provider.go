@@ -38,13 +38,6 @@ const (
 	TagKeyExternalIPName TagKey = TagKeyDomain + "/external-ip-name" // Tag key for external IP name
 )
 
-const (
-	// The duration for the items in the cache to expire (by default)
-	DefaultTTL = 15 * time.Minute
-	// DefaultCleanupInterval triggers cache cleanup (lazy eviction) at this interval.
-	DefaultCleanupInterval = time.Minute
-)
-
 // FilterOption is a filter option for AWS API calls.
 type FilterOption interface {
 	Filter() types.Filter
@@ -158,7 +151,7 @@ type awsProvider struct {
 }
 
 // NewProvider instantiate a Provider implementation for AWS
-func NewProvider() (provider.Provider, error) {
+func NewProvider(defaultTTL time.Duration, defaultCleanupInterval time.Duration) (provider.Provider, error) {
 	// Load the Shared AWS Configuration (~/.aws/config)
 	cfg, err := config.LoadDefaultConfig(context.TODO())
 	if err != nil {
@@ -175,10 +168,10 @@ func NewProvider() (provider.Provider, error) {
 			// https://github.com/aws/aws-sdk-go-v2/discussions/2810
 			o.MeterProvider = smithyotelmetrics.Adapt(meterProvider)
 		}),
-		instancesCache:         cache.New(DefaultTTL, DefaultCleanupInterval),
-		securityGroupsCache:    cache.New(DefaultTTL, DefaultCleanupInterval),
-		networkInterfacesCache: cache.New(DefaultTTL, DefaultCleanupInterval),
-		addressesCache:         cache.New(DefaultTTL, DefaultCleanupInterval),
+		instancesCache:         cache.New(defaultTTL, defaultCleanupInterval),
+		securityGroupsCache:    cache.New(defaultTTL, defaultCleanupInterval),
+		networkInterfacesCache: cache.New(defaultTTL, defaultCleanupInterval),
+		addressesCache:         cache.New(defaultTTL, defaultCleanupInterval),
 	}, nil
 }
 
@@ -243,6 +236,7 @@ func (p *awsProvider) getAddress(ctx context.Context, opts ...FilterOption) (*ty
 	return getResource(p, p.addressesCache, ctx, apiCall, opts...)
 }
 
+// Wrapper function for fetching securityGroups
 func (p *awsProvider) getSecurityGroup(ctx context.Context, opts ...FilterOption) (*types.SecurityGroup, error) {
 	apiCall := func(ctx context.Context, filters []types.Filter) (*types.SecurityGroup, error) {
 		res, err := p.ec2.DescribeSecurityGroups(ctx, &ec2.DescribeSecurityGroupsInput{Filters: filters})
