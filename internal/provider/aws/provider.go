@@ -6,6 +6,8 @@ import (
 	"fmt"
 	"path"
 	"slices"
+	"sync"
+	"time"
 
 	"github.com/aws/aws-sdk-go-v2/config"
 	"github.com/aws/aws-sdk-go-v2/service/ec2"
@@ -13,6 +15,8 @@ import (
 	"github.com/aws/aws-sdk-go/aws"
 	"github.com/aws/smithy-go/metrics/smithyotelmetrics"
 	"github.com/go-logr/logr"
+	"github.com/mitchellh/hashstructure/v2"
+	"github.com/patrickmn/go-cache"
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/meta"
 	kmetav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -135,11 +139,19 @@ func WithAddressID(addressID string) AddressIDFilter {
 
 // awsProvider is an AWS provider implementation for the provider.Provider interface
 type awsProvider struct {
-	ec2 *ec2.Client
+	// We have a mutex because the provider can be used by multiple controllers,
+	// so that we can avoid callers result in cache misses and multiple
+	// calls to AWS API when we could have just made one call.
+	sync.Mutex
+	ec2                    *ec2.Client
+	instancesCache         *cache.Cache
+	securityGroupsCache    *cache.Cache
+	networkInterfacesCache *cache.Cache
+	addressesCache         *cache.Cache
 }
 
 // NewProvider instantiate a Provider implementation for AWS
-func NewProvider() (provider.Provider, error) {
+func NewProvider(defaultTTL time.Duration, defaultCleanupInterval time.Duration) (provider.Provider, error) {
 	// Load the Shared AWS Configuration (~/.aws/config)
 	cfg, err := config.LoadDefaultConfig(context.TODO())
 	if err != nil {
@@ -156,7 +168,90 @@ func NewProvider() (provider.Provider, error) {
 			// https://github.com/aws/aws-sdk-go-v2/discussions/2810
 			o.MeterProvider = smithyotelmetrics.Adapt(meterProvider)
 		}),
+		instancesCache:         cache.New(defaultTTL, defaultCleanupInterval),
+		securityGroupsCache:    cache.New(defaultTTL, defaultCleanupInterval),
+		networkInterfacesCache: cache.New(defaultTTL, defaultCleanupInterval),
+		addressesCache:         cache.New(defaultTTL, defaultCleanupInterval),
 	}, nil
+}
+
+// Standalone generic function for fetching AWS resources
+func getResource[T any](
+	p *awsProvider,
+	cache *cache.Cache,
+	ctx context.Context,
+	apiCall func(context.Context, []types.Filter) (T, error),
+	opts ...FilterOption,
+) (T, error) {
+	var zero T // Default zero value for the generic type
+
+	// We lock here so that multiple callers do not result in cache misses and multiple
+	// calls to AWS API when we could have just made one call.
+	p.Lock()
+	defer p.Unlock()
+
+	// Convert filter options to AWS filters
+	filters := make([]types.Filter, len(opts))
+	for _, opt := range opts {
+		filters = append(filters, opt.Filter())
+	}
+
+	// Hash the filters
+	hash, err := hashstructure.Hash(filters, hashstructure.FormatV2, &hashstructure.HashOptions{SlicesAsSets: true})
+	if err != nil {
+		return zero, converter.DecodeEC2Error("failed to hash filters", err)
+	}
+
+	// Check cache
+	if cached, ok := cache.Get(fmt.Sprint(hash)); ok {
+		return cached.(T), nil
+	}
+
+	// Call the provided AWS API function
+	resource, err := apiCall(ctx, filters)
+	if err != nil {
+		return zero, err
+	}
+
+	// Store in cache
+	cache.SetDefault(fmt.Sprint(hash), resource)
+	return resource, nil
+}
+
+// Wrapper function for fetching Addresses
+func (p *awsProvider) getAddress(ctx context.Context, opts ...FilterOption) (*types.Address, error) {
+	apiCall := func(ctx context.Context, filters []types.Filter) (*types.Address, error) {
+		res, err := p.ec2.DescribeAddresses(ctx, &ec2.DescribeAddressesInput{Filters: filters})
+		if err != nil {
+			return nil, converter.DecodeEC2Error("failed to list addresses", err)
+		}
+		if len(res.Addresses) == 0 {
+			return nil, &provider.Error{
+				Code: provider.NotFoundError,
+				Msg:  "failed to get address: address not found",
+			}
+		}
+		return &res.Addresses[0], nil
+	}
+	return getResource(p, p.addressesCache, ctx, apiCall, opts...)
+}
+
+// Wrapper function for fetching securityGroups
+func (p *awsProvider) getSecurityGroup(ctx context.Context, opts ...FilterOption) (*types.SecurityGroup, error) {
+	apiCall := func(ctx context.Context, filters []types.Filter) (*types.SecurityGroup, error) {
+		res, err := p.ec2.DescribeSecurityGroups(ctx, &ec2.DescribeSecurityGroupsInput{Filters: filters})
+		if err != nil {
+			return nil, converter.DecodeEC2Error("failed to list security groups", err)
+		}
+		if len(res.SecurityGroups) == 0 {
+			return nil, &provider.Error{
+				Code: provider.NotFoundError,
+				Msg:  "failed to get security group: security group not found",
+			}
+		}
+		return &res.SecurityGroups[0], nil
+	}
+	return getResource(p, p.securityGroupsCache, ctx, apiCall, opts...)
 }
 
 // GetInstanceID returns the instance ID from a node
@@ -165,6 +260,16 @@ func (p *awsProvider) GetInstanceID(node corev1.Node) string {
 }
 
 func (p *awsProvider) getInstance(ctx context.Context, instanceID string) (*types.Instance, error) {
+	// We lock here so that multiple callers do not result in cache misses and multiple
+	// calls to AWS API when we could have just made one call.
+	p.Lock()
+	defer p.Unlock()
+
+	// Check cache first
+	if cachedInstance, ok := p.instancesCache.Get(instanceID); ok {
+		return cachedInstance.(*types.Instance), nil
+	}
+
 	res, err := p.ec2.DescribeInstances(ctx, &ec2.DescribeInstancesInput{
 		InstanceIds: []string{instanceID},
 	})
@@ -177,10 +282,23 @@ func (p *awsProvider) getInstance(ctx context.Context, instanceID string) (*type
 			Msg:  fmt.Sprintf("failed to get instance: instance with instance-id %s not found", instanceID),
 		}
 	}
+
+	// Add instance to cache
+	p.instancesCache.SetDefault(instanceID, &res.Reservations[0].Instances[0])
+
 	return &res.Reservations[0].Instances[0], nil
 }
 
 func (p *awsProvider) getNetworkInterfaces(ctx context.Context, securityGroupID string) ([]types.NetworkInterface, error) {
+	// We lock here so that multiple callers do not result in cache misses and multiple
+	// calls to AWS API when we could have just made one call.
+	p.Lock()
+	defer p.Unlock()
+
+	// Check cache first
+	if cachedENI, ok := p.networkInterfacesCache.Get(securityGroupID); ok {
+		return cachedENI.([]types.NetworkInterface), nil
+	}
 	res, err := p.ec2.DescribeNetworkInterfaces(ctx, &ec2.DescribeNetworkInterfacesInput{
 		Filters: []types.Filter{
 			{
@@ -192,6 +310,8 @@ func (p *awsProvider) getNetworkInterfaces(ctx context.Context, securityGroupID 
 	if err != nil {
 		return nil, converter.DecodeEC2Error("failed to list network interfaces", err)
 	}
+	// Add NetworkInterfaces to cache
+	p.networkInterfacesCache.SetDefault(securityGroupID, res.NetworkInterfaces)
 	return res.NetworkInterfaces, nil
 }
 
@@ -203,29 +323,6 @@ func eniWithPublicIP(instance *types.Instance) (*types.InstanceNetworkInterface,
 		return nil, fmt.Errorf("no network interface with public IP found for instance %s", aws.StringValue(instance.InstanceId))
 	}
 	return &instance.NetworkInterfaces[idx], nil
-}
-
-func (p *awsProvider) getSecurityGroup(
-	ctx context.Context,
-	opts ...FilterOption,
-) (*types.SecurityGroup, error) {
-	filters := make([]types.Filter, len(opts))
-	for _, opt := range opts {
-		filters = append(filters, opt.Filter())
-	}
-
-	res, err := p.ec2.DescribeSecurityGroups(ctx, &ec2.DescribeSecurityGroupsInput{Filters: filters})
-	if err != nil {
-		return nil, converter.DecodeEC2Error("failed to list security groups", err)
-	}
-
-	if len(res.SecurityGroups) == 0 {
-		return nil, &provider.Error{
-			Code: provider.NotFoundError,
-			Msg:  "failed to get security group: security group not found",
-		}
-	}
-	return &res.SecurityGroups[0], nil
 }
 
 func (p *awsProvider) createSecurityGroup(ctx context.Context, vpcID, nodeName, instanceID string) (string, error) {
@@ -257,6 +354,8 @@ func (p *awsProvider) createSecurityGroup(ctx context.Context, vpcID, nodeName, 
 		return "", converter.DecodeEC2Error("failed to create security group", err)
 	}
 
+	p.securityGroupsCache.Flush()
+
 	return aws.StringValue(res.GroupId), nil
 }
 
@@ -267,6 +366,8 @@ func (p *awsProvider) deleteSecurityGroup(ctx context.Context, securityGroupID s
 	if err != nil {
 		return converter.DecodeEC2Error("failed to delete security group", err)
 	}
+
+	p.securityGroupsCache.Flush()
 
 	return nil
 }
@@ -283,6 +384,8 @@ func (p *awsProvider) authorizeSecurityGroupIngress(ctx context.Context, log log
 	}
 	log.Info("Security group ingress permission authorized", "firewallRuleID", firewallRuleID, "permission", req)
 
+	p.securityGroupsCache.Flush()
+
 	return nil
 }
 
@@ -297,6 +400,8 @@ func (p *awsProvider) revokeSecurityGroupIngress(ctx context.Context, log logr.L
 		return converter.DecodeEC2Error("failed to revoke security group ingress permission", err)
 	}
 	log.Info("Security group ingress permission revoked", "firewallRuleID", firewallRuleID, "permission", req)
+
+	p.securityGroupsCache.Flush()
 
 	return nil
 }
@@ -313,6 +418,8 @@ func (p *awsProvider) authorizeSecurityGroupEgress(ctx context.Context, log logr
 	}
 	log.Info("Security group egress permission authorized", "firewallRuleID", firewallRuleID, "permission", req)
 
+	p.securityGroupsCache.Flush()
+
 	return nil
 }
 
@@ -327,6 +434,8 @@ func (p *awsProvider) revokeSecurityGroupEgress(ctx context.Context, log logr.Lo
 		return converter.DecodeEC2Error("failed to revoke security group egress permission", err)
 	}
 	log.Info("Security group egress permission revoked", "firewallRuleID", firewallRuleID, "permission", req)
+
+	p.securityGroupsCache.Flush()
 
 	return nil
 }
@@ -371,29 +480,6 @@ func (p *awsProvider) revokeUselessPermission(
 	return nil
 }
 
-func (p *awsProvider) getAddress(
-	ctx context.Context,
-	opts ...FilterOption,
-) (*types.Address, error) {
-	filters := make([]types.Filter, len(opts))
-	for _, opt := range opts {
-		filters = append(filters, opt.Filter())
-	}
-
-	res, err := p.ec2.DescribeAddresses(ctx, &ec2.DescribeAddressesInput{Filters: filters})
-	if err != nil {
-		return nil, converter.DecodeEC2Error("failed to list addresses", err)
-	}
-
-	if len(res.Addresses) == 0 {
-		return nil, &provider.Error{
-			Code: provider.NotFoundError,
-			Msg:  "failed to get address: address not found",
-		}
-	}
-	return &res.Addresses[0], nil
-}
-
 func (p *awsProvider) createAddress(ctx context.Context, externalIPName, instanceID string) (string, error) {
 	res, err := p.ec2.AllocateAddress(ctx, &ec2.AllocateAddressInput{
 		Domain: "vpc",
@@ -421,6 +507,8 @@ func (p *awsProvider) createAddress(ctx context.Context, externalIPName, instanc
 		return "", converter.DecodeEC2Error("failed to create address", err)
 	}
 
+	p.addressesCache.Flush()
+
 	return aws.StringValue(res.AllocationId), nil
 }
 
@@ -433,6 +521,8 @@ func (p *awsProvider) associateAddress(ctx context.Context, addressID, networkIn
 		return converter.DecodeEC2Error("failed to associate address", err)
 	}
 
+	p.addressesCache.Flush()
+
 	return nil
 }
 
@@ -444,6 +534,8 @@ func (p *awsProvider) disassociateAddress(ctx context.Context, associationID str
 		return converter.DecodeEC2Error("failed to disassociate address", err)
 	}
 
+	p.addressesCache.Flush()
+
 	return nil
 }
 
@@ -454,6 +546,8 @@ func (p *awsProvider) deleteAddress(ctx context.Context, addressID string) error
 	if err != nil {
 		return converter.DecodeEC2Error("failed to delete address", err)
 	}
+
+	p.addressesCache.Flush()
 
 	return nil
 }
@@ -608,6 +702,9 @@ func (p *awsProvider) ReconcileFirewallRule(
 			return status, fmt.Errorf("failed to modify network interface attribute: %w", err)
 		}
 		log.Info("Security group disassociated from network interface", "securityGroupID", securityGroupID, "networkInterfaceID", ni.NetworkInterfaceId)
+
+		p.networkInterfacesCache.Delete(securityGroupID)
+		p.securityGroupsCache.Flush()
 	}
 
 	if !isAssociated {
@@ -642,6 +739,9 @@ func (p *awsProvider) ReconcileFirewallRule(
 			"securityGroupID", securityGroupID,
 			"networkInterfaceID", networkInterface.NetworkInterfaceId,
 		)
+
+		p.networkInterfacesCache.Delete(securityGroupID)
+		p.securityGroupsCache.Flush()
 	}
 
 	meta.SetStatusCondition(&status.Conditions, kmetav1.Condition{
