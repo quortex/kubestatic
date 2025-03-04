@@ -39,13 +39,6 @@ const (
 	TagKeyExternalIPName TagKey = TagKeyDomain + "/external-ip-name" // Tag key for external IP name
 )
 
-const (
-	// The duration for the items in the cache to expire (by default)
-	DefaultTTL = 15 * time.Minute
-	// DefaultCleanupInterval triggers cache cleanup (lazy eviction) at this interval.
-	DefaultCleanupInterval = time.Minute
-)
-
 // FilterOption is a filter option for AWS API calls.
 type FilterOption interface {
 	Filter() types.Filter
@@ -159,7 +152,7 @@ type awsProvider struct {
 }
 
 // NewProvider instantiate a Provider implementation for AWS
-func NewProvider() (provider.Provider, error) {
+func NewProvider(defaultTTL time.Duration, defaultCleanupInterval time.Duration) (provider.Provider, error) {
 	// Load the Shared AWS Configuration (~/.aws/config)
 	cfg, err := config.LoadDefaultConfig(context.TODO())
 	if err != nil {
@@ -176,10 +169,10 @@ func NewProvider() (provider.Provider, error) {
 			// https://github.com/aws/aws-sdk-go-v2/discussions/2810
 			o.MeterProvider = smithyotelmetrics.Adapt(meterProvider)
 		}),
-		instancesCache:         cache.New(DefaultTTL, DefaultCleanupInterval),
-		securityGroupsCache:    cache.New(DefaultTTL, DefaultCleanupInterval),
-		networkInterfacesCache: cache.New(DefaultTTL, DefaultCleanupInterval),
-		addressesCache:         cache.New(DefaultTTL, DefaultCleanupInterval),
+		instancesCache:         cache.New(defaultTTL, defaultCleanupInterval),
+		securityGroupsCache:    cache.New(defaultTTL, defaultCleanupInterval),
+		networkInterfacesCache: cache.New(defaultTTL, defaultCleanupInterval),
+		addressesCache:         cache.New(defaultTTL, defaultCleanupInterval),
 	}, nil
 }
 
@@ -188,6 +181,7 @@ func getResource[T any](
 	p *awsProvider,
 	cache *cache.Cache,
 	ctx context.Context,
+	cacheKey string,
 	apiCall func(context.Context, []types.Filter) (T, error),
 	opts ...FilterOption,
 ) (T, error) {
@@ -204,14 +198,18 @@ func getResource[T any](
 		filters = append(filters, opt.Filter())
 	}
 
-	// Hash the filters
-	hash, err := hashstructure.Hash(filters, hashstructure.FormatV2, &hashstructure.HashOptions{SlicesAsSets: true})
-	if err != nil {
-		return zero, converter.DecodeEC2Error("failed to hash filters", err)
+	if cacheKey == "" {
+		// Hash the filters
+		hash, err := hashstructure.Hash(filters, hashstructure.FormatV2, &hashstructure.HashOptions{SlicesAsSets: true})
+		if err != nil {
+			return zero, converter.DecodeEC2Error("failed to hash filters", err)
+		}
+
+		cacheKey = fmt.Sprint(hash)
 	}
 
 	// Check cache
-	if cached, ok := cache.Get(fmt.Sprint(hash)); ok {
+	if cached, ok := cache.Get(cacheKey); ok {
 		return cached.(T), nil
 	}
 
@@ -222,7 +220,7 @@ func getResource[T any](
 	}
 
 	// Store in cache
-	cache.SetDefault(fmt.Sprint(hash), resource)
+	cache.SetDefault(cacheKey, resource)
 	return resource, nil
 }
 
@@ -241,9 +239,10 @@ func (p *awsProvider) getAddress(ctx context.Context, opts ...FilterOption) (*ty
 		}
 		return &res.Addresses[0], nil
 	}
-	return getResource(p, p.addressesCache, ctx, apiCall, opts...)
+	return getResource(p, p.addressesCache, ctx, "", apiCall, opts...)
 }
 
+// Wrapper function for fetching securityGroups
 func (p *awsProvider) getSecurityGroup(ctx context.Context, opts ...FilterOption) (*types.SecurityGroup, error) {
 	apiCall := func(ctx context.Context, filters []types.Filter) (*types.SecurityGroup, error) {
 		res, err := p.ec2.DescribeSecurityGroups(ctx, &ec2.DescribeSecurityGroupsInput{Filters: filters})
@@ -258,7 +257,7 @@ func (p *awsProvider) getSecurityGroup(ctx context.Context, opts ...FilterOption
 		}
 		return &res.SecurityGroups[0], nil
 	}
-	return getResource(p, p.securityGroupsCache, ctx, apiCall, opts...)
+	return getResource(p, p.securityGroupsCache, ctx, "", apiCall, opts...)
 }
 
 // GetInstanceID returns the instance ID from a node
@@ -267,59 +266,42 @@ func (p *awsProvider) GetInstanceID(node corev1.Node) string {
 }
 
 func (p *awsProvider) getInstance(ctx context.Context, instanceID string) (*types.Instance, error) {
-	// We lock here so that multiple callers do not result in cache misses and multiple
-	// calls to AWS API when we could have just made one call.
-	p.Lock()
-	defer p.Unlock()
-
-	// Check cache first
-	if cachedInstance, ok := p.instancesCache.Get(instanceID); ok {
-		return cachedInstance.(*types.Instance), nil
-	}
-
-	res, err := p.ec2.DescribeInstances(ctx, &ec2.DescribeInstancesInput{
-		InstanceIds: []string{instanceID},
-	})
-	if err != nil {
-		return nil, converter.DecodeEC2Error("failed to get instance", err)
-	}
-	if len(res.Reservations) == 0 || len(res.Reservations[0].Instances) == 0 {
-		return nil, &provider.Error{
-			Code: provider.NotFoundError,
-			Msg:  fmt.Sprintf("failed to get instance: instance with instance-id %s not found", instanceID),
+	apiCall := func(ctx context.Context, _ []types.Filter) (*types.Instance, error) {
+		res, err := p.ec2.DescribeInstances(ctx, &ec2.DescribeInstancesInput{
+			InstanceIds: []string{instanceID},
+		})
+		if err != nil {
+			return nil, converter.DecodeEC2Error("failed to get instance", err)
 		}
+		if len(res.Reservations) == 0 || len(res.Reservations[0].Instances) == 0 {
+			return nil, &provider.Error{
+				Code: provider.NotFoundError,
+				Msg:  fmt.Sprintf("failed to get instance: instance with instance-id %s not found", instanceID),
+			}
+		}
+		return &res.Reservations[0].Instances[0], nil
 	}
 
-	// Add instance to cache
-	p.instancesCache.SetDefault(instanceID, &res.Reservations[0].Instances[0])
-
-	return &res.Reservations[0].Instances[0], nil
+	return getResource(p, p.instancesCache, ctx, instanceID, apiCall)
 }
 
 func (p *awsProvider) getNetworkInterfaces(ctx context.Context, securityGroupID string) ([]types.NetworkInterface, error) {
-	// We lock here so that multiple callers do not result in cache misses and multiple
-	// calls to AWS API when we could have just made one call.
-	p.Lock()
-	defer p.Unlock()
-
-	// Check cache first
-	if cachedENI, ok := p.networkInterfacesCache.Get(securityGroupID); ok {
-		return cachedENI.([]types.NetworkInterface), nil
-	}
-	res, err := p.ec2.DescribeNetworkInterfaces(ctx, &ec2.DescribeNetworkInterfacesInput{
-		Filters: []types.Filter{
-			{
-				Name:   aws.String("group-id"),
-				Values: []string{securityGroupID},
+	apiCall := func(ctx context.Context, _ []types.Filter) ([]types.NetworkInterface, error) {
+		res, err := p.ec2.DescribeNetworkInterfaces(ctx, &ec2.DescribeNetworkInterfacesInput{
+			Filters: []types.Filter{
+				{
+					Name:   aws.String("group-id"),
+					Values: []string{securityGroupID},
+				},
 			},
-		},
-	})
-	if err != nil {
-		return nil, converter.DecodeEC2Error("failed to list network interfaces", err)
+		})
+		if err != nil {
+			return nil, converter.DecodeEC2Error("failed to list network interfaces", err)
+		}
+		return res.NetworkInterfaces, nil
 	}
-	// Add NetworkInterfaces to cache
-	p.networkInterfacesCache.SetDefault(securityGroupID, res.NetworkInterfaces)
-	return res.NetworkInterfaces, nil
+
+	return getResource(p, p.networkInterfacesCache, ctx, securityGroupID, apiCall)
 }
 
 func eniWithPublicIP(instance *types.Instance) (*types.InstanceNetworkInterface, error) {

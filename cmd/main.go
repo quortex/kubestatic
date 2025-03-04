@@ -77,6 +77,8 @@ func main() {
 	var preventEIPDeallocation bool
 	var nodeMinReconciliationInterval time.Duration
 	var nodeReconciliationRequeueInterval time.Duration
+	var cacheTTL time.Duration
+	var cacheCleanupInterval time.Duration
 	flag.StringVar(&metricsAddr, "metrics-bind-address", "0", "The address the metrics endpoint binds to. "+
 		"Use :8443 for HTTPS or :8080 for HTTP, or leave as 0 to disable the metrics service.")
 	flag.StringVar(&probeAddr, "health-probe-bind-address", ":8081", "The address the probe endpoint binds to.")
@@ -95,6 +97,11 @@ func main() {
 		"The minimum duration to wait between two reconciliations for the same node.")
 	flag.DurationVar(&nodeReconciliationRequeueInterval, "node-reconciliation-requeue-interval", 1*time.Minute,
 		"The duration for which nodes are automatically reconciled.")
+	flag.DurationVar(&cacheTTL, "cache-ttl", 15*time.Minute,
+		"The time-to-live (TTL) duration for all cache entries. After this period, cached items expire and are removed.")
+	flag.DurationVar(&cacheCleanupInterval, "cache-cleanup-interval", time.Minute,
+		"The interval at which expired cache entries are removed. "+
+			"A shorter interval ensures frequent cleanup but may impact performance.")
 	opts := zap.Options{}
 	opts.BindFlags(flag.CommandLine)
 	flag.Parse()
@@ -149,7 +156,7 @@ func main() {
 	switch cloudProvider {
 	case providerAWS:
 		var err error
-		pvd, err = aws.NewProvider()
+		pvd, err = aws.NewProvider(cacheTTL, cacheCleanupInterval)
 		if err != nil {
 			setupLog.Error(err, "Failed to initialize provider")
 			os.Exit(1)
