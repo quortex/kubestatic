@@ -3,6 +3,7 @@ package aws
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"path"
 	"slices"
@@ -857,23 +858,58 @@ func (p *awsProvider) ReconcileExternalIP(
 	instanceID string,
 	externalIP *v1alpha1.ExternalIP,
 ) (v1alpha1.ExternalIPStatus, error) {
-	status := externalIP.Status
+	status := v1alpha1.ExternalIPStatus{
+		State:      v1alpha1.ExternalIPStatePending,
+		Conditions: slices.Clone(externalIP.Status.Conditions),
+	}
 
 	// Get the address associated with the instance
 	address, err := p.getAddress(ctx, Managed(), WithExternalIPName(externalIP.Name))
 	if err != nil && err.(*provider.Error).Code != provider.NotFoundError {
+		meta.SetStatusCondition(&status.Conditions, kmetav1.Condition{
+			Type:               v1alpha1.ExternalIPConditionReasonIPCreated,
+			Status:             kmetav1.ConditionUnknown,
+			ObservedGeneration: externalIP.Generation,
+			Reason:             v1alpha1.FirewallRuleConditionReasonProviderError,
+			Message:            fmt.Sprintf("Failed to get address: %s", err),
+		})
 		return status, fmt.Errorf("failed to get address: %w", err)
 	}
 
 	if address == nil {
 		addressID, err := p.createAddress(ctx, externalIP.Name, instanceID)
 		if err != nil {
+			if provider.IsErrAddressLimitExceeded(err) {
+				meta.SetStatusCondition(&status.Conditions, kmetav1.Condition{
+					Type:               v1alpha1.ExternalIPConditionReasonIPCreated,
+					Status:             kmetav1.ConditionFalse,
+					ObservedGeneration: externalIP.Generation,
+					Reason:             v1alpha1.ExternalIPConditionReasonProviderError,
+					Message:            "Could not create address: The maximum number of addresses has been reached",
+				})
+			} else {
+				meta.SetStatusCondition(&status.Conditions, kmetav1.Condition{
+					Type:               v1alpha1.ExternalIPConditionReasonIPCreated,
+					Status:             kmetav1.ConditionFalse,
+					ObservedGeneration: externalIP.Generation,
+					Reason:             v1alpha1.ExternalIPConditionReasonProviderError,
+					Message:            fmt.Sprintf("Failed to create address: %s", err),
+				})
+			}
+
 			return status, fmt.Errorf("failed to create address: %w", err)
 		}
 		log.Info("Address created", "addressID", addressID)
 
 		address, err = p.getAddress(ctx, Managed(), WithExternalIPName(externalIP.Name), WithAddressID(addressID))
 		if err != nil {
+			meta.SetStatusCondition(&status.Conditions, kmetav1.Condition{
+				Type:               v1alpha1.ExternalIPConditionReasonIPCreated,
+				Status:             kmetav1.ConditionTrue,
+				ObservedGeneration: externalIP.Generation,
+				Reason:             v1alpha1.ExternalIPConditionReasonProviderError,
+				Message:            fmt.Sprintf("Failed to get address: %s", err),
+			})
 			return status, fmt.Errorf("failed to get address: %w", err)
 		}
 	}
@@ -881,7 +917,23 @@ func (p *awsProvider) ReconcileExternalIP(
 	status.AddressID = address.AllocationId
 	status.PublicIPAddress = address.PublicIp
 
+	meta.SetStatusCondition(&status.Conditions, kmetav1.Condition{
+		Type:               v1alpha1.ExternalIPConditionReasonIPCreated,
+		Status:             kmetav1.ConditionTrue,
+		ObservedGeneration: externalIP.Generation,
+		Reason:             v1alpha1.ExternalIPConditionReasonIPCreated,
+		Message:            "The IP has been successfully created",
+	})
+
 	if instanceID == "" {
+		meta.SetStatusCondition(&status.Conditions, kmetav1.Condition{
+			Type:               v1alpha1.ExternalIPConditionTypeNetworkInterfaceAssociated,
+			Status:             kmetav1.ConditionFalse,
+			ObservedGeneration: externalIP.Generation,
+			Reason:             v1alpha1.ExternalIPConditionReasonProviderError,
+			Message:            "Address has no instanceID",
+		})
+
 		if address.AssociationId == nil {
 			return status, nil
 		}
@@ -906,17 +958,42 @@ func (p *awsProvider) ReconcileExternalIP(
 	// Get the first network interface with a public IP address
 	networkInterface, err := eniWithPublicIP(instance)
 	if err != nil {
+		meta.SetStatusCondition(&status.Conditions, kmetav1.Condition{
+			Type:               v1alpha1.ExternalIPConditionTypeNetworkInterfaceAssociated,
+			Status:             kmetav1.ConditionUnknown,
+			ObservedGeneration: externalIP.Generation,
+			Reason:             v1alpha1.ExternalIPConditionReasonProviderError,
+			Message:            fmt.Sprintf("Failed to get network interface with public IP: %s", err),
+		})
 		return status, fmt.Errorf("failed to get network interface with public IP: %w", err)
 	}
 
 	if address.NetworkInterfaceId != nil {
 		// Address is already associated with the instance
 		if *address.NetworkInterfaceId == *networkInterface.NetworkInterfaceId {
+			status.State = v1alpha1.ExternalIPStateAssociated
+
+			meta.SetStatusCondition(&status.Conditions, kmetav1.Condition{
+				Type:               v1alpha1.ExternalIPConditionTypeNetworkInterfaceAssociated,
+				Status:             kmetav1.ConditionTrue,
+				ObservedGeneration: externalIP.Generation,
+				Reason:             v1alpha1.ExternalIPConditionReasonNetworkInterfaceAssociated,
+				Message: fmt.Sprintf("Address %s associated with network interface %s",
+					aws.StringValue(address.AllocationId), aws.StringValue(networkInterface.NetworkInterfaceId)),
+			})
 			return status, nil
 		}
 
 		// Disassociate the address from the current network interface
 		if err := p.disassociateAddress(ctx, *address.AssociationId); err != nil {
+			meta.SetStatusCondition(&status.Conditions, kmetav1.Condition{
+				Type:               v1alpha1.ExternalIPConditionTypeNetworkInterfaceAssociated,
+				Status:             kmetav1.ConditionFalse,
+				ObservedGeneration: externalIP.Generation,
+				Reason:             v1alpha1.ExternalIPConditionReasonProviderError,
+				Message: fmt.Sprintf("Failed to disassociate address %s with %s",
+					aws.StringValue(address.AllocationId), aws.StringValue(address.AssociationId)),
+			})
 			return status, fmt.Errorf("failed to disassociate address: %w", err)
 		}
 		log.Info("Address disassociated", "addressID", address.AllocationId, "associationID", *address.AssociationId)
@@ -927,12 +1004,29 @@ func (p *awsProvider) ReconcileExternalIP(
 
 	// Associate the address with the network interface
 	if err := p.associateAddress(ctx, aws.StringValue(address.AllocationId), *networkInterface.NetworkInterfaceId); err != nil {
+		meta.SetStatusCondition(&status.Conditions, kmetav1.Condition{
+			Type:               v1alpha1.ExternalIPConditionTypeNetworkInterfaceAssociated,
+			Status:             kmetav1.ConditionFalse,
+			ObservedGeneration: externalIP.Generation,
+			Reason:             v1alpha1.ExternalIPConditionReasonProviderError,
+			Message:            fmt.Sprintf("Failed to associate address: %s", err),
+		})
+
 		return status, fmt.Errorf("failed to associate address: %w", err)
 	}
 	log.Info("Address associated", "addressID", address.AllocationId, "networkInterfaceID", *networkInterface.NetworkInterfaceId)
 
 	status.InstanceID = &instanceID
 	status.State = v1alpha1.ExternalIPStateAssociated
+
+	meta.SetStatusCondition(&status.Conditions, kmetav1.Condition{
+		Type:               v1alpha1.ExternalIPConditionTypeNetworkInterfaceAssociated,
+		Status:             kmetav1.ConditionTrue,
+		ObservedGeneration: externalIP.Generation,
+		Reason:             v1alpha1.ExternalIPConditionReasonNetworkInterfaceAssociated,
+		Message: fmt.Sprintf("Address %s associated with network interface %s",
+			aws.StringValue(address.AllocationId), aws.StringValue(networkInterface.NetworkInterfaceId)),
+	})
 
 	return status, nil
 }
@@ -956,8 +1050,9 @@ func (p *awsProvider) ReconcileExternalIPDeletion(
 	// Get the address associated with the instance
 	address, err := p.getAddress(ctx, Managed(), WithExternalIPName(externalIP.Name))
 	if err != nil {
+		var providerErr *provider.Error
 		// The address does not exist, end of reconciliation
-		if err.(*provider.Error).Code != provider.NotFoundError {
+		if errors.As(err, &providerErr) && providerErr.Code == provider.NotFoundError {
 			return nil
 		}
 		return fmt.Errorf("failed to get address: %w", err)
