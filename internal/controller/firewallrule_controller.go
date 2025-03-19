@@ -85,6 +85,16 @@ func (r *FirewallRuleReconciler) Reconcile(ctx context.Context, req ctrl.Request
 
 	if firewallRule.Spec.NodeName == nil {
 		log.V(1).Info("No nodename found on the FirewallRule")
+		// Remove finalizer if deletion is requested
+		if !firewallRule.DeletionTimestamp.IsZero() && controllerutil.ContainsFinalizer(firewallRule, firewallRuleFinalizer) {
+			controllerutil.RemoveFinalizer(firewallRule, firewallRuleFinalizer)
+			if err := r.Update(ctx, firewallRule); err != nil {
+				log.Error(err, "Failed to remove finalizer")
+				return ctrl.Result{}, err
+			}
+			log.V(1).Info("Successfully removed finalizer")
+			return ctrl.Result{}, nil
+		}
 		status := v1alpha1.FirewallRuleStatus{
 			State: v1alpha1.FirewallRuleStatePending,
 		}
@@ -233,6 +243,24 @@ func (r *FirewallRuleReconciler) reconcileFirewallRule(
 ) error {
 	var node corev1.Node
 	if err := r.Get(ctx, types.NamespacedName{Name: nodeName}, &node); err != nil {
+		if apierrors.IsNotFound(err) {
+			if err := r.Provider.ReconcileFirewallRulesDeletion(ctx, log, nodeName); err != nil {
+				log.Error(err, "Failed to reconcile FirewallRule deletion")
+				return err
+			}
+		}
+
+		// Remove finalizer if deletion is requested
+		if !firewallRule.DeletionTimestamp.IsZero() && controllerutil.ContainsFinalizer(firewallRule, firewallRuleFinalizer) {
+			controllerutil.RemoveFinalizer(firewallRule, firewallRuleFinalizer)
+			if removeFinalizerErr := r.Update(ctx, firewallRule); removeFinalizerErr != nil {
+				log.Error(errors.Join(removeFinalizerErr, err), "Failed to remove finalizer during error handling")
+				return fmt.Errorf("failed to remove finalizer during error handling: %w", errors.Join(removeFinalizerErr, err))
+			}
+			log.V(1).Info("Successfully removed finalizer")
+			return err
+		}
+
 		status := v1alpha1.FirewallRuleStatus{
 			State: v1alpha1.FirewallRuleStatePending,
 		}
@@ -247,14 +275,6 @@ func (r *FirewallRuleReconciler) reconcileFirewallRule(
 		if patchErr := patchFirewallRuleStatus(ctx, r, firewallRule, status); patchErr != nil {
 			log.Error(errors.Join(patchErr, err), "Failed to patch FirewallRule status during error handling")
 			return fmt.Errorf("failed to patch FirewallRule status during error handling: %w", errors.Join(patchErr, err))
-		}
-
-		if apierrors.IsNotFound(err) {
-			if err := r.Provider.ReconcileFirewallRulesDeletion(ctx, log, nodeName); err != nil {
-				log.Error(err, "Failed to reconcile FirewallRule deletion")
-				return err
-			}
-			return err
 		}
 
 		log.Error(err, "Failed to get Node")
