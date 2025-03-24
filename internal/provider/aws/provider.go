@@ -596,6 +596,12 @@ func (p *awsProvider) ReconcileFirewallRule(
 	}
 
 	if securityGroup == nil {
+		if !firewallRule.DeletionTimestamp.IsZero() {
+			// Object is in process of being deleted – likely going to disappear
+			log.Info("FirewallRule found with deletion timestamp and no security group created. Ignoring since object must be deleted")
+			return status, nil
+		}
+
 		securityGroupID, err := p.createSecurityGroup(ctx, aws.StringValue(instance.VpcId), nodeName, instanceID)
 		if err != nil {
 			meta.SetStatusCondition(&status.Conditions, kmetav1.Condition{
@@ -768,7 +774,7 @@ func (p *awsProvider) ReconcileFirewallRule(
 			if len(securityGroup.IpPermissions) == 1 && len(securityGroup.IpPermissionsEgress) == 0 {
 				// If the security group has only one ingress rule and no egress rule, delete the security group
 				if err := p.ReconcileFirewallRulesDeletion(ctx, log, nodeName); err != nil {
-					return status, fmt.Errorf("failed to to reconcile FirewallRule deletion: %w", err)
+					return status, fmt.Errorf("failed to reconcile FirewallRule deletion: %w", err)
 				}
 			} else {
 				// Revoke Ingress permissions reconciliation
@@ -783,7 +789,7 @@ func (p *awsProvider) ReconcileFirewallRule(
 			if len(securityGroup.IpPermissionsEgress) == 1 && len(securityGroup.IpPermissions) == 0 {
 				// If the security group has only one egress rule and no ingress rule, delete the security group
 				if err := p.ReconcileFirewallRulesDeletion(ctx, log, nodeName); err != nil {
-					return status, fmt.Errorf("failed to to reconcile FirewallRule deletion: %w", err)
+					return status, fmt.Errorf("failed to reconcile FirewallRule deletion: %w", err)
 				}
 			} else {
 				// Revoke Egress permissions reconciliation
