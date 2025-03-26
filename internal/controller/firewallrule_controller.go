@@ -78,6 +78,12 @@ func (r *FirewallRuleReconciler) Reconcile(ctx context.Context, req ctrl.Request
 		return ctrl.Result{}, err
 	}
 
+	if !firewallRule.ObjectMeta.DeletionTimestamp.IsZero() && len(firewallRule.ObjectMeta.Finalizers) == 0 {
+		// Object is in process of being deleted and no finalizers left – likely going to disappear
+		log.Info("FirewallRule found with deletion timestamp and no finalizers. Ignoring since object must be deleted")
+		return ctrl.Result{}, nil
+	}
+
 	if firewallRule.Spec.DisableReconciliation {
 		log.Info("Reconciliation disabled")
 		return ctrl.Result{}, nil
