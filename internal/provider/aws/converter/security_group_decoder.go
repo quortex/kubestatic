@@ -2,8 +2,8 @@
 package converter
 
 import (
+	"github.com/aws/aws-sdk-go-v2/aws"
 	"github.com/aws/aws-sdk-go-v2/service/ec2/types"
-	"github.com/aws/aws-sdk-go/aws"
 
 	"github.com/quortex/kubestatic/internal/provider"
 )
@@ -11,10 +11,10 @@ import (
 // DecodeIpPermission converts an ec2 IpPermission to an IPPermission.
 func DecodeIpPermission(data types.IpPermission) *provider.IPPermission {
 	return &provider.IPPermission{
-		FromPort: int64(aws.Int32Value(data.FromPort)),
-		Protocol: aws.StringValue(data.IpProtocol),
+		FromPort: int64(aws.ToInt32(data.FromPort)),
+		Protocol: aws.ToString(data.IpProtocol),
 		IPRanges: DecodeIpRanges(data.IpRanges),
-		ToPort:   aws.Int64(int64(aws.Int32Value(data.ToPort))),
+		ToPort:   aws.Int64(int64(aws.ToInt32(data.ToPort))),
 	}
 }
 
@@ -30,8 +30,8 @@ func DecodeIpPermissions(data []types.IpPermission) []*provider.IPPermission {
 // DecodeIpRange converts an ec2 IpRange to an IPRange.
 func DecodeIpRange(data types.IpRange) *provider.IPRange {
 	return &provider.IPRange{
-		CIDR:        aws.StringValue(data.CidrIp),
-		Description: aws.StringValue(data.Description),
+		CIDR:        aws.ToString(data.CidrIp),
+		Description: aws.ToString(data.Description),
 	}
 }
 

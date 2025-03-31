@@ -3,7 +3,6 @@ module github.com/quortex/kubestatic
 go 1.23.0
 
 require (
-	github.com/aws/aws-sdk-go v1.55.5
 	github.com/aws/aws-sdk-go-v2/config v1.28.1
 	github.com/aws/aws-sdk-go-v2/service/ec2 v1.186.1
 	github.com/aws/smithy-go v1.22.1
