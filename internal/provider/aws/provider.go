@@ -346,7 +346,9 @@ func (p *awsProvider) createSecurityGroup(ctx context.Context, vpcID, nodeName, 
 		return "", converter.DecodeEC2Error("failed to create security group", err)
 	}
 
+	p.securityGroupsMutex.Lock()
 	p.securityGroupsCache.Flush()
+	p.securityGroupsMutex.Unlock()
 
 	return aws.ToString(res.GroupId), nil
 }
@@ -359,7 +361,9 @@ func (p *awsProvider) deleteSecurityGroup(ctx context.Context, securityGroupID s
 		return converter.DecodeEC2Error("failed to delete security group", err)
 	}
 
+	p.securityGroupsMutex.Lock()
 	p.securityGroupsCache.Flush()
+	p.securityGroupsMutex.Unlock()
 
 	return nil
 }
@@ -376,7 +380,9 @@ func (p *awsProvider) authorizeSecurityGroupIngress(ctx context.Context, log log
 	}
 	log.Info("Security group ingress permission authorized", "firewallRuleID", firewallRuleID, "permission", req)
 
+	p.securityGroupsMutex.Lock()
 	p.securityGroupsCache.Flush()
+	p.securityGroupsMutex.Unlock()
 
 	return nil
 }
@@ -393,7 +399,9 @@ func (p *awsProvider) revokeSecurityGroupIngress(ctx context.Context, log logr.L
 	}
 	log.Info("Security group ingress permission revoked", "firewallRuleID", firewallRuleID, "permission", req)
 
+	p.securityGroupsMutex.Lock()
 	p.securityGroupsCache.Flush()
+	p.securityGroupsMutex.Unlock()
 
 	return nil
 }
@@ -410,7 +418,9 @@ func (p *awsProvider) authorizeSecurityGroupEgress(ctx context.Context, log logr
 	}
 	log.Info("Security group egress permission authorized", "firewallRuleID", firewallRuleID, "permission", req)
 
+	p.securityGroupsMutex.Lock()
 	p.securityGroupsCache.Flush()
+	p.securityGroupsMutex.Unlock()
 
 	return nil
 }
@@ -427,7 +437,9 @@ func (p *awsProvider) revokeSecurityGroupEgress(ctx context.Context, log logr.Lo
 	}
 	log.Info("Security group egress permission revoked", "firewallRuleID", firewallRuleID, "permission", req)
 
+	p.securityGroupsMutex.Lock()
 	p.securityGroupsCache.Flush()
+	p.securityGroupsMutex.Unlock()
 
 	return nil
 }
@@ -499,7 +511,9 @@ func (p *awsProvider) createAddress(ctx context.Context, externalIPName, instanc
 		return "", converter.DecodeEC2Error("failed to create address", err)
 	}
 
+	p.addressesMutex.Lock()
 	p.addressesCache.Flush()
+	p.addressesMutex.Unlock()
 
 	return aws.ToString(res.AllocationId), nil
 }
@@ -513,7 +527,9 @@ func (p *awsProvider) associateAddress(ctx context.Context, addressID, networkIn
 		return converter.DecodeEC2Error("failed to associate address", err)
 	}
 
+	p.addressesMutex.Lock()
 	p.addressesCache.Flush()
+	p.addressesMutex.Unlock()
 
 	return nil
 }
@@ -526,7 +542,9 @@ func (p *awsProvider) disassociateAddress(ctx context.Context, associationID str
 		return converter.DecodeEC2Error("failed to disassociate address", err)
 	}
 
+	p.addressesMutex.Lock()
 	p.addressesCache.Flush()
+	p.addressesMutex.Unlock()
 
 	return nil
 }
@@ -539,7 +557,9 @@ func (p *awsProvider) deleteAddress(ctx context.Context, addressID string) error
 		return converter.DecodeEC2Error("failed to delete address", err)
 	}
 
+	p.addressesMutex.Lock()
 	p.addressesCache.Flush()
+	p.addressesMutex.Unlock()
 
 	return nil
 }
@@ -702,7 +722,9 @@ func (p *awsProvider) ReconcileFirewallRule(
 		log.Info("Security group disassociated from network interface", "securityGroupID", securityGroupID, "networkInterfaceID", ni.NetworkInterfaceId)
 
 		p.networkInterfacesCache.Delete(securityGroupID)
+		p.securityGroupsMutex.Lock()
 		p.securityGroupsCache.Flush()
+		p.securityGroupsMutex.Unlock()
 	}
 
 	if !isAssociated {
@@ -739,7 +761,9 @@ func (p *awsProvider) ReconcileFirewallRule(
 		)
 
 		p.networkInterfacesCache.Delete(securityGroupID)
+		p.securityGroupsMutex.Lock()
 		p.securityGroupsCache.Flush()
+		p.securityGroupsMutex.Unlock()
 	}
 
 	meta.SetStatusCondition(&status.Conditions, kmetav1.Condition{
