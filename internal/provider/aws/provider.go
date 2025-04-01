@@ -141,10 +141,9 @@ func WithAddressID(addressID string) AddressIDFilter {
 // awsProvider is an AWS provider implementation for the provider.Provider interface
 type awsProvider struct {
 	ec2 *ec2.Client
-	// We have a mutexes because the provider can be used by multiple controllers,
-	// so that we can avoid callers result in cache misses and multiple
-	// calls to AWS API when we could have just made one call.
-	// Individual mutexes for each cache
+	// These Mutexes ensure that when a cache miss occurs, only one controller makes
+	// the AWS API call while others wait for the result, preventing duplicate
+	// requests for the same data.
 	instancesMutex         sync.Mutex
 	instancesCache         *cache.Cache
 	securityGroupsMutex    sync.Mutex
@@ -156,16 +155,16 @@ type awsProvider struct {
 }
 
 // NewProvider instantiate a Provider implementation for AWS
-func NewProvider(defaultTTL time.Duration, defaultCleanupInterval time.Duration) (provider.Provider, error) {
+func NewProvider(defaultTTL, defaultCleanupInterval time.Duration) (provider.Provider, error) {
 	// Load the Shared AWS Configuration (~/.aws/config)
 	cfg, err := config.LoadDefaultConfig(context.TODO())
 	if err != nil {
-		panic(err)
+		return nil, err
 	}
 
 	meterProvider, err := NewMeterProvider()
 	if err != nil {
-		panic(err)
+		return nil, err
 	}
 
 	return &awsProvider{
@@ -182,8 +181,8 @@ func NewProvider(defaultTTL time.Duration, defaultCleanupInterval time.Duration)
 
 // Standalone generic function for fetching AWS resources
 func getResource[T any](
-	cache *cache.Cache,
 	ctx context.Context,
+	cache *cache.Cache,
 	mu *sync.Mutex,
 	cacheKey string,
 	apiCall func(context.Context, []types.Filter) (T, error),
@@ -243,7 +242,7 @@ func (p *awsProvider) getAddress(ctx context.Context, opts ...FilterOption) (*ty
 		}
 		return &res.Addresses[0], nil
 	}
-	return getResource(p.addressesCache, ctx, &p.addressesMutex, "", apiCall, opts...)
+	return getResource(ctx, p.addressesCache, &p.addressesMutex, "", apiCall, opts...)
 }
 
 // Wrapper function for fetching securityGroups
@@ -261,7 +260,7 @@ func (p *awsProvider) getSecurityGroup(ctx context.Context, opts ...FilterOption
 		}
 		return &res.SecurityGroups[0], nil
 	}
-	return getResource(p.securityGroupsCache, ctx, &p.securityGroupsMutex, "", apiCall, opts...)
+	return getResource(ctx, p.securityGroupsCache, &p.securityGroupsMutex, "", apiCall, opts...)
 }
 
 // GetInstanceID returns the instance ID from a node
@@ -286,7 +285,7 @@ func (p *awsProvider) getInstance(ctx context.Context, instanceID string) (*type
 		return &res.Reservations[0].Instances[0], nil
 	}
 
-	return getResource(p.instancesCache, ctx, &p.instancesMutex, instanceID, apiCall)
+	return getResource(ctx, p.instancesCache, &p.instancesMutex, instanceID, apiCall)
 }
 
 func (p *awsProvider) getNetworkInterfaces(ctx context.Context, securityGroupID string) ([]types.NetworkInterface, error) {
@@ -305,7 +304,7 @@ func (p *awsProvider) getNetworkInterfaces(ctx context.Context, securityGroupID 
 		return res.NetworkInterfaces, nil
 	}
 
-	return getResource(p.networkInterfacesCache, ctx, &p.networkInterfacesMutex, securityGroupID, apiCall)
+	return getResource(ctx, p.networkInterfacesCache, &p.networkInterfacesMutex, securityGroupID, apiCall)
 }
 
 func eniWithPublicIP(instance *types.Instance) (*types.InstanceNetworkInterface, error) {
