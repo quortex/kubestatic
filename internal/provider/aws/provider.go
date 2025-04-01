@@ -21,11 +21,11 @@ import (
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/meta"
 	kmetav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/util/rand"
 
 	"github.com/quortex/kubestatic/api/v1alpha1"
 	"github.com/quortex/kubestatic/internal/provider"
 	"github.com/quortex/kubestatic/internal/provider/aws/converter"
-	"github.com/quortex/kubestatic/internal/utils"
 )
 
 // TagKey represents an AWS tag key.
@@ -320,7 +320,7 @@ func eniWithPublicIP(instance *types.Instance) (*types.InstanceNetworkInterface,
 
 func (p *awsProvider) createSecurityGroup(ctx context.Context, vpcID, nodeName, instanceID string) (string, error) {
 	res, err := p.ec2.CreateSecurityGroup(ctx, &ec2.CreateSecurityGroupInput{
-		GroupName:   aws.String(fmt.Sprintf("kubestatic-%s", utils.RandomString(10))),
+		GroupName:   aws.String(fmt.Sprintf("kubestatic-%s", rand.String(10))),
 		Description: aws.String(fmt.Sprintf("Kubestatic managed group for instance %s", instanceID)),
 		VpcId:       aws.String(vpcID),
 		TagSpecifications: []types.TagSpecification{
