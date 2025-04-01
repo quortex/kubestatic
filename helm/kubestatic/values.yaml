@@ -81,7 +81,6 @@ tolerations: []
 # --  Affinity for Kubestitute pod assignment.
 affinity: {}
 
-# -- ServiceAccount setup
 serviceAccount:
   # -- Annotations added to the ServiceAccount.
   annotations: {}
@@ -99,3 +98,22 @@ serviceMonitor:
   scrapeTimeout: ""
   # -- Relabellings to apply to samples before scraping.
   relabelings: []
+
+networkPolicy:
+  # -- Whether to enable kubestatic network policy.
+  enabled: false
+  # -- Ingress rules to add to the network policy.
+  extraIngress: []
+  #    - ports:
+  #        - protocol: TCP
+  #          port: 8443
+  #      from:
+  #        - namespaceSelector:
+  #            matchLabels:
+  #              kubernetes.io/metadata.name: monitoring
+  #          podSelector:
+  #            matchLabels:
+  #              app.kubernetes.io/name: prometheus
+  #              operator.prometheus.io/name: prometheus-kube-prometheus-prometheus
+  # -- Egress rules to add to the network policy.
+  extraEgress: []

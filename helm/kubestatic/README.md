@@ -91,7 +91,6 @@ helm install kubestatic kubestatic/kubestatic -n kubestatic-system
 | nodeSelector | object | `{}` | Node labels for Kubestitute pod assignment. |
 | tolerations | list | `[]` | Node tolerations for Kubestitute scheduling to nodes with taints. |
 | affinity | object | `{}` | Affinity for Kubestitute pod assignment. |
-| serviceAccount | object | `{"annotations":{}}` | ServiceAccount setup |
 | serviceAccount.annotations | object | `{}` | Annotations added to the ServiceAccount. |
 | serviceMonitor.enabled | bool | `false` | Create a prometheus operator ServiceMonitor. |
 | serviceMonitor.additionalLabels | object | `{}` | Labels added to the ServiceMonitor. |
@@ -99,4 +98,7 @@ helm install kubestatic kubestatic/kubestatic -n kubestatic-system
 | serviceMonitor.interval | string | `""` | Override prometheus operator scrapping interval. |
 | serviceMonitor.scrapeTimeout | string | `""` | Override prometheus operator scrapping timeout. |
 | serviceMonitor.relabelings | list | `[]` | Relabellings to apply to samples before scraping. |
+| networkPolicy.enabled | bool | `false` | Whether to enable kubestatic network policy. |
+| networkPolicy.extraIngress | list | `[]` | Ingress rules to add to the network policy. |
+| networkPolicy.extraEgress | list | `[]` | Egress rules to add to the network policy. |
 
