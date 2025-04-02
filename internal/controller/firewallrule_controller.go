@@ -92,8 +92,7 @@ func (r *FirewallRuleReconciler) Reconcile(ctx context.Context, req ctrl.Request
 	if firewallRule.Spec.NodeName == nil {
 		log.V(1).Info("No nodename found on the FirewallRule")
 		// Remove finalizer if deletion is requested
-		if !firewallRule.DeletionTimestamp.IsZero() && controllerutil.ContainsFinalizer(firewallRule, firewallRuleFinalizer) {
-			controllerutil.RemoveFinalizer(firewallRule, firewallRuleFinalizer)
+		if !firewallRule.DeletionTimestamp.IsZero() && controllerutil.RemoveFinalizer(firewallRule, firewallRuleFinalizer) {
 			if err := r.Update(ctx, firewallRule); err != nil {
 				log.Error(err, "Failed to remove finalizer")
 				return ctrl.Result{}, err
@@ -101,9 +100,11 @@ func (r *FirewallRuleReconciler) Reconcile(ctx context.Context, req ctrl.Request
 			log.V(1).Info("Successfully removed finalizer")
 			return ctrl.Result{}, nil
 		}
+
 		status := v1alpha1.FirewallRuleStatus{
 			State: v1alpha1.FirewallRuleStatePending,
 		}
+
 		meta.SetStatusCondition(&status.Conditions, kmetav1.Condition{
 			Type:               v1alpha1.FirewallRuleConditionTypeSecurityGroupRuleAuthorized,
 			Status:             kmetav1.ConditionFalse,
@@ -119,8 +120,7 @@ func (r *FirewallRuleReconciler) Reconcile(ctx context.Context, req ctrl.Request
 	}
 
 	// Add finalizer
-	if !controllerutil.ContainsFinalizer(firewallRule, firewallRuleFinalizer) {
-		firewallRule.Finalizers = append(firewallRule.Finalizers, firewallRuleFinalizer)
+	if controllerutil.AddFinalizer(firewallRule, firewallRuleFinalizer) {
 		if err := r.Update(ctx, firewallRule); err != nil {
 			log.Error(err, "Failed to add finalizer")
 			return ctrl.Result{}, err
@@ -182,8 +182,7 @@ func (r *FirewallRuleReconciler) Reconcile(ctx context.Context, req ctrl.Request
 	}
 
 	// Remove finalizer
-	if !firewallRule.DeletionTimestamp.IsZero() && controllerutil.ContainsFinalizer(firewallRule, firewallRuleFinalizer) {
-		controllerutil.RemoveFinalizer(firewallRule, firewallRuleFinalizer)
+	if !firewallRule.DeletionTimestamp.IsZero() && controllerutil.RemoveFinalizer(firewallRule, firewallRuleFinalizer) {
 		if err := r.Update(ctx, firewallRule); err != nil {
 			log.Error(err, "Failed to remove finalizer")
 			return ctrl.Result{}, err
@@ -257,8 +256,7 @@ func (r *FirewallRuleReconciler) reconcileFirewallRule(
 		}
 
 		// Remove finalizer if deletion is requested
-		if !firewallRule.DeletionTimestamp.IsZero() && controllerutil.ContainsFinalizer(firewallRule, firewallRuleFinalizer) {
-			controllerutil.RemoveFinalizer(firewallRule, firewallRuleFinalizer)
+		if !firewallRule.DeletionTimestamp.IsZero() && controllerutil.RemoveFinalizer(firewallRule, firewallRuleFinalizer) {
 			if removeFinalizerErr := r.Update(ctx, firewallRule); removeFinalizerErr != nil {
 				log.Error(errors.Join(removeFinalizerErr, err), "Failed to remove finalizer during error handling")
 				return fmt.Errorf("failed to remove finalizer during error handling: %w", errors.Join(removeFinalizerErr, err))
