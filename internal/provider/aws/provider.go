@@ -602,7 +602,7 @@ func (p *awsProvider) ReconcileFirewallRule(
 ) (v1alpha1.FirewallRuleStatus, error) {
 	status := v1alpha1.FirewallRuleStatus{
 		State:      v1alpha1.FirewallRuleStatePending,
-		Conditions: []kmetav1.Condition{},
+		Conditions: slices.Clone(firewallRule.Status.Conditions),
 	}
 
 	// Get the instance
