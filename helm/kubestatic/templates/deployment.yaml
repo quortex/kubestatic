@@ -31,6 +31,10 @@ spec:
         - name: manager
           securityContext:
             {{- toYaml .securityContext | nindent 12 }}
+          volumeMounts:
+          - mountPath: /tmp/k8s-webhook-server/serving-certs
+            name: cert
+            readOnly: true
           image: "{{ .image.repository }}:{{ .image.tag | default $.Chart.AppVersion }}"
           command:
             - /manager
@@ -108,3 +112,8 @@ spec:
       tolerations:
         {{- toYaml . | nindent 8 }}
       {{- end }}
+      volumes:
+      - name: cert
+        secret:
+          defaultMode: 420
+          secretName: webhook-server-cert

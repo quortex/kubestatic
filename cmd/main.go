@@ -19,7 +19,6 @@ package main
 import (
 	"crypto/tls"
 	"flag"
-	"fmt"
 	"os"
 	"strings"
 	"time"
@@ -42,6 +41,7 @@ import (
 	"github.com/quortex/kubestatic/internal/controller"
 	"github.com/quortex/kubestatic/internal/provider"
 	"github.com/quortex/kubestatic/internal/provider/aws"
+	webhookkubestaticquortexiov1alpha1 "github.com/quortex/kubestatic/internal/webhook/v1alpha1"
 	// +kubebuilder:scaffold:imports
 )
 
@@ -76,6 +76,8 @@ func main() {
 	var preventEIPDeallocation bool
 	var nodeMinReconciliationInterval time.Duration
 	var nodeReconciliationRequeueInterval time.Duration
+	var cacheTTL time.Duration
+	var cacheCleanupInterval time.Duration
 	flag.StringVar(&metricsAddr, "metrics-bind-address", "0", "The address the metrics endpoint binds to. "+
 		"Use :8443 for HTTPS or :8080 for HTTP, or leave as 0 to disable the metrics service.")
 	flag.StringVar(&probeAddr, "health-probe-bind-address", ":8081", "The address the probe endpoint binds to.")
@@ -94,9 +96,12 @@ func main() {
 		"The minimum duration to wait between two reconciliations for the same node.")
 	flag.DurationVar(&nodeReconciliationRequeueInterval, "node-reconciliation-requeue-interval", 1*time.Minute,
 		"The duration for which nodes are automatically reconciled.")
-	opts := zap.Options{
-		Development: true,
-	}
+	flag.DurationVar(&cacheTTL, "cache-ttl", 15*time.Minute,
+		"The time-to-live (TTL) duration for all cache entries. After this period, cached items expire and are removed.")
+	flag.DurationVar(&cacheCleanupInterval, "cache-cleanup-interval", time.Minute,
+		"The interval at which expired cache entries are removed. "+
+			"A shorter interval ensures frequent cleanup but may impact performance.")
+	opts := zap.Options{}
 	opts.BindFlags(flag.CommandLine)
 	flag.Parse()
 
@@ -150,14 +155,14 @@ func main() {
 	switch cloudProvider {
 	case providerAWS:
 		var err error
-		pvd, err = aws.NewProvider()
+		pvd, err = aws.NewProvider(cacheTTL, cacheCleanupInterval)
 		if err != nil {
 			setupLog.Error(err, "Failed to initialize provider")
 			os.Exit(1)
 		}
 
 	default:
-		setupLog.Error(fmt.Errorf("Invalid cloud-provider: %s", cloudProvider), "unable to init cloud provider implementation")
+		setupLog.Error(nil, "unable to init cloud provider implementation: invalid cloud-provider", "cloud-provider", cloudProvider)
 		os.Exit(1)
 	}
 
@@ -187,7 +192,6 @@ func main() {
 
 	if err = (&controller.ExternalIPReconciler{
 		Client:   mgr.GetClient(),
-		Log:      ctrl.Log.WithName("controllers").WithName("ExternalIP"),
 		Scheme:   mgr.GetScheme(),
 		Provider: pvd,
 	}).SetupWithManager(mgr); err != nil {
@@ -196,7 +200,6 @@ func main() {
 	}
 	if err = (&controller.NodeReconciler{
 		Client:                        mgr.GetClient(),
-		Log:                           ctrl.Log.WithName("controllers").WithName("Node"),
 		Scheme:                        mgr.GetScheme(),
 		PreventEIPDeallocation:        preventEIPDeallocation,
 		MinReconciliationInterval:     nodeMinReconciliationInterval,
@@ -207,14 +210,20 @@ func main() {
 	}
 	if err = (&controller.FirewallRuleReconciler{
 		Client:   mgr.GetClient(),
-		Log:      ctrl.Log.WithName("controllers").WithName("FirewallRule"),
 		Scheme:   mgr.GetScheme(),
 		Provider: pvd,
 	}).SetupWithManager(mgr); err != nil {
 		setupLog.Error(err, "unable to create controller", "controller", "FirewallRule")
 		os.Exit(1)
 	}
-	//+kubebuilder:scaffold:builder
+	// nolint:goconst
+	if os.Getenv("ENABLE_WEBHOOKS") != "false" {
+		if err = webhookkubestaticquortexiov1alpha1.SetupFirewallRuleWebhookWithManager(mgr); err != nil {
+			setupLog.Error(err, "unable to create webhook", "webhook", "FirewallRule")
+			os.Exit(1)
+		}
+	}
+	// +kubebuilder:scaffold:builder
 
 	if err := mgr.AddHealthzCheck("healthz", healthz.Ping); err != nil {
 		setupLog.Error(err, "Unable to set up health check")

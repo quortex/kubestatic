@@ -22,7 +22,7 @@ SHELL = /usr/bin/env bash -o pipefail
 .SHELLFLAGS = -ec
 
 .PHONY: all
-all: build doc
+all: build doc charts
 
 ##@ General
 
@@ -90,9 +90,12 @@ charts: yq helm-docs kustomize ## Generate helm charts and their documentations
 	@$(YQ) '.metadata.name = ("PREFIX-" + .metadata.name)' config/rbac/role.yaml | \
 		sed "s/PREFIX/{{ include \"kubestatic.fullname\" . }}/" > helm/kubestatic/templates/manager_role.yaml
 	@$(KUSTOMIZE) build config/default/ > $(TMP)/result.yaml
-	${YQ} 'select(.kind=="CustomResourceDefinition")' $${TMPFILE} > helm/kubestatic/crds/crds.yaml && \
-	rm -rf $${TMPFILE}
+	@$(YQ) 'select(.kind=="ValidatingWebhookConfiguration" or .kind=="MutatingWebhookConfiguration")' $(TMP)/result.yaml | \
+		sed -e 's|name: kubestatic|name: {{ include \"kubestatic.fullname\" . }}|' \
+			-e 's|cert-manager.io/inject-ca-from: .*|cert-manager.io/inject-ca-from: {{ .Release.Namespace }}/{{ include \"kubestatic.fullname\" . }}-serving-cert|' \
+			-e 's|namespace: .*|namespace: {{ .Release.Namespace }}|' > helm/kubestatic/templates/webhooks.yaml
 	@$(YQ) 'select(.kind=="CustomResourceDefinition")' $(TMP)/result.yaml > helm/kubestatic/crds/crds.yaml
+	@rm -rf $(TMP)
 	@$(HELM_DOCS) -s file
 
 
@@ -123,7 +126,7 @@ docker-push: ## Push docker image with the manager.
 # - have enabled BuildKit. More info: https://docs.docker.com/develop/develop-images/build_enhancements/
 # - be able to push the image to your registry (i.e. if you do not set a valid value via IMG=<myregistry/image:<tag>> then the export will fail)
 # To adequately provide solutions that are compatible with multiple platforms, you should consider using this option.
-PLATFORMS ?= linux/arm64,linux/amd64,linux/s390x,linux/ppc64le
+PLATFORMS ?= linux/arm64,linux/amd64
 .PHONY: docker-buildx
 docker-buildx: ## Build and push docker image for the manager for cross-platform support
 	# copy existing Dockerfile and insert --platform=${BUILDPLATFORM} into Dockerfile.cross, and preserve the original Dockerfile
@@ -184,7 +187,7 @@ HELM_DOCS ?= $(LOCALBIN)/helm-docs
 KUSTOMIZE_VERSION ?= v5.4.3
 CONTROLLER_TOOLS_VERSION ?= v0.16.1
 ENVTEST_VERSION ?= release-0.19
-GOLANGCI_LINT_VERSION ?= v1.59.1
+GOLANGCI_LINT_VERSION ?= v2.0.2
 CRD_REF_DOCS_VERSION ?= v0.1.0
 YQ_VERSION ?= v4.44.3
 HELM_DOCS_VERSION ?= v1.14.2
@@ -207,7 +210,7 @@ $(ENVTEST): $(LOCALBIN)
 .PHONY: golangci-lint
 golangci-lint: $(GOLANGCI_LINT) ## Download golangci-lint locally if necessary.
 $(GOLANGCI_LINT): $(LOCALBIN)
-	$(call go-install-tool,$(GOLANGCI_LINT),github.com/golangci/golangci-lint/cmd/golangci-lint,$(GOLANGCI_LINT_VERSION))
+	$(call go-install-tool,$(GOLANGCI_LINT),github.com/golangci/golangci-lint/v2/cmd/golangci-lint,$(GOLANGCI_LINT_VERSION))
 
 .PHONY: crd-ref-docs
 crd-ref-docs: $(CRD_REF_DOCS) ## Download crd-ref-docs locally if necessary.

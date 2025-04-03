@@ -20,8 +20,6 @@ import (
 	"context"
 	"time"
 
-	"github.com/go-logr/logr"
-	"github.com/google/uuid"
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -32,6 +30,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/builder"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/event"
+	"sigs.k8s.io/controller-runtime/pkg/log"
 	"sigs.k8s.io/controller-runtime/pkg/predicate"
 
 	"github.com/quortex/kubestatic/api/v1alpha1"
@@ -47,7 +46,6 @@ const (
 // NodeReconciler reconciles a Node object
 type NodeReconciler struct {
 	client.Client
-	Log                           logr.Logger
 	Scheme                        *runtime.Scheme
 	PreventEIPDeallocation        bool
 	MinReconciliationInterval     time.Duration
@@ -62,17 +60,15 @@ type NodeReconciler struct {
 // Reconcile is part of the main kubernetes reconciliation loop which aims to
 // move the current state of the cluster closer to the desired state.
 func (r *NodeReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Result, error) {
-	log := r.Log.WithValues("node", req.NamespacedName, "reconciliationID", uuid.New().String())
-
+	log := log.FromContext(ctx)
 	log.V(1).Info("Node reconciliation started")
-	defer log.V(1).Info("Node reconciliation done")
 
 	node := &corev1.Node{}
 	if err := r.Get(ctx, req.NamespacedName, node); err != nil {
 		if errors.IsNotFound(err) {
 			// Request object not found, could have been deleted after reconcile request.
 			// Return and don't requeue
-			log.Info("ExternalIP resource not found. Ignoring since object must be deleted")
+			log.Info("Node resource not found. Ignoring since object must be deleted")
 			delete(r.lastReconciliation, req.Name)
 			return ctrl.Result{}, nil
 		}
@@ -95,7 +91,7 @@ func (r *NodeReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.
 	// List auto assigned ExternalIPs for reconciled node
 	log.V(1).Info("List all ExternalIPs for node")
 	externalIPs := &v1alpha1.ExternalIPList{}
-	if err := r.Client.List(
+	if err := r.List(
 		ctx,
 		externalIPs,
 	); err != nil {
@@ -133,7 +129,7 @@ func (r *NodeReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.
 
 		log.V(1).Info("List all Pods with selector", "selector", sel)
 		podList := &corev1.PodList{}
-		if err := r.Client.List(ctx, podList, client.MatchingLabelsSelector{Selector: sel}); err != nil {
+		if err := r.List(ctx, podList, client.MatchingLabelsSelector{Selector: sel}); err != nil {
 			log.Error(err, "Failed to list all Pods with selector", "selector", sel)
 			return ctrl.Result{}, err
 		}
@@ -168,6 +164,8 @@ func (r *NodeReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.
 		log.Error(err, "Unable to create ExternalIP")
 		return ctrl.Result{}, err
 	}
+
+	log.Info("Node successfully reconciled")
 
 	return ctrl.Result{RequeueAfter: r.ReconciliationRequeueInterval}, nil
 }
