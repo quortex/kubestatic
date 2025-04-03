@@ -91,7 +91,7 @@ func (r *NodeReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.
 	// List auto assigned ExternalIPs for reconciled node
 	log.V(1).Info("List all ExternalIPs for node")
 	externalIPs := &v1alpha1.ExternalIPList{}
-	if err := r.Client.List(
+	if err := r.List(
 		ctx,
 		externalIPs,
 	); err != nil {
@@ -129,7 +129,7 @@ func (r *NodeReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.
 
 		log.V(1).Info("List all Pods with selector", "selector", sel)
 		podList := &corev1.PodList{}
-		if err := r.Client.List(ctx, podList, client.MatchingLabelsSelector{Selector: sel}); err != nil {
+		if err := r.List(ctx, podList, client.MatchingLabelsSelector{Selector: sel}); err != nil {
 			log.Error(err, "Failed to list all Pods with selector", "selector", sel)
 			return ctrl.Result{}, err
 		}

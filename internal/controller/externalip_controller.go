@@ -75,7 +75,7 @@ func (r *ExternalIPReconciler) Reconcile(ctx context.Context, req ctrl.Request) 
 		return ctrl.Result{}, err
 	}
 
-	if !externalIP.ObjectMeta.DeletionTimestamp.IsZero() && len(externalIP.ObjectMeta.Finalizers) == 0 {
+	if !externalIP.DeletionTimestamp.IsZero() && len(externalIP.Finalizers) == 0 {
 		// Object is in process of being deleted and no finalizers left – likely going to disappear
 		log.Info("ExternalIP found with deletion timestamp and no finalizers. Ignoring since object must be deleted")
 		return ctrl.Result{}, nil
@@ -88,7 +88,7 @@ func (r *ExternalIPReconciler) Reconcile(ctx context.Context, req ctrl.Request) 
 
 	// Add finalizer
 	if !controllerutil.ContainsFinalizer(externalIP, externalIPFinalizer) {
-		externalIP.ObjectMeta.Finalizers = append(externalIP.ObjectMeta.Finalizers, externalIPFinalizer)
+		externalIP.Finalizers = append(externalIP.Finalizers, externalIPFinalizer)
 		if err := r.Update(ctx, externalIP); err != nil {
 			log.Error(err, "Failed to add finalizer")
 			return ctrl.Result{}, err
@@ -122,7 +122,7 @@ func (r *ExternalIPReconciler) Reconcile(ctx context.Context, req ctrl.Request) 
 
 	var status v1alpha1.ExternalIPStatus
 	var err error
-	if externalIP.ObjectMeta.DeletionTimestamp.IsZero() {
+	if externalIP.DeletionTimestamp.IsZero() {
 		status, err = r.Provider.ReconcileExternalIP(ctx, log, instanceID, externalIP)
 		if err != nil {
 			if patchErr := patchExternalIPStatus(ctx, r, externalIP, status); patchErr != nil {
@@ -133,7 +133,7 @@ func (r *ExternalIPReconciler) Reconcile(ctx context.Context, req ctrl.Request) 
 			return ctrl.Result{}, err
 		}
 		// Node not being deleted, reconcile externalip label
-		if externalIP.Spec.NodeName != "" && node.ObjectMeta.DeletionTimestamp.IsZero() {
+		if externalIP.Spec.NodeName != "" && node.DeletionTimestamp.IsZero() {
 			// Marshal node, ...
 			old, err := json.Marshal(node)
 			if err != nil {
@@ -157,7 +157,7 @@ func (r *ExternalIPReconciler) Reconcile(ctx context.Context, req ctrl.Request) 
 			}
 
 			// Apply patch to set node's wanted labels.
-			if err = r.Client.Patch(ctx, &node, client.RawPatch(types.MergePatchType, patch)); err != nil {
+			if err = r.Patch(ctx, &node, client.RawPatch(types.MergePatchType, patch)); err != nil {
 				log.Error(err, "Failed to patch node")
 				return ctrl.Result{}, err
 			}

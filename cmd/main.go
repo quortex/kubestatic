@@ -19,7 +19,6 @@ package main
 import (
 	"crypto/tls"
 	"flag"
-	"fmt"
 	"os"
 	"strings"
 	"time"
@@ -163,7 +162,7 @@ func main() {
 		}
 
 	default:
-		setupLog.Error(fmt.Errorf("Invalid cloud-provider: %s", cloudProvider), "unable to init cloud provider implementation")
+		setupLog.Error(nil, "unable to init cloud provider implementation: invalid cloud-provider", "cloud-provider", cloudProvider)
 		os.Exit(1)
 	}
 
