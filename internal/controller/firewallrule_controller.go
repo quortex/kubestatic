@@ -78,7 +78,7 @@ func (r *FirewallRuleReconciler) Reconcile(ctx context.Context, req ctrl.Request
 		return ctrl.Result{}, err
 	}
 
-	if !firewallRule.ObjectMeta.DeletionTimestamp.IsZero() && len(firewallRule.ObjectMeta.Finalizers) == 0 {
+	if !firewallRule.DeletionTimestamp.IsZero() && len(firewallRule.Finalizers) == 0 {
 		// Object is in process of being deleted and no finalizers left – likely going to disappear
 		log.Info("FirewallRule found with deletion timestamp and no finalizers. Ignoring since object must be deleted")
 		return ctrl.Result{}, nil
@@ -120,7 +120,7 @@ func (r *FirewallRuleReconciler) Reconcile(ctx context.Context, req ctrl.Request
 
 	// Add finalizer
 	if !controllerutil.ContainsFinalizer(firewallRule, firewallRuleFinalizer) {
-		firewallRule.ObjectMeta.Finalizers = append(firewallRule.ObjectMeta.Finalizers, firewallRuleFinalizer)
+		firewallRule.Finalizers = append(firewallRule.Finalizers, firewallRuleFinalizer)
 		if err := r.Update(ctx, firewallRule); err != nil {
 			log.Error(err, "Failed to add finalizer")
 			return ctrl.Result{}, err
@@ -147,7 +147,7 @@ func (r *FirewallRuleReconciler) Reconcile(ctx context.Context, req ctrl.Request
 		}
 		firewallRule.Annotations[annNodeName] = currentNodeName
 
-		if err := r.Client.Patch(ctx, firewallRule, existingFR); err != nil {
+		if err := r.Patch(ctx, firewallRule, existingFR); err != nil {
 			log.Error(err, "Failed to add annotation node name")
 			return ctrl.Result{}, err
 		}
@@ -165,7 +165,7 @@ func (r *FirewallRuleReconciler) Reconcile(ctx context.Context, req ctrl.Request
 
 		existingFR := client.MergeFrom(firewallRule.DeepCopy())
 		delete(firewallRule.Annotations, annNodeName)
-		if err := r.Client.Patch(ctx, firewallRule, existingFR); err != nil {
+		if err := r.Patch(ctx, firewallRule, existingFR); err != nil {
 			log.Error(err, "Failed to remove annotation node name")
 			return ctrl.Result{}, err
 		}
