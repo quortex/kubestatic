@@ -10,10 +10,10 @@ import (
 	"sync"
 	"time"
 
+	"github.com/aws/aws-sdk-go-v2/aws"
 	"github.com/aws/aws-sdk-go-v2/config"
 	"github.com/aws/aws-sdk-go-v2/service/ec2"
 	"github.com/aws/aws-sdk-go-v2/service/ec2/types"
-	"github.com/aws/aws-sdk-go/aws"
 	"github.com/aws/smithy-go/metrics/smithyotelmetrics"
 	"github.com/go-logr/logr"
 	"github.com/mitchellh/hashstructure/v2"
@@ -21,11 +21,11 @@ import (
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/meta"
 	kmetav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/util/rand"
 
 	"github.com/quortex/kubestatic/api/v1alpha1"
 	"github.com/quortex/kubestatic/internal/provider"
 	"github.com/quortex/kubestatic/internal/provider/aws/converter"
-	"github.com/quortex/kubestatic/internal/utils"
 )
 
 // TagKey represents an AWS tag key.
@@ -141,10 +141,9 @@ func WithAddressID(addressID string) AddressIDFilter {
 // awsProvider is an AWS provider implementation for the provider.Provider interface
 type awsProvider struct {
 	ec2 *ec2.Client
-	// We have a mutexes because the provider can be used by multiple controllers,
-	// so that we can avoid callers result in cache misses and multiple
-	// calls to AWS API when we could have just made one call.
-	// Individual mutexes for each cache
+	// These Mutexes ensure that when a cache miss occurs, only one controller makes
+	// the AWS API call while others wait for the result, preventing duplicate
+	// requests for the same data.
 	instancesMutex         sync.Mutex
 	instancesCache         *cache.Cache
 	securityGroupsMutex    sync.Mutex
@@ -156,16 +155,16 @@ type awsProvider struct {
 }
 
 // NewProvider instantiate a Provider implementation for AWS
-func NewProvider(defaultTTL time.Duration, defaultCleanupInterval time.Duration) (provider.Provider, error) {
+func NewProvider(defaultTTL, defaultCleanupInterval time.Duration) (provider.Provider, error) {
 	// Load the Shared AWS Configuration (~/.aws/config)
 	cfg, err := config.LoadDefaultConfig(context.TODO())
 	if err != nil {
-		panic(err)
+		return nil, err
 	}
 
 	meterProvider, err := NewMeterProvider()
 	if err != nil {
-		panic(err)
+		return nil, err
 	}
 
 	return &awsProvider{
@@ -182,8 +181,8 @@ func NewProvider(defaultTTL time.Duration, defaultCleanupInterval time.Duration)
 
 // Standalone generic function for fetching AWS resources
 func getResource[T any](
-	cache *cache.Cache,
 	ctx context.Context,
+	cache *cache.Cache,
 	mu *sync.Mutex,
 	cacheKey string,
 	apiCall func(context.Context, []types.Filter) (T, error),
@@ -243,7 +242,7 @@ func (p *awsProvider) getAddress(ctx context.Context, opts ...FilterOption) (*ty
 		}
 		return &res.Addresses[0], nil
 	}
-	return getResource(p.addressesCache, ctx, &p.addressesMutex, "", apiCall, opts...)
+	return getResource(ctx, p.addressesCache, &p.addressesMutex, "", apiCall, opts...)
 }
 
 // Wrapper function for fetching securityGroups
@@ -261,7 +260,7 @@ func (p *awsProvider) getSecurityGroup(ctx context.Context, opts ...FilterOption
 		}
 		return &res.SecurityGroups[0], nil
 	}
-	return getResource(p.securityGroupsCache, ctx, &p.securityGroupsMutex, "", apiCall, opts...)
+	return getResource(ctx, p.securityGroupsCache, &p.securityGroupsMutex, "", apiCall, opts...)
 }
 
 // GetInstanceID returns the instance ID from a node
@@ -286,7 +285,7 @@ func (p *awsProvider) getInstance(ctx context.Context, instanceID string) (*type
 		return &res.Reservations[0].Instances[0], nil
 	}
 
-	return getResource(p.instancesCache, ctx, &p.instancesMutex, instanceID, apiCall)
+	return getResource(ctx, p.instancesCache, &p.instancesMutex, instanceID, apiCall)
 }
 
 func (p *awsProvider) getNetworkInterfaces(ctx context.Context, securityGroupID string) ([]types.NetworkInterface, error) {
@@ -305,7 +304,7 @@ func (p *awsProvider) getNetworkInterfaces(ctx context.Context, securityGroupID 
 		return res.NetworkInterfaces, nil
 	}
 
-	return getResource(p.networkInterfacesCache, ctx, &p.networkInterfacesMutex, securityGroupID, apiCall)
+	return getResource(ctx, p.networkInterfacesCache, &p.networkInterfacesMutex, securityGroupID, apiCall)
 }
 
 func eniWithPublicIP(instance *types.Instance) (*types.InstanceNetworkInterface, error) {
@@ -313,14 +312,17 @@ func eniWithPublicIP(instance *types.Instance) (*types.InstanceNetworkInterface,
 		return ni.Association != nil && ni.Association.PublicIp != nil
 	})
 	if idx == -1 {
-		return nil, fmt.Errorf("no network interface with public IP found for instance %s", aws.StringValue(instance.InstanceId))
+		return nil, fmt.Errorf("no network interface with public IP found for instance %s", aws.ToString(instance.InstanceId))
 	}
 	return &instance.NetworkInterfaces[idx], nil
 }
 
 func (p *awsProvider) createSecurityGroup(ctx context.Context, vpcID, nodeName, instanceID string) (string, error) {
+	p.securityGroupsMutex.Lock()
+	defer p.securityGroupsMutex.Unlock()
+
 	res, err := p.ec2.CreateSecurityGroup(ctx, &ec2.CreateSecurityGroupInput{
-		GroupName:   aws.String(fmt.Sprintf("kubestatic-%s", utils.RandomString(10))),
+		GroupName:   aws.String(fmt.Sprintf("kubestatic-%s", rand.String(10))),
 		Description: aws.String(fmt.Sprintf("Kubestatic managed group for instance %s", instanceID)),
 		VpcId:       aws.String(vpcID),
 		TagSpecifications: []types.TagSpecification{
@@ -349,10 +351,13 @@ func (p *awsProvider) createSecurityGroup(ctx context.Context, vpcID, nodeName, 
 
 	p.securityGroupsCache.Flush()
 
-	return aws.StringValue(res.GroupId), nil
+	return aws.ToString(res.GroupId), nil
 }
 
 func (p *awsProvider) deleteSecurityGroup(ctx context.Context, securityGroupID string) error {
+	p.securityGroupsMutex.Lock()
+	defer p.securityGroupsMutex.Unlock()
+
 	_, err := p.ec2.DeleteSecurityGroup(ctx, &ec2.DeleteSecurityGroupInput{
 		GroupId: aws.String(securityGroupID),
 	})
@@ -366,6 +371,9 @@ func (p *awsProvider) deleteSecurityGroup(ctx context.Context, securityGroupID s
 }
 
 func (p *awsProvider) authorizeSecurityGroupIngress(ctx context.Context, log logr.Logger, firewallRuleID string, req provider.IPPermission) error {
+	p.securityGroupsMutex.Lock()
+	defer p.securityGroupsMutex.Unlock()
+
 	_, err := p.ec2.AuthorizeSecurityGroupIngress(ctx, &ec2.AuthorizeSecurityGroupIngressInput{
 		GroupId: &firewallRuleID,
 		IpPermissions: []types.IpPermission{
@@ -383,6 +391,9 @@ func (p *awsProvider) authorizeSecurityGroupIngress(ctx context.Context, log log
 }
 
 func (p *awsProvider) revokeSecurityGroupIngress(ctx context.Context, log logr.Logger, firewallRuleID string, req provider.IPPermission) error {
+	p.securityGroupsMutex.Lock()
+	defer p.securityGroupsMutex.Unlock()
+
 	_, err := p.ec2.RevokeSecurityGroupIngress(ctx, &ec2.RevokeSecurityGroupIngressInput{
 		GroupId: aws.String(firewallRuleID),
 		IpPermissions: []types.IpPermission{
@@ -400,6 +411,9 @@ func (p *awsProvider) revokeSecurityGroupIngress(ctx context.Context, log logr.L
 }
 
 func (p *awsProvider) authorizeSecurityGroupEgress(ctx context.Context, log logr.Logger, firewallRuleID string, req provider.IPPermission) error {
+	p.securityGroupsMutex.Lock()
+	defer p.securityGroupsMutex.Unlock()
+
 	_, err := p.ec2.AuthorizeSecurityGroupEgress(ctx, &ec2.AuthorizeSecurityGroupEgressInput{
 		GroupId: aws.String(firewallRuleID),
 		IpPermissions: []types.IpPermission{
@@ -417,6 +431,9 @@ func (p *awsProvider) authorizeSecurityGroupEgress(ctx context.Context, log logr
 }
 
 func (p *awsProvider) revokeSecurityGroupEgress(ctx context.Context, log logr.Logger, firewallRuleID string, req provider.IPPermission) error {
+	p.securityGroupsMutex.Lock()
+	defer p.securityGroupsMutex.Unlock()
+
 	_, err := p.ec2.RevokeSecurityGroupEgress(ctx, &ec2.RevokeSecurityGroupEgressInput{
 		GroupId: aws.String(firewallRuleID),
 		IpPermissions: []types.IpPermission{
@@ -474,8 +491,11 @@ func (p *awsProvider) revokeUselessPermission(
 }
 
 func (p *awsProvider) createAddress(ctx context.Context, externalIPName, instanceID string) (string, error) {
+	p.addressesMutex.Lock()
+	defer p.addressesMutex.Unlock()
+
 	res, err := p.ec2.AllocateAddress(ctx, &ec2.AllocateAddressInput{
-		Domain: "vpc",
+		Domain: types.DomainTypeVpc,
 		TagSpecifications: []types.TagSpecification{
 			{
 				ResourceType: types.ResourceTypeElasticIp,
@@ -502,10 +522,13 @@ func (p *awsProvider) createAddress(ctx context.Context, externalIPName, instanc
 
 	p.addressesCache.Flush()
 
-	return aws.StringValue(res.AllocationId), nil
+	return aws.ToString(res.AllocationId), nil
 }
 
 func (p *awsProvider) associateAddress(ctx context.Context, addressID, networkInterfaceID string) error {
+	p.addressesMutex.Lock()
+	defer p.addressesMutex.Unlock()
+
 	_, err := p.ec2.AssociateAddress(ctx, &ec2.AssociateAddressInput{
 		AllocationId:       &addressID,
 		NetworkInterfaceId: &networkInterfaceID,
@@ -520,6 +543,9 @@ func (p *awsProvider) associateAddress(ctx context.Context, addressID, networkIn
 }
 
 func (p *awsProvider) disassociateAddress(ctx context.Context, associationID string) error {
+	p.addressesMutex.Lock()
+	defer p.addressesMutex.Unlock()
+
 	_, err := p.ec2.DisassociateAddress(ctx, &ec2.DisassociateAddressInput{
 		AssociationId: &associationID,
 	})
@@ -533,6 +559,9 @@ func (p *awsProvider) disassociateAddress(ctx context.Context, associationID str
 }
 
 func (p *awsProvider) deleteAddress(ctx context.Context, addressID string) error {
+	p.addressesMutex.Lock()
+	defer p.addressesMutex.Unlock()
+
 	_, err := p.ec2.ReleaseAddress(ctx, &ec2.ReleaseAddressInput{
 		AllocationId: &addressID,
 	})
@@ -583,7 +612,7 @@ func (p *awsProvider) ReconcileFirewallRule(
 	}
 
 	// Get the security group associated with the instance
-	securityGroup, err := p.getSecurityGroup(ctx, Managed(), WithVPCID(aws.StringValue(instance.VpcId)), WithNodeName(nodeName))
+	securityGroup, err := p.getSecurityGroup(ctx, Managed(), WithVPCID(aws.ToString(instance.VpcId)), WithNodeName(nodeName))
 	if err != nil && err.(*provider.Error).Code != provider.NotFoundError {
 		meta.SetStatusCondition(&status.Conditions, kmetav1.Condition{
 			Type:               v1alpha1.FirewallRuleConditionTypeSecurityGroupCreated,
@@ -602,7 +631,7 @@ func (p *awsProvider) ReconcileFirewallRule(
 			return status, nil
 		}
 
-		securityGroupID, err := p.createSecurityGroup(ctx, aws.StringValue(instance.VpcId), nodeName, instanceID)
+		securityGroupID, err := p.createSecurityGroup(ctx, aws.ToString(instance.VpcId), nodeName, instanceID)
 		if err != nil {
 			meta.SetStatusCondition(&status.Conditions, kmetav1.Condition{
 				Type:               v1alpha1.FirewallRuleConditionTypeSecurityGroupCreated,
@@ -619,7 +648,7 @@ func (p *awsProvider) ReconcileFirewallRule(
 		securityGroup, err = p.getSecurityGroup(
 			ctx,
 			Managed(),
-			WithVPCID(aws.StringValue(instance.VpcId)),
+			WithVPCID(aws.ToString(instance.VpcId)),
 			WithNodeName(nodeName),
 			WithSecurityGroupID(securityGroupID),
 		)
@@ -640,10 +669,10 @@ func (p *awsProvider) ReconcileFirewallRule(
 		Status:             kmetav1.ConditionTrue,
 		ObservedGeneration: firewallRule.Generation,
 		Reason:             v1alpha1.FirewallRuleConditionReasonSecurityGroupCreated,
-		Message:            fmt.Sprintf("Security group created with nodename %s in %s", nodeName, aws.StringValue(instance.VpcId)),
+		Message:            fmt.Sprintf("Security group created with nodename %s in %s", nodeName, aws.ToString(instance.VpcId)),
 	})
 
-	securityGroupID := aws.StringValue(securityGroup.GroupId)
+	securityGroupID := aws.ToString(securityGroup.GroupId)
 	status.FirewallRuleID = securityGroup.GroupId
 
 	// Get the first network interface with a public IP address
@@ -674,7 +703,7 @@ func (p *awsProvider) ReconcileFirewallRule(
 
 	isAssociated := false
 	for _, ni := range networkInterfaces {
-		if aws.StringValue(ni.NetworkInterfaceId) == aws.StringValue(networkInterface.NetworkInterfaceId) {
+		if aws.ToString(ni.NetworkInterfaceId) == aws.ToString(networkInterface.NetworkInterfaceId) {
 			isAssociated = true
 			continue
 		}
@@ -682,10 +711,12 @@ func (p *awsProvider) ReconcileFirewallRule(
 		// Disassociate the security group from other network interfaces
 		groups := []string{}
 		for _, group := range ni.Groups {
-			if aws.StringValue(group.GroupId) != securityGroupID {
-				groups = append(groups, aws.StringValue(group.GroupId))
+			if aws.ToString(group.GroupId) != securityGroupID {
+				groups = append(groups, aws.ToString(group.GroupId))
 			}
 		}
+
+		p.securityGroupsMutex.Lock()
 		_, err = p.ec2.ModifyNetworkInterfaceAttribute(ctx, &ec2.ModifyNetworkInterfaceAttributeInput{
 			NetworkInterfaceId: ni.NetworkInterfaceId,
 			Groups:             groups,
@@ -703,7 +734,9 @@ func (p *awsProvider) ReconcileFirewallRule(
 		log.Info("Security group disassociated from network interface", "securityGroupID", securityGroupID, "networkInterfaceID", ni.NetworkInterfaceId)
 
 		p.networkInterfacesCache.Delete(securityGroupID)
+
 		p.securityGroupsCache.Flush()
+		p.securityGroupsMutex.Unlock()
 	}
 
 	if !isAssociated {
@@ -711,11 +744,12 @@ func (p *awsProvider) ReconcileFirewallRule(
 		// Disassociate the security group from other network interfaces
 		groups := []string{}
 		for _, group := range networkInterface.Groups {
-			if aws.StringValue(group.GroupId) != securityGroupID {
-				groups = append(groups, aws.StringValue(group.GroupId))
+			if aws.ToString(group.GroupId) != securityGroupID {
+				groups = append(groups, aws.ToString(group.GroupId))
 			}
 		}
 		groups = append(groups, securityGroupID)
+		p.securityGroupsMutex.Lock()
 		_, err = p.ec2.ModifyNetworkInterfaceAttribute(ctx, &ec2.ModifyNetworkInterfaceAttributeInput{
 			NetworkInterfaceId: networkInterface.NetworkInterfaceId,
 			Groups:             groups,
@@ -728,7 +762,7 @@ func (p *awsProvider) ReconcileFirewallRule(
 				Reason:             v1alpha1.FirewallRuleConditionReasonProviderError,
 				Message: fmt.Sprintf(
 					"Security group not associated with network interface %s: %s",
-					aws.StringValue(networkInterface.NetworkInterfaceId),
+					aws.ToString(networkInterface.NetworkInterfaceId),
 					err,
 				),
 			})
@@ -740,7 +774,9 @@ func (p *awsProvider) ReconcileFirewallRule(
 		)
 
 		p.networkInterfacesCache.Delete(securityGroupID)
+
 		p.securityGroupsCache.Flush()
+		p.securityGroupsMutex.Unlock()
 	}
 
 	meta.SetStatusCondition(&status.Conditions, kmetav1.Condition{
@@ -748,7 +784,7 @@ func (p *awsProvider) ReconcileFirewallRule(
 		Status:             kmetav1.ConditionTrue,
 		ObservedGeneration: firewallRule.Generation,
 		Reason:             v1alpha1.FirewallRuleConditionReasonNetworkInterfaceAssociated,
-		Message:            fmt.Sprintf("Security group associated with network interface %s", aws.StringValue(networkInterface.NetworkInterfaceId)),
+		Message:            fmt.Sprintf("Security group associated with network interface %s", aws.ToString(networkInterface.NetworkInterfaceId)),
 	})
 
 	status.InstanceID = &instanceID
@@ -902,7 +938,7 @@ func (p *awsProvider) ReconcileFirewallRulesDeletion(
 		}
 		return fmt.Errorf("failed to get security group: %w", err)
 	}
-	securityGroupID := aws.StringValue(securityGroup.GroupId)
+	securityGroupID := aws.ToString(securityGroup.GroupId)
 
 	// Get all network interfaces associated with the security group
 	networkInterfaces, err := p.getNetworkInterfaces(ctx, securityGroupID)
@@ -914,8 +950,8 @@ func (p *awsProvider) ReconcileFirewallRulesDeletion(
 		// Disassociate the security group from all network interfaces
 		groups := []string{}
 		for _, group := range ni.Groups {
-			if aws.StringValue(group.GroupId) != securityGroupID {
-				groups = append(groups, aws.StringValue(group.GroupId))
+			if aws.ToString(group.GroupId) != securityGroupID {
+				groups = append(groups, aws.ToString(group.GroupId))
 			}
 		}
 		_, err = p.ec2.ModifyNetworkInterfaceAttribute(ctx, &ec2.ModifyNetworkInterfaceAttributeInput{
@@ -1077,7 +1113,7 @@ func (p *awsProvider) ReconcileExternalIP(
 				ObservedGeneration: externalIP.Generation,
 				Reason:             v1alpha1.ExternalIPConditionReasonNetworkInterfaceAssociated,
 				Message: fmt.Sprintf("Address %s associated with network interface %s",
-					aws.StringValue(address.AllocationId), aws.StringValue(networkInterface.NetworkInterfaceId)),
+					aws.ToString(address.AllocationId), aws.ToString(networkInterface.NetworkInterfaceId)),
 			})
 			return status, nil
 		}
@@ -1090,7 +1126,7 @@ func (p *awsProvider) ReconcileExternalIP(
 				ObservedGeneration: externalIP.Generation,
 				Reason:             v1alpha1.ExternalIPConditionReasonProviderError,
 				Message: fmt.Sprintf("Failed to disassociate address %s with %s",
-					aws.StringValue(address.AllocationId), aws.StringValue(address.AssociationId)),
+					aws.ToString(address.AllocationId), aws.ToString(address.AssociationId)),
 			})
 			return status, fmt.Errorf("failed to disassociate address: %w", err)
 		}
@@ -1101,7 +1137,7 @@ func (p *awsProvider) ReconcileExternalIP(
 	}
 
 	// Associate the address with the network interface
-	if err := p.associateAddress(ctx, aws.StringValue(address.AllocationId), *networkInterface.NetworkInterfaceId); err != nil {
+	if err := p.associateAddress(ctx, aws.ToString(address.AllocationId), *networkInterface.NetworkInterfaceId); err != nil {
 		meta.SetStatusCondition(&status.Conditions, kmetav1.Condition{
 			Type:               v1alpha1.ExternalIPConditionTypeNetworkInterfaceAssociated,
 			Status:             kmetav1.ConditionFalse,
@@ -1123,7 +1159,7 @@ func (p *awsProvider) ReconcileExternalIP(
 		ObservedGeneration: externalIP.Generation,
 		Reason:             v1alpha1.ExternalIPConditionReasonNetworkInterfaceAssociated,
 		Message: fmt.Sprintf("Address %s associated with network interface %s",
-			aws.StringValue(address.AllocationId), aws.StringValue(networkInterface.NetworkInterfaceId)),
+			aws.ToString(address.AllocationId), aws.ToString(networkInterface.NetworkInterfaceId)),
 	})
 
 	return status, nil
@@ -1164,7 +1200,7 @@ func (p *awsProvider) ReconcileExternalIPDeletion(
 		log.Info("Address disassociated", "addressID", address.AllocationId, "associationID", *address.AssociationId)
 	}
 
-	if err := p.deleteAddress(ctx, aws.StringValue(address.AllocationId)); err != nil {
+	if err := p.deleteAddress(ctx, aws.ToString(address.AllocationId)); err != nil {
 		return fmt.Errorf("failed to delete address: %w", err)
 	}
 	log.Info("Address deleted", "addressID", address.AllocationId)

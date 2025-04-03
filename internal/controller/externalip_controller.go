@@ -87,8 +87,7 @@ func (r *ExternalIPReconciler) Reconcile(ctx context.Context, req ctrl.Request) 
 	}
 
 	// Add finalizer
-	if !controllerutil.ContainsFinalizer(externalIP, externalIPFinalizer) {
-		externalIP.Finalizers = append(externalIP.Finalizers, externalIPFinalizer)
+	if controllerutil.AddFinalizer(externalIP, externalIPFinalizer) {
 		if err := r.Update(ctx, externalIP); err != nil {
 			log.Error(err, "Failed to add finalizer")
 			return ctrl.Result{}, err
@@ -169,8 +168,7 @@ func (r *ExternalIPReconciler) Reconcile(ctx context.Context, req ctrl.Request) 
 		}
 	}
 
-	if !externalIP.DeletionTimestamp.IsZero() && controllerutil.ContainsFinalizer(externalIP, externalIPFinalizer) {
-		controllerutil.RemoveFinalizer(externalIP, externalIPFinalizer)
+	if !externalIP.DeletionTimestamp.IsZero() && controllerutil.RemoveFinalizer(externalIP, externalIPFinalizer) {
 		if err := r.Update(ctx, externalIP); err != nil {
 			log.Error(err, "Failed to remove finalizer")
 			return ctrl.Result{}, err

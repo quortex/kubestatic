@@ -25,7 +25,7 @@ func ReconcilePermissions(
 			Protocol: rule.Protocol,
 			ToPort:   rule.ToPort,
 		}
-		if err := applyPermissions(ctx, log, firewallRuleID, addFunc, toAdd); err != nil {
+		if err := addFunc(ctx, log, firewallRuleID, toAdd); err != nil {
 			return err
 		}
 	}
@@ -35,18 +35,6 @@ func ReconcilePermissions(
 
 // PermFunc describes a permission function authorize / revoke ingress / egress
 type PermFunc func(ctx context.Context, log logr.Logger, firewallRuleID string, req IPPermission) error
-
-// applyPermissions perform asynchronous calls on given PermFunc to
-// authorize / ingress / egress permission.
-func applyPermissions(
-	ctx context.Context,
-	log logr.Logger,
-	firewallRuleID string,
-	permFunc PermFunc,
-	permission IPPermission,
-) error {
-	return permFunc(ctx, log, firewallRuleID, permission)
-}
 
 // containsPermission returns if given Permission slice contains Permission.
 func ContainsPermission(slice []*IPPermission, elem *IPPermission) bool {

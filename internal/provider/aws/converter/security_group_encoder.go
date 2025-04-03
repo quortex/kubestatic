@@ -4,8 +4,8 @@ package converter
 import (
 	"slices"
 
+	"github.com/aws/aws-sdk-go-v2/aws"
 	"github.com/aws/aws-sdk-go-v2/service/ec2/types"
-	"github.com/aws/aws-sdk-go/aws"
 	"k8s.io/utils/ptr"
 
 	"github.com/quortex/kubestatic/internal/provider"
