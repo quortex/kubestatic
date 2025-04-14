@@ -10,7 +10,6 @@ import (
 	"github.com/aws/aws-sdk-go-v2/service/ec2"
 	"github.com/aws/aws-sdk-go-v2/service/ec2/types"
 	"github.com/aws/smithy-go"
-	"github.com/aws/smithy-go/ptr"
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
 	. "github.com/onsi/gomega/gstruct"
@@ -26,9 +25,9 @@ import (
 
 var _ = Describe("AWSProvider", func() {
 	var (
-		mockCtrl   *gomock.Controller
-		mockEC2API *mocks.MockEC2API
-		provider   provider.Provider
+		mockCtrl      *gomock.Controller
+		mockec2Client *mocks.Mockec2Client
+		provider      provider.Provider
 	)
 
 	ctx := context.Background()
@@ -36,10 +35,10 @@ var _ = Describe("AWSProvider", func() {
 
 	BeforeEach(func() {
 		mockCtrl = gomock.NewController(GinkgoT())
-		mockEC2API = mocks.NewMockEC2API(mockCtrl)
+		mockec2Client = mocks.NewMockec2Client(mockCtrl)
 
 		// Inject the mock EC2 into the provider
-		provider = NewProviderWithClient(mockEC2API, 5*time.Minute, 10*time.Minute)
+		provider = newProviderWithClient(mockec2Client, 5*time.Minute, 10*time.Minute)
 	})
 
 	AfterEach(func() {
@@ -48,23 +47,20 @@ var _ = Describe("AWSProvider", func() {
 
 	Context("ReconcileFirewallRulesDeletion", func() {
 		var (
-			nodeName, resourcesNamePrefix, testID string
-			groupID, sgName, eniID, eni01ID       *string
+			nodeName, testID, groupID, sgName, eniID, eni01ID string
 		)
 
 		BeforeEach(func() {
 			testID = rand.String(5)
 			nodeName = "node-" + testID
-			resourcesNamePrefix = "test-" + testID
-			groupID = aws.String("sg-" + testID)
-			sgName = aws.String(resourcesNamePrefix + "-sg")
-			eniID = aws.String("eni-" + testID)
-			eni01ID = aws.String("eni-1-" + testID)
+			groupID = "sg-" + testID
+			sgName = fmt.Sprintf("test-%s-sg", testID)
+			eniID = "eni-" + testID
+			eni01ID = "eni-1-" + testID
 		})
 
 		It("should return an error when an AWS API call (DescribeSecurityGroups) fails", func() {
-			// 1. Arrange: Set up mock return values
-			mockEC2API.EXPECT().
+			mockec2Client.EXPECT().
 				DescribeSecurityGroups(ctx, gomock.AssignableToTypeOf(&ec2.DescribeSecurityGroupsInput{})).
 				DoAndReturn(func(_ context.Context, input *ec2.DescribeSecurityGroupsInput, _ ...func(*ec2.Options)) (*ec2.DescribeSecurityGroupsOutput, error) {
 					Expect(input.Filters).To(ConsistOf(
@@ -80,15 +76,12 @@ var _ = Describe("AWSProvider", func() {
 					return &ec2.DescribeSecurityGroupsOutput{}, fmt.Errorf("describe security groups error")
 				})
 
-			// 2. Act: Call the function under test
 			err := provider.ReconcileFirewallRulesDeletion(ctx, log, nodeName)
-			// 3. Assert: Check the result
 			Expect(err).To(HaveOccurred())
 		})
 
 		It("should return nil when the security group is not found", func() {
-			// 1. Arrange: Set up mock return values
-			mockEC2API.EXPECT().
+			mockec2Client.EXPECT().
 				DescribeSecurityGroups(ctx, gomock.AssignableToTypeOf(&ec2.DescribeSecurityGroupsInput{})).
 				DoAndReturn(func(_ context.Context, input *ec2.DescribeSecurityGroupsInput, _ ...func(*ec2.Options)) (*ec2.DescribeSecurityGroupsOutput, error) {
 					Expect(input.Filters).To(ConsistOf(
@@ -105,15 +98,12 @@ var _ = Describe("AWSProvider", func() {
 						SecurityGroups: []types.SecurityGroup{},
 					}, nil
 				})
-			// 2. Act: Call the function under test
 			err := provider.ReconcileFirewallRulesDeletion(ctx, log, nodeName)
-			// 3. Assert: Check the result
 			Expect(err).ToNot(HaveOccurred())
 		})
 
 		It("should return an error when an AWS API call (DescribeNetworkInterfaces) fails", func() {
-			// 1. Arrange: Set up mock return values
-			mockEC2API.EXPECT().
+			mockec2Client.EXPECT().
 				DescribeSecurityGroups(ctx, gomock.AssignableToTypeOf(&ec2.DescribeSecurityGroupsInput{})).
 				DoAndReturn(func(_ context.Context, input *ec2.DescribeSecurityGroupsInput, _ ...func(*ec2.Options)) (*ec2.DescribeSecurityGroupsOutput, error) {
 					Expect(input.Filters).To(ConsistOf(
@@ -129,32 +119,29 @@ var _ = Describe("AWSProvider", func() {
 					return &ec2.DescribeSecurityGroupsOutput{
 						SecurityGroups: []types.SecurityGroup{
 							{
-								GroupId:   groupID,
-								GroupName: sgName,
+								GroupId:   aws.String(groupID),
+								GroupName: aws.String(sgName),
 							},
 						},
 					}, nil
 				})
-			mockEC2API.EXPECT().
+			mockec2Client.EXPECT().
 				DescribeNetworkInterfaces(ctx, gomock.AssignableToTypeOf(&ec2.DescribeNetworkInterfacesInput{})).
 				DoAndReturn(func(_ context.Context, input *ec2.DescribeNetworkInterfacesInput, _ ...func(*ec2.Options)) (*ec2.DescribeNetworkInterfacesOutput, error) {
 					Expect(input.Filters).To(HaveLen(1))
 					Expect(aws.ToString(input.Filters[0].Name)).To(Equal("group-id"))
-					Expect(input.Filters[0].Values).To(ConsistOf(ptr.ToString(groupID)))
+					Expect(input.Filters[0].Values).To(ConsistOf(groupID))
 					return &ec2.DescribeNetworkInterfacesOutput{
 						NetworkInterfaces: []types.NetworkInterface{},
 					}, fmt.Errorf("describe network interfaces error")
 				})
 
-			// 2. Act: Call the function under test
 			err := provider.ReconcileFirewallRulesDeletion(ctx, log, nodeName)
-			// 3. Assert: Check the result
 			Expect(err).To(HaveOccurred())
 		})
 
 		It("should return an error when an AWS API call (ModifyNetworkInterfaceAttribute) fails", func() {
-			// 1. Arrange: Set up mock return values
-			mockEC2API.EXPECT().
+			mockec2Client.EXPECT().
 				DescribeSecurityGroups(ctx, gomock.AssignableToTypeOf(&ec2.DescribeSecurityGroupsInput{})).
 				DoAndReturn(func(_ context.Context, input *ec2.DescribeSecurityGroupsInput, _ ...func(*ec2.Options)) (*ec2.DescribeSecurityGroupsOutput, error) {
 					Expect(input.Filters).To(ConsistOf(
@@ -170,30 +157,30 @@ var _ = Describe("AWSProvider", func() {
 					return &ec2.DescribeSecurityGroupsOutput{
 						SecurityGroups: []types.SecurityGroup{
 							{
-								GroupId:   groupID,
-								GroupName: sgName,
+								GroupId:   aws.String(groupID),
+								GroupName: aws.String(sgName),
 							},
 						},
 					}, nil
 				})
-			mockEC2API.EXPECT().
+			mockec2Client.EXPECT().
 				DescribeNetworkInterfaces(ctx, gomock.AssignableToTypeOf(&ec2.DescribeNetworkInterfacesInput{})).
 				DoAndReturn(func(_ context.Context, input *ec2.DescribeNetworkInterfacesInput, _ ...func(*ec2.Options)) (*ec2.DescribeNetworkInterfacesOutput, error) {
 					Expect(input.Filters).To(HaveLen(1))
 					Expect(aws.ToString(input.Filters[0].Name)).To(Equal("group-id"))
-					Expect(input.Filters[0].Values).To(ConsistOf(ptr.ToString(groupID)))
+					Expect(input.Filters[0].Values).To(ConsistOf(groupID))
 					return &ec2.DescribeNetworkInterfacesOutput{
 						NetworkInterfaces: []types.NetworkInterface{
 							{
-								NetworkInterfaceId: eniID,
+								NetworkInterfaceId: aws.String(eniID),
 								Attachment: &types.NetworkInterfaceAttachment{
 									AttachmentId: aws.String("eni-attach-" + testID),
 									InstanceId:   aws.String("i-" + testID),
 								},
 								Groups: []types.GroupIdentifier{
 									{
-										GroupId:   groupID,
-										GroupName: sgName,
+										GroupId:   aws.String(groupID),
+										GroupName: aws.String(sgName),
 									},
 									{
 										GroupId:   aws.String("sg-01"),
@@ -206,15 +193,15 @@ var _ = Describe("AWSProvider", func() {
 								},
 							},
 							{
-								NetworkInterfaceId: eni01ID,
+								NetworkInterfaceId: aws.String(eni01ID),
 								Attachment: &types.NetworkInterfaceAttachment{
 									AttachmentId: aws.String("eni-attach-1" + testID),
 									InstanceId:   aws.String("i-1-" + testID),
 								},
 								Groups: []types.GroupIdentifier{
 									{
-										GroupId:   groupID,
-										GroupName: sgName,
+										GroupId:   aws.String(groupID),
+										GroupName: aws.String(sgName),
 									},
 									{
 										GroupId:   aws.String("sg-01"),
@@ -230,14 +217,14 @@ var _ = Describe("AWSProvider", func() {
 					}, nil
 				})
 
-			mockEC2API.EXPECT().
+			mockec2Client.EXPECT().
 				ModifyNetworkInterfaceAttribute(ctx, gomock.AssignableToTypeOf(&ec2.ModifyNetworkInterfaceAttributeInput{})).
 				DoAndReturn(func(_ context.Context, input *ec2.ModifyNetworkInterfaceAttributeInput, _ ...func(*ec2.Options)) (*ec2.ModifyNetworkInterfaceAttributeOutput, error) {
 					switch aws.ToString(input.NetworkInterfaceId) {
-					case aws.ToString(eniID):
+					case eniID:
 						Expect(input.Groups).To(ConsistOf("sg-01", "sg-02"))
 						return &ec2.ModifyNetworkInterfaceAttributeOutput{}, nil
-					case aws.ToString(eni01ID):
+					case eni01ID:
 						Expect(input.Groups).To(ConsistOf("sg-01", "sg-02"))
 						return &ec2.ModifyNetworkInterfaceAttributeOutput{}, fmt.Errorf("modify network interface attribute error")
 					default:
@@ -245,15 +232,12 @@ var _ = Describe("AWSProvider", func() {
 					}
 				}).Times(2)
 
-			// 2. Act: Call the function under test
 			err := provider.ReconcileFirewallRulesDeletion(ctx, log, nodeName)
-			// 3. Assert: Check the result
 			Expect(err).To(HaveOccurred())
 		})
 
 		It("should return an error when an AWS API call (DeleteSecurityGroup) fails", func() {
-			// 1. Arrange: Set up mock return values
-			mockEC2API.EXPECT().
+			mockec2Client.EXPECT().
 				DescribeSecurityGroups(ctx, gomock.AssignableToTypeOf(&ec2.DescribeSecurityGroupsInput{})).
 				DoAndReturn(func(_ context.Context, input *ec2.DescribeSecurityGroupsInput, _ ...func(*ec2.Options)) (*ec2.DescribeSecurityGroupsOutput, error) {
 					Expect(input.Filters).To(ConsistOf(
@@ -269,30 +253,30 @@ var _ = Describe("AWSProvider", func() {
 					return &ec2.DescribeSecurityGroupsOutput{
 						SecurityGroups: []types.SecurityGroup{
 							{
-								GroupId:   groupID,
-								GroupName: sgName,
+								GroupId:   aws.String(groupID),
+								GroupName: aws.String(sgName),
 							},
 						},
 					}, nil
 				})
-			mockEC2API.EXPECT().
+			mockec2Client.EXPECT().
 				DescribeNetworkInterfaces(ctx, gomock.AssignableToTypeOf(&ec2.DescribeNetworkInterfacesInput{})).
 				DoAndReturn(func(_ context.Context, input *ec2.DescribeNetworkInterfacesInput, _ ...func(*ec2.Options)) (*ec2.DescribeNetworkInterfacesOutput, error) {
 					Expect(input.Filters).To(HaveLen(1))
 					Expect(aws.ToString(input.Filters[0].Name)).To(Equal("group-id"))
-					Expect(input.Filters[0].Values).To(ConsistOf(ptr.ToString(groupID)))
+					Expect(input.Filters[0].Values).To(ConsistOf(groupID))
 					return &ec2.DescribeNetworkInterfacesOutput{
 						NetworkInterfaces: []types.NetworkInterface{
 							{
-								NetworkInterfaceId: eniID,
+								NetworkInterfaceId: aws.String(eniID),
 								Attachment: &types.NetworkInterfaceAttachment{
 									AttachmentId: aws.String("eni-attach-" + testID),
 									InstanceId:   aws.String("i-" + testID),
 								},
 								Groups: []types.GroupIdentifier{
 									{
-										GroupId:   groupID,
-										GroupName: sgName,
+										GroupId:   aws.String(groupID),
+										GroupName: aws.String(sgName),
 									},
 									{
 										GroupId:   aws.String("sg-01"),
@@ -305,15 +289,15 @@ var _ = Describe("AWSProvider", func() {
 								},
 							},
 							{
-								NetworkInterfaceId: eni01ID,
+								NetworkInterfaceId: aws.String(eni01ID),
 								Attachment: &types.NetworkInterfaceAttachment{
 									AttachmentId: aws.String("eni-attach-1" + testID),
 									InstanceId:   aws.String("i-1-" + testID),
 								},
 								Groups: []types.GroupIdentifier{
 									{
-										GroupId:   groupID,
-										GroupName: sgName,
+										GroupId:   aws.String(groupID),
+										GroupName: aws.String(sgName),
 									},
 									{
 										GroupId:   aws.String("sg-01"),
@@ -329,14 +313,14 @@ var _ = Describe("AWSProvider", func() {
 					}, nil
 				})
 
-			mockEC2API.EXPECT().
+			mockec2Client.EXPECT().
 				ModifyNetworkInterfaceAttribute(ctx, gomock.AssignableToTypeOf(&ec2.ModifyNetworkInterfaceAttributeInput{})).
 				DoAndReturn(func(_ context.Context, input *ec2.ModifyNetworkInterfaceAttributeInput, _ ...func(*ec2.Options)) (*ec2.ModifyNetworkInterfaceAttributeOutput, error) {
 					switch aws.ToString(input.NetworkInterfaceId) {
-					case aws.ToString(eniID):
+					case eniID:
 						Expect(input.Groups).To(ConsistOf("sg-01", "sg-02"))
 						return &ec2.ModifyNetworkInterfaceAttributeOutput{}, nil
-					case aws.ToString(eni01ID):
+					case eni01ID:
 						Expect(input.Groups).To(ConsistOf("sg-01", "sg-02"))
 						return &ec2.ModifyNetworkInterfaceAttributeOutput{}, nil
 					default:
@@ -344,22 +328,19 @@ var _ = Describe("AWSProvider", func() {
 					}
 				}).
 				Times(2)
-			mockEC2API.EXPECT().
+			mockec2Client.EXPECT().
 				DeleteSecurityGroup(ctx, gomock.AssignableToTypeOf(&ec2.DeleteSecurityGroupInput{})).
 				DoAndReturn(func(_ context.Context, input *ec2.DeleteSecurityGroupInput, _ ...func(*ec2.Options)) (*ec2.DeleteSecurityGroupOutput, error) {
-					Expect(aws.ToString(input.GroupId)).To(Equal(aws.ToString(groupID)))
+					Expect(aws.ToString(input.GroupId)).To(Equal(groupID))
 					return &ec2.DeleteSecurityGroupOutput{}, fmt.Errorf("delete security group error")
 				})
 
-			// 2. Act: Call the function under test
 			err := provider.ReconcileFirewallRulesDeletion(ctx, log, nodeName)
-			// 3. Assert: Check the result
 			Expect(err).To(HaveOccurred())
 		})
 
 		It("should return nil when no aws api call returns an error", func() {
-			// 1. Arrange: Set up mock return values
-			mockEC2API.EXPECT().
+			mockec2Client.EXPECT().
 				DescribeSecurityGroups(ctx, gomock.AssignableToTypeOf(&ec2.DescribeSecurityGroupsInput{})).
 				DoAndReturn(func(_ context.Context, input *ec2.DescribeSecurityGroupsInput, _ ...func(*ec2.Options)) (*ec2.DescribeSecurityGroupsOutput, error) {
 					Expect(input.Filters).To(ConsistOf(
@@ -375,30 +356,30 @@ var _ = Describe("AWSProvider", func() {
 					return &ec2.DescribeSecurityGroupsOutput{
 						SecurityGroups: []types.SecurityGroup{
 							{
-								GroupId:   groupID,
-								GroupName: sgName,
+								GroupId:   aws.String(groupID),
+								GroupName: aws.String(sgName),
 							},
 						},
 					}, nil
 				})
-			mockEC2API.EXPECT().
+			mockec2Client.EXPECT().
 				DescribeNetworkInterfaces(ctx, gomock.AssignableToTypeOf(&ec2.DescribeNetworkInterfacesInput{})).
 				DoAndReturn(func(_ context.Context, input *ec2.DescribeNetworkInterfacesInput, _ ...func(*ec2.Options)) (*ec2.DescribeNetworkInterfacesOutput, error) {
 					Expect(input.Filters).To(HaveLen(1))
 					Expect(aws.ToString(input.Filters[0].Name)).To(Equal("group-id"))
-					Expect(input.Filters[0].Values).To(ConsistOf(ptr.ToString(groupID)))
+					Expect(input.Filters[0].Values).To(ConsistOf(groupID))
 					return &ec2.DescribeNetworkInterfacesOutput{
 						NetworkInterfaces: []types.NetworkInterface{
 							{
-								NetworkInterfaceId: eniID,
+								NetworkInterfaceId: aws.String(eniID),
 								Attachment: &types.NetworkInterfaceAttachment{
 									AttachmentId: aws.String("eni-attach-" + testID),
 									InstanceId:   aws.String("i-" + testID),
 								},
 								Groups: []types.GroupIdentifier{
 									{
-										GroupId:   groupID,
-										GroupName: sgName,
+										GroupId:   aws.String(groupID),
+										GroupName: aws.String(sgName),
 									},
 									{
 										GroupId:   aws.String("sg-01"),
@@ -411,15 +392,15 @@ var _ = Describe("AWSProvider", func() {
 								},
 							},
 							{
-								NetworkInterfaceId: eni01ID,
+								NetworkInterfaceId: aws.String(eni01ID),
 								Attachment: &types.NetworkInterfaceAttachment{
 									AttachmentId: aws.String("eni-attach-1" + testID),
 									InstanceId:   aws.String("i-1-" + testID),
 								},
 								Groups: []types.GroupIdentifier{
 									{
-										GroupId:   groupID,
-										GroupName: sgName,
+										GroupId:   aws.String(groupID),
+										GroupName: aws.String(sgName),
 									},
 									{
 										GroupId:   aws.String("sg-01"),
@@ -434,14 +415,14 @@ var _ = Describe("AWSProvider", func() {
 						},
 					}, nil
 				})
-			mockEC2API.EXPECT().
+			mockec2Client.EXPECT().
 				ModifyNetworkInterfaceAttribute(ctx, gomock.AssignableToTypeOf(&ec2.ModifyNetworkInterfaceAttributeInput{})).
 				DoAndReturn(func(_ context.Context, input *ec2.ModifyNetworkInterfaceAttributeInput, _ ...func(*ec2.Options)) (*ec2.ModifyNetworkInterfaceAttributeOutput, error) {
 					switch aws.ToString(input.NetworkInterfaceId) {
-					case aws.ToString(eniID):
+					case eniID:
 						Expect(input.Groups).To(ConsistOf("sg-01", "sg-02"))
 						return &ec2.ModifyNetworkInterfaceAttributeOutput{}, nil
-					case aws.ToString(eni01ID):
+					case eni01ID:
 						Expect(input.Groups).To(ConsistOf("sg-01", "sg-02"))
 						return &ec2.ModifyNetworkInterfaceAttributeOutput{}, nil
 					default:
@@ -449,16 +430,14 @@ var _ = Describe("AWSProvider", func() {
 					}
 				}).
 				Times(2)
-			mockEC2API.EXPECT().
+			mockec2Client.EXPECT().
 				DeleteSecurityGroup(ctx, gomock.AssignableToTypeOf(&ec2.DeleteSecurityGroupInput{})).
 				DoAndReturn(func(_ context.Context, input *ec2.DeleteSecurityGroupInput, _ ...func(*ec2.Options)) (*ec2.DeleteSecurityGroupOutput, error) {
-					Expect(aws.ToString(input.GroupId)).To(Equal(aws.ToString(groupID)))
+					Expect(aws.ToString(input.GroupId)).To(Equal(groupID))
 					return &ec2.DeleteSecurityGroupOutput{}, nil
 				})
 
-			// 2. Act: Call the function under test
 			err := provider.ReconcileFirewallRulesDeletion(ctx, log, nodeName)
-			// 3. Assert: Check the result
 			Expect(err).ToNot(HaveOccurred())
 		})
 	})
@@ -495,8 +474,7 @@ var _ = Describe("AWSProvider", func() {
 		})
 
 		It("should return an error when an AWS API call (DescribeAddresses) fails", func() {
-			// 1. Arrange: Set up mock return values
-			mockEC2API.EXPECT().
+			mockec2Client.EXPECT().
 				DescribeAddresses(ctx, gomock.AssignableToTypeOf(&ec2.DescribeAddressesInput{})).
 				DoAndReturn(func(_ context.Context, input *ec2.DescribeAddressesInput, _ ...func(*ec2.Options)) (*ec2.DescribeAddressesOutput, error) {
 					Expect(input.Filters).To(ConsistOf(
@@ -512,15 +490,12 @@ var _ = Describe("AWSProvider", func() {
 					return &ec2.DescribeAddressesOutput{}, fmt.Errorf("describe addresses error")
 				})
 
-			// 2. Act: Call the function under test
 			err := provider.ReconcileExternalIPDeletion(ctx, log, externalIP)
-			// 3. Assert: Check the result
 			Expect(err).To(HaveOccurred())
 		})
 
 		It("should return nil when the address is not found", func() {
-			// 1. Arrange: Set up mock return values
-			mockEC2API.EXPECT().
+			mockec2Client.EXPECT().
 				DescribeAddresses(ctx, gomock.AssignableToTypeOf(&ec2.DescribeAddressesInput{})).
 				DoAndReturn(func(_ context.Context, input *ec2.DescribeAddressesInput, _ ...func(*ec2.Options)) (*ec2.DescribeAddressesOutput, error) {
 					Expect(input.Filters).To(ConsistOf(
@@ -537,15 +512,13 @@ var _ = Describe("AWSProvider", func() {
 						Addresses: []types.Address{},
 					}, nil
 				})
-			// 2. Act: Call the function under test
+
 			err := provider.ReconcileExternalIPDeletion(ctx, log, externalIP)
-			// 3. Assert: Check the result
 			Expect(err).ToNot(HaveOccurred())
 		})
 
 		It("should return an error when an AWS API call (DisassociateAddress) fails", func() {
-			// 1. Arrange: Set up mock return values
-			mockEC2API.EXPECT().
+			mockec2Client.EXPECT().
 				DescribeAddresses(ctx, gomock.AssignableToTypeOf(&ec2.DescribeAddressesInput{})).
 				DoAndReturn(func(_ context.Context, input *ec2.DescribeAddressesInput, _ ...func(*ec2.Options)) (*ec2.DescribeAddressesOutput, error) {
 					Expect(input.Filters).To(ConsistOf(
@@ -567,22 +540,19 @@ var _ = Describe("AWSProvider", func() {
 						},
 					}, nil
 				})
-			mockEC2API.EXPECT().
+			mockec2Client.EXPECT().
 				DisassociateAddress(ctx, gomock.AssignableToTypeOf(&ec2.DisassociateAddressInput{})).
 				DoAndReturn(func(_ context.Context, input *ec2.DisassociateAddressInput, _ ...func(*ec2.Options)) (*ec2.DisassociateAddressOutput, error) {
 					Expect(aws.ToString(input.AssociationId)).To(Equal(aws.ToString(associationID)))
 					return &ec2.DisassociateAddressOutput{}, fmt.Errorf("disassociate address error")
 				})
 
-			// 2. Act: Call the function under test
 			err := provider.ReconcileExternalIPDeletion(ctx, log, externalIP)
-			// 3. Assert: Check the result
 			Expect(err).To(HaveOccurred())
 		})
 
 		It("should return an error when an AWS API call (ReleaseAddress) fails", func() {
-			// 1. Arrange: Set up mock return values
-			mockEC2API.EXPECT().
+			mockec2Client.EXPECT().
 				DescribeAddresses(ctx, gomock.AssignableToTypeOf(&ec2.DescribeAddressesInput{})).
 				DoAndReturn(func(_ context.Context, input *ec2.DescribeAddressesInput, _ ...func(*ec2.Options)) (*ec2.DescribeAddressesOutput, error) {
 					Expect(input.Filters).To(ConsistOf(
@@ -604,28 +574,25 @@ var _ = Describe("AWSProvider", func() {
 						},
 					}, nil
 				})
-			mockEC2API.EXPECT().
+			mockec2Client.EXPECT().
 				DisassociateAddress(ctx, gomock.AssignableToTypeOf(&ec2.DisassociateAddressInput{})).
 				DoAndReturn(func(_ context.Context, input *ec2.DisassociateAddressInput, _ ...func(*ec2.Options)) (*ec2.DisassociateAddressOutput, error) {
 					Expect(aws.ToString(input.AssociationId)).To(Equal(aws.ToString(associationID)))
 					return &ec2.DisassociateAddressOutput{}, nil
 				})
-			mockEC2API.EXPECT().
+			mockec2Client.EXPECT().
 				ReleaseAddress(ctx, gomock.AssignableToTypeOf(&ec2.ReleaseAddressInput{})).
 				DoAndReturn(func(_ context.Context, input *ec2.ReleaseAddressInput, _ ...func(*ec2.Options)) (*ec2.ReleaseAddressOutput, error) {
 					Expect(aws.ToString(input.AllocationId)).To(Equal(aws.ToString(allocationID)))
 					return &ec2.ReleaseAddressOutput{}, fmt.Errorf("release address error")
 				})
 
-			// 2. Act: Call the function under test
 			err := provider.ReconcileExternalIPDeletion(ctx, log, externalIP)
-			// 3. Assert: Check the result
 			Expect(err).To(HaveOccurred())
 		})
 
 		It("should return nil when no aws api call returns an error", func() {
-			// 1. Arrange: Set up mock return values
-			mockEC2API.EXPECT().
+			mockec2Client.EXPECT().
 				DescribeAddresses(ctx, gomock.AssignableToTypeOf(&ec2.DescribeAddressesInput{})).
 				DoAndReturn(func(_ context.Context, input *ec2.DescribeAddressesInput, _ ...func(*ec2.Options)) (*ec2.DescribeAddressesOutput, error) {
 					Expect(input.Filters).To(ConsistOf(
@@ -647,22 +614,20 @@ var _ = Describe("AWSProvider", func() {
 						},
 					}, nil
 				})
-			mockEC2API.EXPECT().
+			mockec2Client.EXPECT().
 				DisassociateAddress(ctx, gomock.AssignableToTypeOf(&ec2.DisassociateAddressInput{})).
 				DoAndReturn(func(_ context.Context, input *ec2.DisassociateAddressInput, _ ...func(*ec2.Options)) (*ec2.DisassociateAddressOutput, error) {
 					Expect(aws.ToString(input.AssociationId)).To(Equal(aws.ToString(associationID)))
 					return &ec2.DisassociateAddressOutput{}, nil
 				})
-			mockEC2API.EXPECT().
+			mockec2Client.EXPECT().
 				ReleaseAddress(ctx, gomock.AssignableToTypeOf(&ec2.ReleaseAddressInput{})).
 				DoAndReturn(func(_ context.Context, input *ec2.ReleaseAddressInput, _ ...func(*ec2.Options)) (*ec2.ReleaseAddressOutput, error) {
 					Expect(aws.ToString(input.AllocationId)).To(Equal(aws.ToString(allocationID)))
 					return &ec2.ReleaseAddressOutput{}, nil
 				})
 
-			// 2. Act: Call the function under test
 			err := provider.ReconcileExternalIPDeletion(ctx, log, externalIP)
-			// 3. Assert: Check the result
 			Expect(err).ToNot(HaveOccurred())
 		})
 	})
@@ -703,8 +668,7 @@ var _ = Describe("AWSProvider", func() {
 			})
 
 			It("should return a pending state and an error when an AWS API call (DescribeAddresses) fails", func() {
-				// 1. Arrange: Set up mock return values
-				mockEC2API.EXPECT().
+				mockec2Client.EXPECT().
 					DescribeAddresses(ctx, gomock.AssignableToTypeOf(&ec2.DescribeAddressesInput{})).
 					DoAndReturn(func(_ context.Context, input *ec2.DescribeAddressesInput, _ ...func(*ec2.Options)) (*ec2.DescribeAddressesOutput, error) {
 						Expect(input.Filters).To(ConsistOf(
@@ -720,26 +684,21 @@ var _ = Describe("AWSProvider", func() {
 						return &ec2.DescribeAddressesOutput{}, fmt.Errorf("describe addresses error")
 					})
 
-				// 2. Act: Call the function under test
 				status, err := provider.ReconcileExternalIP(ctx, log, instanceID, externalIP)
-				// 3. Assert: Check the result
 				Expect(status).To(MatchFields(IgnoreExtras, Fields{
 					"State": Equal(v1alpha1.ExternalIPStatePending),
-					"Conditions": HaveExactElements(MatchConditions([]kmetav1.Condition{
-						{
+					"Conditions": HaveExactElements(matchCondition(
+						kmetav1.Condition{
 							Type:   v1alpha1.ExternalIPConditionReasonIPCreated,
 							Status: kmetav1.ConditionUnknown,
 							Reason: v1alpha1.FirewallRuleConditionReasonProviderError,
-						},
-					}, "LastTransitionTime", "ObservedGeneration", "Message")),
+						}, "LastTransitionTime", "ObservedGeneration", "Message")),
 				}))
-
 				Expect(err).To(HaveOccurred())
 			})
 
 			It("should return a pending state, specify in the condition when the maximum address is reached and an error when an AWS API call (AllocateAddress) fails", func() {
-				// 1. Arrange: Set up mock return values
-				mockEC2API.EXPECT().
+				mockec2Client.EXPECT().
 					DescribeAddresses(ctx, gomock.AssignableToTypeOf(&ec2.DescribeAddressesInput{})).
 					DoAndReturn(func(_ context.Context, input *ec2.DescribeAddressesInput, _ ...func(*ec2.Options)) (*ec2.DescribeAddressesOutput, error) {
 						Expect(input.Filters).To(ConsistOf(
@@ -754,7 +713,7 @@ var _ = Describe("AWSProvider", func() {
 						))
 						return &ec2.DescribeAddressesOutput{}, nil
 					})
-				mockEC2API.EXPECT().
+				mockec2Client.EXPECT().
 					AllocateAddress(ctx, gomock.AssignableToTypeOf(&ec2.AllocateAddressInput{})).
 					DoAndReturn(func(_ context.Context, input *ec2.AllocateAddressInput, _ ...func(*ec2.Options)) (*ec2.AllocateAddressOutput, error) {
 						Expect(input.Domain).To(Equal(types.DomainTypeVpc))
@@ -782,27 +741,23 @@ var _ = Describe("AWSProvider", func() {
 						}
 					})
 
-				// 2. Act: Call the function under test
 				status, err := provider.ReconcileExternalIP(ctx, log, instanceID, externalIP)
-				// 3. Assert: Check the result
 				Expect(status).To(MatchFields(IgnoreExtras, Fields{
 					"State": Equal(v1alpha1.ExternalIPStatePending),
-					"Conditions": HaveExactElements(MatchConditions([]kmetav1.Condition{
-						{
+					"Conditions": HaveExactElements(matchCondition(
+						kmetav1.Condition{
 							Type:    v1alpha1.ExternalIPConditionReasonIPCreated,
 							Status:  kmetav1.ConditionFalse,
 							Reason:  v1alpha1.ExternalIPConditionReasonProviderError,
 							Message: "Could not create address: The maximum number of addresses has been reached",
-						},
-					}, "LastTransitionTime", "ObservedGeneration")),
+						}, "LastTransitionTime", "ObservedGeneration")),
 				}))
 
 				Expect(err).To(HaveOccurred())
 			})
 
 			It("should return a pending state and an error when an AWS API call (AllocateAddress) fails", func() {
-				// 1. Arrange: Set up mock return values
-				mockEC2API.EXPECT().
+				mockec2Client.EXPECT().
 					DescribeAddresses(ctx, gomock.AssignableToTypeOf(&ec2.DescribeAddressesInput{})).
 					DoAndReturn(func(_ context.Context, input *ec2.DescribeAddressesInput, _ ...func(*ec2.Options)) (*ec2.DescribeAddressesOutput, error) {
 						Expect(input.Filters).To(ConsistOf(
@@ -817,7 +772,7 @@ var _ = Describe("AWSProvider", func() {
 						))
 						return &ec2.DescribeAddressesOutput{}, nil
 					})
-				mockEC2API.EXPECT().
+				mockec2Client.EXPECT().
 					AllocateAddress(ctx, gomock.AssignableToTypeOf(&ec2.AllocateAddressInput{})).
 					DoAndReturn(func(_ context.Context, input *ec2.AllocateAddressInput, _ ...func(*ec2.Options)) (*ec2.AllocateAddressOutput, error) {
 						Expect(input.Domain).To(Equal(types.DomainTypeVpc))
@@ -841,26 +796,22 @@ var _ = Describe("AWSProvider", func() {
 						return &ec2.AllocateAddressOutput{}, fmt.Errorf("allocate address error")
 					})
 
-				// 2. Act: Call the function under test
 				status, err := provider.ReconcileExternalIP(ctx, log, instanceID, externalIP)
-				// 3. Assert: Check the result
 				Expect(status).To(MatchFields(IgnoreExtras, Fields{
 					"State": Equal(v1alpha1.ExternalIPStatePending),
-					"Conditions": HaveExactElements(MatchConditions([]kmetav1.Condition{
-						{
+					"Conditions": HaveExactElements(matchCondition(
+						kmetav1.Condition{
 							Type:   v1alpha1.ExternalIPConditionReasonIPCreated,
 							Status: kmetav1.ConditionFalse,
 							Reason: v1alpha1.ExternalIPConditionReasonProviderError,
-						},
-					}, "LastTransitionTime", "ObservedGeneration", "Message")),
+						}, "LastTransitionTime", "ObservedGeneration", "Message")),
 				}))
 
 				Expect(err).To(HaveOccurred())
 			})
 
 			It("should return a pending state and an error when an AWS API call (DescribeAddresses after address creation) fails", func() {
-				// 1. Arrange: Set up mock return values
-				mockEC2API.EXPECT().
+				mockec2Client.EXPECT().
 					DescribeAddresses(ctx, gomock.AssignableToTypeOf(&ec2.DescribeAddressesInput{})).
 					DoAndReturn(func(_ context.Context, input *ec2.DescribeAddressesInput, _ ...func(*ec2.Options)) (*ec2.DescribeAddressesOutput, error) {
 						switch len(input.Filters) {
@@ -896,7 +847,7 @@ var _ = Describe("AWSProvider", func() {
 							return nil, fmt.Errorf("unexpected number of filter: %d", len(input.Filters))
 						}
 					}).Times(2)
-				mockEC2API.EXPECT().
+				mockec2Client.EXPECT().
 					AllocateAddress(ctx, gomock.AssignableToTypeOf(&ec2.AllocateAddressInput{})).
 					DoAndReturn(func(_ context.Context, input *ec2.AllocateAddressInput, _ ...func(*ec2.Options)) (*ec2.AllocateAddressOutput, error) {
 						Expect(input.Domain).To(Equal(types.DomainTypeVpc))
@@ -922,17 +873,14 @@ var _ = Describe("AWSProvider", func() {
 						}, nil
 					})
 
-				// 2. Act: Call the function under test
 				status, err := provider.ReconcileExternalIP(ctx, log, instanceID, externalIP)
-				// 3. Assert: Check the result
 				Expect(status).To(MatchFields(IgnoreExtras, Fields{
 					"State": Equal(v1alpha1.ExternalIPStatePending),
-					"Conditions": HaveExactElements(MatchConditions([]kmetav1.Condition{
-						{
-							Type:   v1alpha1.ExternalIPConditionReasonIPCreated,
-							Status: kmetav1.ConditionTrue,
-							Reason: v1alpha1.ExternalIPConditionReasonProviderError,
-						},
+					"Conditions": HaveExactElements(matchCondition(kmetav1.Condition{
+
+						Type:   v1alpha1.ExternalIPConditionReasonIPCreated,
+						Status: kmetav1.ConditionTrue,
+						Reason: v1alpha1.ExternalIPConditionReasonProviderError,
 					}, "LastTransitionTime", "ObservedGeneration", "Message")),
 				}))
 
@@ -941,8 +889,7 @@ var _ = Describe("AWSProvider", func() {
 
 			When("the address is not associated to any instance", func() {
 				It("should return a reserved state and specify IPCreation and NetworkInterfaceAssociation condition", func() {
-					// 1. Arrange: Set up mock return values
-					mockEC2API.EXPECT().
+					mockec2Client.EXPECT().
 						DescribeAddresses(ctx, gomock.AssignableToTypeOf(&ec2.DescribeAddressesInput{})).
 						DoAndReturn(func(_ context.Context, input *ec2.DescribeAddressesInput, _ ...func(*ec2.Options)) (*ec2.DescribeAddressesOutput, error) {
 							switch len(input.Filters) {
@@ -984,7 +931,7 @@ var _ = Describe("AWSProvider", func() {
 								return nil, fmt.Errorf("unexpected number of filter: %d", len(input.Filters))
 							}
 						}).Times(2)
-					mockEC2API.EXPECT().
+					mockec2Client.EXPECT().
 						AllocateAddress(ctx, gomock.AssignableToTypeOf(&ec2.AllocateAddressInput{})).
 						DoAndReturn(func(_ context.Context, input *ec2.AllocateAddressInput, _ ...func(*ec2.Options)) (*ec2.AllocateAddressOutput, error) {
 							Expect(input.Domain).To(Equal(types.DomainTypeVpc))
@@ -1010,12 +957,10 @@ var _ = Describe("AWSProvider", func() {
 							}, nil
 						})
 
-					// 2. Act: Call the function under test
 					status, err := provider.ReconcileExternalIP(ctx, log, instanceID, externalIP)
-					// 3. Assert: Check the result
 					Expect(status).To(MatchFields(IgnoreExtras, Fields{
 						"State": Equal(v1alpha1.ExternalIPStateReserved),
-						"Conditions": ConsistOf(MatchConditions([]kmetav1.Condition{
+						"Conditions": ConsistOf(matchConditions([]kmetav1.Condition{
 							{
 								Type:   v1alpha1.ExternalIPConditionReasonIPCreated,
 								Status: kmetav1.ConditionTrue,
@@ -1036,8 +981,7 @@ var _ = Describe("AWSProvider", func() {
 				associationID = aws.String("eipassoc-" + testID)
 
 				It("should return a reserved state and specify IPCreation and NetworkInterfaceAssociation condition and an error when an AWS API call (DisassociateAddress) fails", func() {
-					// 1. Arrange: Set up mock return values
-					mockEC2API.EXPECT().
+					mockec2Client.EXPECT().
 						DescribeAddresses(ctx, gomock.AssignableToTypeOf(&ec2.DescribeAddressesInput{})).
 						DoAndReturn(func(_ context.Context, input *ec2.DescribeAddressesInput, _ ...func(*ec2.Options)) (*ec2.DescribeAddressesOutput, error) {
 							switch len(input.Filters) {
@@ -1080,7 +1024,7 @@ var _ = Describe("AWSProvider", func() {
 								return nil, fmt.Errorf("unexpected number of filter: %d", len(input.Filters))
 							}
 						}).Times(2)
-					mockEC2API.EXPECT().
+					mockec2Client.EXPECT().
 						AllocateAddress(ctx, gomock.AssignableToTypeOf(&ec2.AllocateAddressInput{})).
 						DoAndReturn(func(_ context.Context, input *ec2.AllocateAddressInput, _ ...func(*ec2.Options)) (*ec2.AllocateAddressOutput, error) {
 							Expect(input.Domain).To(Equal(types.DomainTypeVpc))
@@ -1105,19 +1049,17 @@ var _ = Describe("AWSProvider", func() {
 								AllocationId: allocationID,
 							}, nil
 						})
-					mockEC2API.EXPECT().
+					mockec2Client.EXPECT().
 						DisassociateAddress(ctx, gomock.AssignableToTypeOf(&ec2.DisassociateAddressInput{})).
 						DoAndReturn(func(_ context.Context, input *ec2.DisassociateAddressInput, _ ...func(*ec2.Options)) (*ec2.DisassociateAddressOutput, error) {
 							Expect(aws.ToString(input.AssociationId)).To(Equal(aws.ToString(associationID)))
 							return &ec2.DisassociateAddressOutput{}, fmt.Errorf("disassociate address error")
 						})
 
-					// 2. Act: Call the function under test
 					status, err := provider.ReconcileExternalIP(ctx, log, instanceID, externalIP)
-					// 3. Assert: Check the result
 					Expect(status).To(MatchFields(IgnoreExtras, Fields{
 						"State": Equal(v1alpha1.ExternalIPStateReserved),
-						"Conditions": ConsistOf(MatchConditions([]kmetav1.Condition{
+						"Conditions": ConsistOf(matchConditions([]kmetav1.Condition{
 							{
 								Type:   v1alpha1.ExternalIPConditionReasonIPCreated,
 								Status: kmetav1.ConditionTrue,
@@ -1134,8 +1076,7 @@ var _ = Describe("AWSProvider", func() {
 				})
 
 				It("should return a reserved state and specify IPCreation and NetworkInterfaceAssociation condition", func() {
-					// 1. Arrange: Set up mock return values
-					mockEC2API.EXPECT().
+					mockec2Client.EXPECT().
 						DescribeAddresses(ctx, gomock.AssignableToTypeOf(&ec2.DescribeAddressesInput{})).
 						DoAndReturn(func(_ context.Context, input *ec2.DescribeAddressesInput, _ ...func(*ec2.Options)) (*ec2.DescribeAddressesOutput, error) {
 							switch len(input.Filters) {
@@ -1178,7 +1119,7 @@ var _ = Describe("AWSProvider", func() {
 								return nil, fmt.Errorf("unexpected number of filter: %d", len(input.Filters))
 							}
 						}).Times(2)
-					mockEC2API.EXPECT().
+					mockec2Client.EXPECT().
 						AllocateAddress(ctx, gomock.AssignableToTypeOf(&ec2.AllocateAddressInput{})).
 						DoAndReturn(func(_ context.Context, input *ec2.AllocateAddressInput, _ ...func(*ec2.Options)) (*ec2.AllocateAddressOutput, error) {
 							Expect(input.Domain).To(Equal(types.DomainTypeVpc))
@@ -1203,20 +1144,18 @@ var _ = Describe("AWSProvider", func() {
 								AllocationId: allocationID,
 							}, nil
 						})
-					mockEC2API.EXPECT().
+					mockec2Client.EXPECT().
 						DisassociateAddress(ctx, gomock.AssignableToTypeOf(&ec2.DisassociateAddressInput{})).
 						DoAndReturn(func(_ context.Context, input *ec2.DisassociateAddressInput, _ ...func(*ec2.Options)) (*ec2.DisassociateAddressOutput, error) {
 							Expect(aws.ToString(input.AssociationId)).To(Equal(aws.ToString(associationID)))
 							return &ec2.DisassociateAddressOutput{}, nil
 						})
 
-					// 2. Act: Call the function under test
 					status, err := provider.ReconcileExternalIP(ctx, log, instanceID, externalIP)
-					// 3. Assert: Check the result
 					Expect(status).To(MatchFields(IgnoreExtras, Fields{
 						"State":      Equal(v1alpha1.ExternalIPStateReserved),
 						"InstanceID": BeNil(),
-						"Conditions": ConsistOf(MatchConditions([]kmetav1.Condition{
+						"Conditions": ConsistOf(matchConditions([]kmetav1.Condition{
 							{
 								Type:   v1alpha1.ExternalIPConditionReasonIPCreated,
 								Status: kmetav1.ConditionTrue,
@@ -1240,8 +1179,7 @@ var _ = Describe("AWSProvider", func() {
 			})
 
 			It("should return a pending state and an error when an AWS API call (DescribeAddresses) fails", func() {
-				// 1. Arrange: Set up mock return values
-				mockEC2API.EXPECT().
+				mockec2Client.EXPECT().
 					DescribeAddresses(ctx, gomock.AssignableToTypeOf(&ec2.DescribeAddressesInput{})).
 					DoAndReturn(func(_ context.Context, input *ec2.DescribeAddressesInput, _ ...func(*ec2.Options)) (*ec2.DescribeAddressesOutput, error) {
 						Expect(input.Filters).To(ConsistOf(
@@ -1257,25 +1195,21 @@ var _ = Describe("AWSProvider", func() {
 						return &ec2.DescribeAddressesOutput{}, fmt.Errorf("describe addresses error")
 					})
 
-				// 2. Act: Call the function under test
 				status, err := provider.ReconcileExternalIP(ctx, log, instanceID, externalIP)
-				// 3. Assert: Check the result
 				Expect(status).To(MatchFields(IgnoreExtras, Fields{
 					"State": Equal(v1alpha1.ExternalIPStatePending),
-					"Conditions": HaveExactElements(MatchConditions([]kmetav1.Condition{
-						{
+					"Conditions": HaveExactElements(matchCondition(
+						kmetav1.Condition{
 							Type:   v1alpha1.ExternalIPConditionReasonIPCreated,
 							Status: kmetav1.ConditionUnknown,
 							Reason: v1alpha1.ExternalIPConditionReasonProviderError,
-						},
-					}, "LastTransitionTime", "ObservedGeneration", "Message")),
+						}, "LastTransitionTime", "ObservedGeneration", "Message")),
 				}))
 				Expect(err).To(HaveOccurred())
 			})
 
 			It("should return a reserved state and an error when an AWS API call (DescribeInstances) fails", func() {
-				// 1. Arrange: Set up mock return values
-				mockEC2API.EXPECT().
+				mockec2Client.EXPECT().
 					DescribeAddresses(ctx, gomock.AssignableToTypeOf(&ec2.DescribeAddressesInput{})).
 					DoAndReturn(func(_ context.Context, input *ec2.DescribeAddressesInput, _ ...func(*ec2.Options)) (*ec2.DescribeAddressesOutput, error) {
 						Expect(input.Filters).To(ConsistOf(
@@ -1297,32 +1231,28 @@ var _ = Describe("AWSProvider", func() {
 							},
 						}, nil
 					})
-				mockEC2API.EXPECT().
+				mockec2Client.EXPECT().
 					DescribeInstances(ctx, gomock.AssignableToTypeOf(&ec2.DescribeInstancesInput{})).
 					DoAndReturn(func(_ context.Context, input *ec2.DescribeInstancesInput, _ ...func(*ec2.Options)) (*ec2.DescribeInstancesOutput, error) {
 						Expect(input.InstanceIds).To(ConsistOf(instanceID))
 						return &ec2.DescribeInstancesOutput{}, fmt.Errorf("describe instances error")
 					})
 
-				// 2. Act: Call the function under test
 				status, err := provider.ReconcileExternalIP(ctx, log, instanceID, externalIP)
-				// 3. Assert: Check the result
 				Expect(status).To(MatchFields(IgnoreExtras, Fields{
 					"State": Equal(v1alpha1.ExternalIPStateReserved),
-					"Conditions": HaveExactElements(MatchConditions([]kmetav1.Condition{
-						{
+					"Conditions": HaveExactElements(matchCondition(
+						kmetav1.Condition{
 							Type:   v1alpha1.ExternalIPConditionReasonIPCreated,
 							Status: kmetav1.ConditionTrue,
 							Reason: v1alpha1.ExternalIPConditionReasonIPCreated,
-						},
-					}, "LastTransitionTime", "ObservedGeneration", "Message")),
+						}, "LastTransitionTime", "ObservedGeneration", "Message")),
 				}))
 				Expect(err).To(HaveOccurred())
 			})
 
 			It("should return a reserved state and an error when no instance is found with API call (DescribeInstances)", func() {
-				// 1. Arrange: Set up mock return values
-				mockEC2API.EXPECT().
+				mockec2Client.EXPECT().
 					DescribeAddresses(ctx, gomock.AssignableToTypeOf(&ec2.DescribeAddressesInput{})).
 					DoAndReturn(func(_ context.Context, input *ec2.DescribeAddressesInput, _ ...func(*ec2.Options)) (*ec2.DescribeAddressesOutput, error) {
 						Expect(input.Filters).To(ConsistOf(
@@ -1344,7 +1274,7 @@ var _ = Describe("AWSProvider", func() {
 							},
 						}, nil
 					})
-				mockEC2API.EXPECT().
+				mockec2Client.EXPECT().
 					DescribeInstances(ctx, gomock.AssignableToTypeOf(&ec2.DescribeInstancesInput{})).
 					DoAndReturn(func(_ context.Context, input *ec2.DescribeInstancesInput, _ ...func(*ec2.Options)) (*ec2.DescribeInstancesOutput, error) {
 						Expect(input.InstanceIds).To(ConsistOf(instanceID))
@@ -1353,12 +1283,10 @@ var _ = Describe("AWSProvider", func() {
 						}, nil
 					})
 
-				// 2. Act: Call the function under test
 				status, err := provider.ReconcileExternalIP(ctx, log, instanceID, externalIP)
-				// 3. Assert: Check the result
 				Expect(status).To(MatchFields(IgnoreExtras, Fields{
 					"State": Equal(v1alpha1.ExternalIPStateReserved),
-					"Conditions": HaveExactElements(MatchConditions([]kmetav1.Condition{
+					"Conditions": HaveExactElements(matchConditions([]kmetav1.Condition{
 						{
 							Type:   v1alpha1.ExternalIPConditionReasonIPCreated,
 							Status: kmetav1.ConditionTrue,
@@ -1370,8 +1298,7 @@ var _ = Describe("AWSProvider", func() {
 			})
 
 			It("should return a reserved state and an error when the instance has no ENI with public IP", func() {
-				// 1. Arrange: Set up mock return values
-				mockEC2API.EXPECT().
+				mockec2Client.EXPECT().
 					DescribeAddresses(ctx, gomock.AssignableToTypeOf(&ec2.DescribeAddressesInput{})).
 					DoAndReturn(func(_ context.Context, input *ec2.DescribeAddressesInput, _ ...func(*ec2.Options)) (*ec2.DescribeAddressesOutput, error) {
 						Expect(input.Filters).To(ConsistOf(
@@ -1393,7 +1320,7 @@ var _ = Describe("AWSProvider", func() {
 							},
 						}, nil
 					})
-				mockEC2API.EXPECT().
+				mockec2Client.EXPECT().
 					DescribeInstances(ctx, gomock.AssignableToTypeOf(&ec2.DescribeInstancesInput{})).
 					DoAndReturn(func(_ context.Context, input *ec2.DescribeInstancesInput, _ ...func(*ec2.Options)) (*ec2.DescribeInstancesOutput, error) {
 						Expect(input.InstanceIds).To(ConsistOf(instanceID))
@@ -1417,12 +1344,10 @@ var _ = Describe("AWSProvider", func() {
 						}, nil
 					})
 
-				// 2. Act: Call the function under test
 				status, err := provider.ReconcileExternalIP(ctx, log, instanceID, externalIP)
-				// 3. Assert: Check the result
 				Expect(status).To(MatchFields(IgnoreExtras, Fields{
 					"State": Equal(v1alpha1.ExternalIPStateReserved),
-					"Conditions": HaveExactElements(MatchConditions([]kmetav1.Condition{
+					"Conditions": HaveExactElements(matchConditions([]kmetav1.Condition{
 						{
 							Type:   v1alpha1.ExternalIPConditionReasonIPCreated,
 							Status: kmetav1.ConditionTrue,
@@ -1439,8 +1364,7 @@ var _ = Describe("AWSProvider", func() {
 			})
 
 			It("should return a reserved state and an error when the instance has no ENI with public IP", func() {
-				// 1. Arrange: Set up mock return values
-				mockEC2API.EXPECT().
+				mockec2Client.EXPECT().
 					DescribeAddresses(ctx, gomock.AssignableToTypeOf(&ec2.DescribeAddressesInput{})).
 					DoAndReturn(func(_ context.Context, input *ec2.DescribeAddressesInput, _ ...func(*ec2.Options)) (*ec2.DescribeAddressesOutput, error) {
 						Expect(input.Filters).To(ConsistOf(
@@ -1462,7 +1386,7 @@ var _ = Describe("AWSProvider", func() {
 							},
 						}, nil
 					})
-				mockEC2API.EXPECT().
+				mockec2Client.EXPECT().
 					DescribeInstances(ctx, gomock.AssignableToTypeOf(&ec2.DescribeInstancesInput{})).
 					DoAndReturn(func(_ context.Context, input *ec2.DescribeInstancesInput, _ ...func(*ec2.Options)) (*ec2.DescribeInstancesOutput, error) {
 						Expect(input.InstanceIds).To(ConsistOf(instanceID))
@@ -1486,12 +1410,10 @@ var _ = Describe("AWSProvider", func() {
 						}, nil
 					})
 
-				// 2. Act: Call the function under test
 				status, err := provider.ReconcileExternalIP(ctx, log, instanceID, externalIP)
-				// 3. Assert: Check the result
 				Expect(status).To(MatchFields(IgnoreExtras, Fields{
 					"State": Equal(v1alpha1.ExternalIPStateReserved),
-					"Conditions": HaveExactElements(MatchConditions([]kmetav1.Condition{
+					"Conditions": HaveExactElements(matchConditions([]kmetav1.Condition{
 						{
 							Type:   v1alpha1.ExternalIPConditionReasonIPCreated,
 							Status: kmetav1.ConditionTrue,
@@ -1512,8 +1434,7 @@ var _ = Describe("AWSProvider", func() {
 				eniID = aws.String("eni-" + testID)
 				eni01ID = aws.String("eni-01-" + testID)
 				It("should return an associated state if it's associated with the current instance", func() {
-					// 1. Arrange: Set up mock return values
-					mockEC2API.EXPECT().
+					mockec2Client.EXPECT().
 						DescribeAddresses(ctx, gomock.AssignableToTypeOf(&ec2.DescribeAddressesInput{})).
 						DoAndReturn(func(_ context.Context, input *ec2.DescribeAddressesInput, _ ...func(*ec2.Options)) (*ec2.DescribeAddressesOutput, error) {
 							Expect(input.Filters).To(ConsistOf(
@@ -1536,7 +1457,7 @@ var _ = Describe("AWSProvider", func() {
 								},
 							}, nil
 						})
-					mockEC2API.EXPECT().
+					mockec2Client.EXPECT().
 						DescribeInstances(ctx, gomock.AssignableToTypeOf(&ec2.DescribeInstancesInput{})).
 						DoAndReturn(func(_ context.Context, input *ec2.DescribeInstancesInput, _ ...func(*ec2.Options)) (*ec2.DescribeInstancesOutput, error) {
 							Expect(input.InstanceIds).To(ConsistOf(instanceID))
@@ -1562,12 +1483,10 @@ var _ = Describe("AWSProvider", func() {
 							}, nil
 						})
 
-					// 2. Act: Call the function under test
 					status, err := provider.ReconcileExternalIP(ctx, log, instanceID, externalIP)
-					// 3. Assert: Check the result
 					Expect(status).To(MatchFields(IgnoreExtras, Fields{
 						"State": Equal(v1alpha1.ExternalIPStateAssociated),
-						"Conditions": HaveExactElements(MatchConditions([]kmetav1.Condition{
+						"Conditions": HaveExactElements(matchConditions([]kmetav1.Condition{
 							{
 								Type:   v1alpha1.ExternalIPConditionReasonIPCreated,
 								Status: kmetav1.ConditionTrue,
@@ -1584,8 +1503,7 @@ var _ = Describe("AWSProvider", func() {
 				})
 
 				It("should return a reserved state and an error if it's associated with a different instance and the AWS API call (DisassociateAddress) fails", func() {
-					// 1. Arrange: Set up mock return values
-					mockEC2API.EXPECT().
+					mockec2Client.EXPECT().
 						DescribeAddresses(ctx, gomock.AssignableToTypeOf(&ec2.DescribeAddressesInput{})).
 						DoAndReturn(func(_ context.Context, input *ec2.DescribeAddressesInput, _ ...func(*ec2.Options)) (*ec2.DescribeAddressesOutput, error) {
 							Expect(input.Filters).To(ConsistOf(
@@ -1608,7 +1526,7 @@ var _ = Describe("AWSProvider", func() {
 								},
 							}, nil
 						})
-					mockEC2API.EXPECT().
+					mockec2Client.EXPECT().
 						DescribeInstances(ctx, gomock.AssignableToTypeOf(&ec2.DescribeInstancesInput{})).
 						DoAndReturn(func(_ context.Context, input *ec2.DescribeInstancesInput, _ ...func(*ec2.Options)) (*ec2.DescribeInstancesOutput, error) {
 							Expect(input.InstanceIds).To(ConsistOf(instanceID))
@@ -1633,19 +1551,17 @@ var _ = Describe("AWSProvider", func() {
 								},
 							}, nil
 						})
-					mockEC2API.EXPECT().
+					mockec2Client.EXPECT().
 						DisassociateAddress(ctx, gomock.AssignableToTypeOf(&ec2.DisassociateAddressInput{})).
 						DoAndReturn(func(_ context.Context, input *ec2.DisassociateAddressInput, _ ...func(*ec2.Options)) (*ec2.DisassociateAddressOutput, error) {
 							Expect(aws.ToString(input.AssociationId)).To(Equal(aws.ToString(associationID)))
 							return &ec2.DisassociateAddressOutput{}, fmt.Errorf("disassociate address error")
 						})
 
-					// 2. Act: Call the function under test
 					status, err := provider.ReconcileExternalIP(ctx, log, instanceID, externalIP)
-					// 3. Assert: Check the result
 					Expect(status).To(MatchFields(IgnoreExtras, Fields{
 						"State": Equal(v1alpha1.ExternalIPStateReserved),
-						"Conditions": HaveExactElements(MatchConditions([]kmetav1.Condition{
+						"Conditions": HaveExactElements(matchConditions([]kmetav1.Condition{
 							{
 								Type:   v1alpha1.ExternalIPConditionReasonIPCreated,
 								Status: kmetav1.ConditionTrue,
@@ -1662,8 +1578,7 @@ var _ = Describe("AWSProvider", func() {
 				})
 
 				It("should return an associate state when no AWS API call fails", func() {
-					// 1. Arrange: Set up mock return values
-					mockEC2API.EXPECT().
+					mockec2Client.EXPECT().
 						DescribeAddresses(ctx, gomock.AssignableToTypeOf(&ec2.DescribeAddressesInput{})).
 						DoAndReturn(func(_ context.Context, input *ec2.DescribeAddressesInput, _ ...func(*ec2.Options)) (*ec2.DescribeAddressesOutput, error) {
 							Expect(input.Filters).To(ConsistOf(
@@ -1686,7 +1601,7 @@ var _ = Describe("AWSProvider", func() {
 								},
 							}, nil
 						})
-					mockEC2API.EXPECT().
+					mockec2Client.EXPECT().
 						DescribeInstances(ctx, gomock.AssignableToTypeOf(&ec2.DescribeInstancesInput{})).
 						DoAndReturn(func(_ context.Context, input *ec2.DescribeInstancesInput, _ ...func(*ec2.Options)) (*ec2.DescribeInstancesOutput, error) {
 							Expect(input.InstanceIds).To(ConsistOf(instanceID))
@@ -1711,13 +1626,13 @@ var _ = Describe("AWSProvider", func() {
 								},
 							}, nil
 						})
-					mockEC2API.EXPECT().
+					mockec2Client.EXPECT().
 						DisassociateAddress(ctx, gomock.AssignableToTypeOf(&ec2.DisassociateAddressInput{})).
 						DoAndReturn(func(_ context.Context, input *ec2.DisassociateAddressInput, _ ...func(*ec2.Options)) (*ec2.DisassociateAddressOutput, error) {
 							Expect(aws.ToString(input.AssociationId)).To(Equal(aws.ToString(associationID)))
 							return &ec2.DisassociateAddressOutput{}, nil
 						})
-					mockEC2API.EXPECT().
+					mockec2Client.EXPECT().
 						AssociateAddress(ctx, gomock.AssignableToTypeOf(&ec2.AssociateAddressInput{})).
 						DoAndReturn(func(_ context.Context, input *ec2.AssociateAddressInput, _ ...func(*ec2.Options)) (*ec2.AssociateAddressOutput, error) {
 							Expect(aws.ToString(input.AllocationId)).To(Equal(aws.ToString(allocationID)))
@@ -1725,13 +1640,11 @@ var _ = Describe("AWSProvider", func() {
 							return &ec2.AssociateAddressOutput{}, nil
 						})
 
-					// 2. Act: Call the function under test
 					status, err := provider.ReconcileExternalIP(ctx, log, instanceID, externalIP)
-					// 3. Assert: Check the result
 					Expect(status).To(MatchFields(IgnoreExtras, Fields{
 						"State":      Equal(v1alpha1.ExternalIPStateAssociated),
 						"InstanceID": PointTo(Equal(instanceID)),
-						"Conditions": HaveExactElements(MatchConditions([]kmetav1.Condition{
+						"Conditions": HaveExactElements(matchConditions([]kmetav1.Condition{
 							{
 								Type:   v1alpha1.ExternalIPConditionReasonIPCreated,
 								Status: kmetav1.ConditionTrue,
@@ -1749,8 +1662,7 @@ var _ = Describe("AWSProvider", func() {
 			})
 
 			It("should return a reserved state and an error when the AWS API call (AssociateAddress) fails", func() {
-				// 1. Arrange: Set up mock return values
-				mockEC2API.EXPECT().
+				mockec2Client.EXPECT().
 					DescribeAddresses(ctx, gomock.AssignableToTypeOf(&ec2.DescribeAddressesInput{})).
 					DoAndReturn(func(_ context.Context, input *ec2.DescribeAddressesInput, _ ...func(*ec2.Options)) (*ec2.DescribeAddressesOutput, error) {
 						Expect(input.Filters).To(ConsistOf(
@@ -1772,7 +1684,7 @@ var _ = Describe("AWSProvider", func() {
 							},
 						}, nil
 					})
-				mockEC2API.EXPECT().
+				mockec2Client.EXPECT().
 					DescribeInstances(ctx, gomock.AssignableToTypeOf(&ec2.DescribeInstancesInput{})).
 					DoAndReturn(func(_ context.Context, input *ec2.DescribeInstancesInput, _ ...func(*ec2.Options)) (*ec2.DescribeInstancesOutput, error) {
 						Expect(input.InstanceIds).To(ConsistOf(instanceID))
@@ -1797,7 +1709,7 @@ var _ = Describe("AWSProvider", func() {
 							},
 						}, nil
 					})
-				mockEC2API.EXPECT().
+				mockec2Client.EXPECT().
 					AssociateAddress(ctx, gomock.AssignableToTypeOf(&ec2.AssociateAddressInput{})).
 					DoAndReturn(func(_ context.Context, input *ec2.AssociateAddressInput, _ ...func(*ec2.Options)) (*ec2.AssociateAddressOutput, error) {
 						Expect(aws.ToString(input.AllocationId)).To(Equal(aws.ToString(allocationID)))
@@ -1805,12 +1717,10 @@ var _ = Describe("AWSProvider", func() {
 						return &ec2.AssociateAddressOutput{}, fmt.Errorf("associate address error")
 					})
 
-				// 2. Act: Call the function under test
 				status, err := provider.ReconcileExternalIP(ctx, log, instanceID, externalIP)
-				// 3. Assert: Check the result
 				Expect(status).To(MatchFields(IgnoreExtras, Fields{
 					"State": Equal(v1alpha1.ExternalIPStateReserved),
-					"Conditions": HaveExactElements(MatchConditions([]kmetav1.Condition{
+					"Conditions": HaveExactElements(matchConditions([]kmetav1.Condition{
 						{
 							Type:   v1alpha1.ExternalIPConditionReasonIPCreated,
 							Status: kmetav1.ConditionTrue,
@@ -1827,8 +1737,7 @@ var _ = Describe("AWSProvider", func() {
 			})
 
 			It("should return an associate state when no AWS API call fails", func() {
-				// 1. Arrange: Set up mock return values
-				mockEC2API.EXPECT().
+				mockec2Client.EXPECT().
 					DescribeAddresses(ctx, gomock.AssignableToTypeOf(&ec2.DescribeAddressesInput{})).
 					DoAndReturn(func(_ context.Context, input *ec2.DescribeAddressesInput, _ ...func(*ec2.Options)) (*ec2.DescribeAddressesOutput, error) {
 						Expect(input.Filters).To(ConsistOf(
@@ -1850,7 +1759,7 @@ var _ = Describe("AWSProvider", func() {
 							},
 						}, nil
 					})
-				mockEC2API.EXPECT().
+				mockec2Client.EXPECT().
 					DescribeInstances(ctx, gomock.AssignableToTypeOf(&ec2.DescribeInstancesInput{})).
 					DoAndReturn(func(_ context.Context, input *ec2.DescribeInstancesInput, _ ...func(*ec2.Options)) (*ec2.DescribeInstancesOutput, error) {
 						Expect(input.InstanceIds).To(ConsistOf(instanceID))
@@ -1875,7 +1784,7 @@ var _ = Describe("AWSProvider", func() {
 							},
 						}, nil
 					})
-				mockEC2API.EXPECT().
+				mockec2Client.EXPECT().
 					AssociateAddress(ctx, gomock.AssignableToTypeOf(&ec2.AssociateAddressInput{})).
 					DoAndReturn(func(_ context.Context, input *ec2.AssociateAddressInput, _ ...func(*ec2.Options)) (*ec2.AssociateAddressOutput, error) {
 						Expect(aws.ToString(input.AllocationId)).To(Equal(aws.ToString(allocationID)))
@@ -1883,13 +1792,11 @@ var _ = Describe("AWSProvider", func() {
 						return &ec2.AssociateAddressOutput{}, nil
 					})
 
-				// 2. Act: Call the function under test
 				status, err := provider.ReconcileExternalIP(ctx, log, instanceID, externalIP)
-				// 3. Assert: Check the result
 				Expect(status).To(MatchFields(IgnoreExtras, Fields{
 					"State":      Equal(v1alpha1.ExternalIPStateAssociated),
 					"InstanceID": PointTo(Equal(instanceID)),
-					"Conditions": HaveExactElements(MatchConditions([]kmetav1.Condition{
+					"Conditions": HaveExactElements(matchConditions([]kmetav1.Condition{
 						{
 							Type:   v1alpha1.ExternalIPConditionReasonIPCreated,
 							Status: kmetav1.ConditionTrue,
@@ -1972,17 +1879,14 @@ var _ = Describe("AWSProvider", func() {
 		})
 
 		It("should return a pending state and an error when an AWS API call (DescribeInstances) fails", func() {
-			// 1. Arrange: Set up mock return values
-			mockEC2API.EXPECT().
+			mockec2Client.EXPECT().
 				DescribeInstances(ctx, gomock.AssignableToTypeOf(&ec2.DescribeInstancesInput{})).
 				DoAndReturn(func(_ context.Context, input *ec2.DescribeInstancesInput, _ ...func(*ec2.Options)) (*ec2.DescribeInstancesOutput, error) {
 					Expect(input.InstanceIds).To(ConsistOf(instanceID))
 					return &ec2.DescribeInstancesOutput{}, fmt.Errorf("describe instance error")
 				})
 
-			// 2. Act: Call the function under test
 			status, err := provider.ReconcileFirewallRule(ctx, log, nodeName, instanceID, firewallRule, firewallrules)
-			// 3. Assert: Check the result
 			Expect(status).To(MatchFields(IgnoreExtras, Fields{
 				"State":      Equal(v1alpha1.FirewallRuleStatePending),
 				"Conditions": BeNil(),
@@ -1991,8 +1895,7 @@ var _ = Describe("AWSProvider", func() {
 		})
 
 		It("should return a pending state and an error when the instance is not found", func() {
-			// 1. Arrange: Set up mock return values
-			mockEC2API.EXPECT().
+			mockec2Client.EXPECT().
 				DescribeInstances(ctx, gomock.AssignableToTypeOf(&ec2.DescribeInstancesInput{})).
 				DoAndReturn(func(_ context.Context, input *ec2.DescribeInstancesInput, _ ...func(*ec2.Options)) (*ec2.DescribeInstancesOutput, error) {
 					Expect(input.InstanceIds).To(ConsistOf(instanceID))
@@ -2001,9 +1904,7 @@ var _ = Describe("AWSProvider", func() {
 					}, nil
 				})
 
-			// 2. Act: Call the function under test
 			status, err := provider.ReconcileFirewallRule(ctx, log, nodeName, instanceID, firewallRule, firewallrules)
-			// 3. Assert: Check the result
 			Expect(status).To(MatchFields(IgnoreExtras, Fields{
 				"State":      Equal(v1alpha1.FirewallRuleStatePending),
 				"Conditions": BeNil(),
@@ -2012,8 +1913,7 @@ var _ = Describe("AWSProvider", func() {
 		})
 
 		It("should return a pending state and an error when an AWS API call (DescribeSecurityGroups) fails", func() {
-			// 1. Arrange: Set up mock return values
-			mockEC2API.EXPECT().
+			mockec2Client.EXPECT().
 				DescribeInstances(ctx, gomock.AssignableToTypeOf(&ec2.DescribeInstancesInput{})).
 				DoAndReturn(func(_ context.Context, input *ec2.DescribeInstancesInput, _ ...func(*ec2.Options)) (*ec2.DescribeInstancesOutput, error) {
 					Expect(input.InstanceIds).To(ConsistOf(instanceID))
@@ -2039,7 +1939,7 @@ var _ = Describe("AWSProvider", func() {
 						},
 					}, nil
 				})
-			mockEC2API.EXPECT().
+			mockec2Client.EXPECT().
 				DescribeSecurityGroups(ctx, gomock.AssignableToTypeOf(&ec2.DescribeSecurityGroupsInput{})).
 				DoAndReturn(func(_ context.Context, input *ec2.DescribeSecurityGroupsInput, _ ...func(*ec2.Options)) (*ec2.DescribeSecurityGroupsOutput, error) {
 					Expect(input.Filters).To(ConsistOf(
@@ -2059,18 +1959,15 @@ var _ = Describe("AWSProvider", func() {
 					return &ec2.DescribeSecurityGroupsOutput{}, fmt.Errorf("describe addresses error")
 				})
 
-			// 2. Act: Call the function under test
 			status, err := provider.ReconcileFirewallRule(ctx, log, nodeName, instanceID, firewallRule, firewallrules)
-			// 3. Assert: Check the result
 			Expect(status).To(MatchFields(IgnoreExtras, Fields{
 				"State": Equal(v1alpha1.FirewallRuleStatePending),
-				"Conditions": HaveExactElements(MatchConditions([]kmetav1.Condition{
-					{
+				"Conditions": HaveExactElements(matchCondition(
+					kmetav1.Condition{
 						Type:   v1alpha1.FirewallRuleConditionTypeSecurityGroupCreated,
 						Status: kmetav1.ConditionUnknown,
 						Reason: v1alpha1.FirewallRuleConditionReasonProviderError,
-					},
-				}, "LastTransitionTime", "ObservedGeneration", "Message")),
+					}, "LastTransitionTime", "ObservedGeneration", "Message")),
 			}))
 			Expect(err).To(HaveOccurred())
 		})
@@ -2078,8 +1975,7 @@ var _ = Describe("AWSProvider", func() {
 		When("the security group is not found", func() {
 			It("should return a pending state if deletions timestamp is not nil (do nothing, deletion is pending)", func() {
 				firewallRule.DeletionTimestamp = &kmetav1.Time{Time: time.Now()}
-				// 1. Arrange: Set up mock return values
-				mockEC2API.EXPECT().
+				mockec2Client.EXPECT().
 					DescribeInstances(ctx, gomock.AssignableToTypeOf(&ec2.DescribeInstancesInput{})).
 					DoAndReturn(func(_ context.Context, input *ec2.DescribeInstancesInput, _ ...func(*ec2.Options)) (*ec2.DescribeInstancesOutput, error) {
 						Expect(input.InstanceIds).To(ConsistOf(instanceID))
@@ -2105,7 +2001,7 @@ var _ = Describe("AWSProvider", func() {
 							},
 						}, nil
 					})
-				mockEC2API.EXPECT().
+				mockec2Client.EXPECT().
 					DescribeSecurityGroups(ctx, gomock.AssignableToTypeOf(&ec2.DescribeSecurityGroupsInput{})).
 					DoAndReturn(func(_ context.Context, input *ec2.DescribeSecurityGroupsInput, _ ...func(*ec2.Options)) (*ec2.DescribeSecurityGroupsOutput, error) {
 						Expect(input.Filters).To(ConsistOf(
@@ -2125,9 +2021,7 @@ var _ = Describe("AWSProvider", func() {
 						return &ec2.DescribeSecurityGroupsOutput{}, nil
 					})
 
-				// 2. Act: Call the function under test
 				status, err := provider.ReconcileFirewallRule(ctx, log, nodeName, instanceID, firewallRule, firewallrules)
-				// 3. Assert: Check the result
 				Expect(status).To(MatchFields(IgnoreExtras, Fields{
 					"State":      Equal(v1alpha1.FirewallRuleStatePending),
 					"Conditions": BeNil(),
@@ -2136,8 +2030,7 @@ var _ = Describe("AWSProvider", func() {
 			})
 
 			It("should return a pending state and an error when an AWS API call (CreateSecurityGroup) fails", func() {
-				// 1. Arrange: Set up mock return values
-				mockEC2API.EXPECT().
+				mockec2Client.EXPECT().
 					DescribeInstances(ctx, gomock.AssignableToTypeOf(&ec2.DescribeInstancesInput{})).
 					DoAndReturn(func(_ context.Context, input *ec2.DescribeInstancesInput, _ ...func(*ec2.Options)) (*ec2.DescribeInstancesOutput, error) {
 						Expect(input.InstanceIds).To(ConsistOf(instanceID))
@@ -2163,7 +2056,7 @@ var _ = Describe("AWSProvider", func() {
 							},
 						}, nil
 					})
-				mockEC2API.EXPECT().
+				mockec2Client.EXPECT().
 					DescribeSecurityGroups(ctx, gomock.AssignableToTypeOf(&ec2.DescribeSecurityGroupsInput{})).
 					DoAndReturn(func(_ context.Context, input *ec2.DescribeSecurityGroupsInput, _ ...func(*ec2.Options)) (*ec2.DescribeSecurityGroupsOutput, error) {
 						Expect(input.Filters).To(ConsistOf(
@@ -2182,7 +2075,7 @@ var _ = Describe("AWSProvider", func() {
 						))
 						return &ec2.DescribeSecurityGroupsOutput{}, nil
 					})
-				mockEC2API.EXPECT().
+				mockec2Client.EXPECT().
 					CreateSecurityGroup(ctx, gomock.AssignableToTypeOf(&ec2.CreateSecurityGroupInput{})).
 					DoAndReturn(func(_ context.Context, input *ec2.CreateSecurityGroupInput, _ ...func(*ec2.Options)) (*ec2.CreateSecurityGroupOutput, error) {
 						Expect(aws.ToString(input.VpcId)).To(Equal(vpcID))
@@ -2204,25 +2097,21 @@ var _ = Describe("AWSProvider", func() {
 						return &ec2.CreateSecurityGroupOutput{}, fmt.Errorf("create security group error")
 					})
 
-				// 2. Act: Call the function under test
 				status, err := provider.ReconcileFirewallRule(ctx, log, nodeName, instanceID, firewallRule, firewallrules)
-				// 3. Assert: Check the result
 				Expect(status).To(MatchFields(IgnoreExtras, Fields{
 					"State": Equal(v1alpha1.FirewallRuleStatePending),
-					"Conditions": HaveExactElements(MatchConditions([]kmetav1.Condition{
-						{
+					"Conditions": HaveExactElements(matchCondition(
+						kmetav1.Condition{
 							Type:   v1alpha1.FirewallRuleConditionTypeSecurityGroupCreated,
 							Status: kmetav1.ConditionFalse,
 							Reason: v1alpha1.FirewallRuleConditionReasonProviderError,
-						},
-					}, "LastTransitionTime", "ObservedGeneration", "Message")),
+						}, "LastTransitionTime", "ObservedGeneration", "Message")),
 				}))
 				Expect(err).To(HaveOccurred())
 			})
 
 			It("should return a pending state and an error when an AWS API call (DescribeSecurityGroups after security group creation) fails", func() {
-				// 1. Arrange: Set up mock return values
-				mockEC2API.EXPECT().
+				mockec2Client.EXPECT().
 					DescribeInstances(ctx, gomock.AssignableToTypeOf(&ec2.DescribeInstancesInput{})).
 					DoAndReturn(func(_ context.Context, input *ec2.DescribeInstancesInput, _ ...func(*ec2.Options)) (*ec2.DescribeInstancesOutput, error) {
 						Expect(input.InstanceIds).To(ConsistOf(instanceID))
@@ -2248,7 +2137,7 @@ var _ = Describe("AWSProvider", func() {
 							},
 						}, nil
 					})
-				mockEC2API.EXPECT().
+				mockec2Client.EXPECT().
 					DescribeSecurityGroups(ctx, gomock.AssignableToTypeOf(&ec2.DescribeSecurityGroupsInput{})).
 					DoAndReturn(func(_ context.Context, input *ec2.DescribeSecurityGroupsInput, _ ...func(*ec2.Options)) (*ec2.DescribeSecurityGroupsOutput, error) {
 						switch len(input.Filters) {
@@ -2292,7 +2181,7 @@ var _ = Describe("AWSProvider", func() {
 							return nil, fmt.Errorf("unexpected securitygroups filters length: %d", len(input.Filters))
 						}
 					}).Times(2)
-				mockEC2API.EXPECT().
+				mockec2Client.EXPECT().
 					CreateSecurityGroup(ctx, gomock.AssignableToTypeOf(&ec2.CreateSecurityGroupInput{})).
 					DoAndReturn(func(_ context.Context, input *ec2.CreateSecurityGroupInput, _ ...func(*ec2.Options)) (*ec2.CreateSecurityGroupOutput, error) {
 						Expect(aws.ToString(input.VpcId)).To(Equal(vpcID))
@@ -2316,12 +2205,10 @@ var _ = Describe("AWSProvider", func() {
 						}, nil
 					})
 
-				// 2. Act: Call the function under test
 				status, err := provider.ReconcileFirewallRule(ctx, log, nodeName, instanceID, firewallRule, firewallrules)
-				// 3. Assert: Check the result
 				Expect(status).To(MatchFields(IgnoreExtras, Fields{
 					"State": Equal(v1alpha1.FirewallRuleStatePending),
-					"Conditions": HaveExactElements(MatchConditions([]kmetav1.Condition{
+					"Conditions": HaveExactElements(matchConditions([]kmetav1.Condition{
 						{
 							Type:   v1alpha1.FirewallRuleConditionTypeSecurityGroupCreated,
 							Status: kmetav1.ConditionTrue,
@@ -2339,8 +2226,7 @@ var _ = Describe("AWSProvider", func() {
 		})
 
 		It("should return a pending state and an error when the instance has no public IP", func() {
-			// 1. Arrange: Set up mock return values
-			mockEC2API.EXPECT().
+			mockec2Client.EXPECT().
 				DescribeInstances(ctx, gomock.AssignableToTypeOf(&ec2.DescribeInstancesInput{})).
 				DoAndReturn(func(_ context.Context, input *ec2.DescribeInstancesInput, _ ...func(*ec2.Options)) (*ec2.DescribeInstancesOutput, error) {
 					Expect(input.InstanceIds).To(ConsistOf(instanceID))
@@ -2365,7 +2251,7 @@ var _ = Describe("AWSProvider", func() {
 						},
 					}, nil
 				})
-			mockEC2API.EXPECT().
+			mockec2Client.EXPECT().
 				DescribeSecurityGroups(ctx, gomock.AssignableToTypeOf(&ec2.DescribeSecurityGroupsInput{})).
 				DoAndReturn(func(_ context.Context, input *ec2.DescribeSecurityGroupsInput, _ ...func(*ec2.Options)) (*ec2.DescribeSecurityGroupsOutput, error) {
 					Expect(input.Filters).To(ConsistOf(
@@ -2391,12 +2277,10 @@ var _ = Describe("AWSProvider", func() {
 					}, nil
 				})
 
-			// 2. Act: Call the function under test
 			status, err := provider.ReconcileFirewallRule(ctx, log, nodeName, instanceID, firewallRule, firewallrules)
-			// 3. Assert: Check the result
 			Expect(status).To(MatchFields(IgnoreExtras, Fields{
 				"State": Equal(v1alpha1.FirewallRuleStatePending),
-				"Conditions": HaveExactElements(MatchConditions([]kmetav1.Condition{
+				"Conditions": HaveExactElements(matchConditions([]kmetav1.Condition{
 					{
 						Type:   v1alpha1.FirewallRuleConditionTypeSecurityGroupCreated,
 						Status: kmetav1.ConditionTrue,
@@ -2413,8 +2297,7 @@ var _ = Describe("AWSProvider", func() {
 		})
 
 		It("should return a pending state and an error when an AWS API call (DescribeNetworkInterfaces) fails", func() {
-			// 1. Arrange: Set up mock return values
-			mockEC2API.EXPECT().
+			mockec2Client.EXPECT().
 				DescribeInstances(ctx, gomock.AssignableToTypeOf(&ec2.DescribeInstancesInput{})).
 				DoAndReturn(func(_ context.Context, input *ec2.DescribeInstancesInput, _ ...func(*ec2.Options)) (*ec2.DescribeInstancesOutput, error) {
 					Expect(input.InstanceIds).To(ConsistOf(instanceID))
@@ -2440,7 +2323,7 @@ var _ = Describe("AWSProvider", func() {
 						},
 					}, nil
 				})
-			mockEC2API.EXPECT().
+			mockec2Client.EXPECT().
 				DescribeSecurityGroups(ctx, gomock.AssignableToTypeOf(&ec2.DescribeSecurityGroupsInput{})).
 				DoAndReturn(func(_ context.Context, input *ec2.DescribeSecurityGroupsInput, _ ...func(*ec2.Options)) (*ec2.DescribeSecurityGroupsOutput, error) {
 					Expect(input.Filters).To(ConsistOf(
@@ -2465,7 +2348,7 @@ var _ = Describe("AWSProvider", func() {
 						},
 					}, nil
 				})
-			mockEC2API.EXPECT().
+			mockec2Client.EXPECT().
 				DescribeNetworkInterfaces(ctx, gomock.AssignableToTypeOf(&ec2.DescribeNetworkInterfacesInput{})).
 				DoAndReturn(func(_ context.Context, input *ec2.DescribeNetworkInterfacesInput, _ ...func(*ec2.Options)) (*ec2.DescribeNetworkInterfacesOutput, error) {
 					Expect(input.Filters).To(ConsistOf(
@@ -2477,12 +2360,10 @@ var _ = Describe("AWSProvider", func() {
 					return &ec2.DescribeNetworkInterfacesOutput{}, fmt.Errorf("describe network interfaces error")
 				})
 
-			// 2. Act: Call the function under test
 			status, err := provider.ReconcileFirewallRule(ctx, log, nodeName, instanceID, firewallRule, firewallrules)
-			// 3. Assert: Check the result
 			Expect(status).To(MatchFields(IgnoreExtras, Fields{
 				"State": Equal(v1alpha1.FirewallRuleStatePending),
-				"Conditions": HaveExactElements(MatchConditions([]kmetav1.Condition{
+				"Conditions": HaveExactElements(matchConditions([]kmetav1.Condition{
 					{
 						Type:   v1alpha1.FirewallRuleConditionTypeSecurityGroupCreated,
 						Status: kmetav1.ConditionTrue,
@@ -2499,8 +2380,7 @@ var _ = Describe("AWSProvider", func() {
 		})
 
 		It("should return a pending state and an error when an AWS API call (DescribeNetworkInterfaces) fails", func() {
-			// 1. Arrange: Set up mock return values
-			mockEC2API.EXPECT().
+			mockec2Client.EXPECT().
 				DescribeInstances(ctx, gomock.AssignableToTypeOf(&ec2.DescribeInstancesInput{})).
 				DoAndReturn(func(_ context.Context, input *ec2.DescribeInstancesInput, _ ...func(*ec2.Options)) (*ec2.DescribeInstancesOutput, error) {
 					Expect(input.InstanceIds).To(ConsistOf(instanceID))
@@ -2526,7 +2406,7 @@ var _ = Describe("AWSProvider", func() {
 						},
 					}, nil
 				})
-			mockEC2API.EXPECT().
+			mockec2Client.EXPECT().
 				DescribeSecurityGroups(ctx, gomock.AssignableToTypeOf(&ec2.DescribeSecurityGroupsInput{})).
 				DoAndReturn(func(_ context.Context, input *ec2.DescribeSecurityGroupsInput, _ ...func(*ec2.Options)) (*ec2.DescribeSecurityGroupsOutput, error) {
 					Expect(input.Filters).To(ConsistOf(
@@ -2551,7 +2431,7 @@ var _ = Describe("AWSProvider", func() {
 						},
 					}, nil
 				})
-			mockEC2API.EXPECT().
+			mockec2Client.EXPECT().
 				DescribeNetworkInterfaces(ctx, gomock.AssignableToTypeOf(&ec2.DescribeNetworkInterfacesInput{})).
 				DoAndReturn(func(_ context.Context, input *ec2.DescribeNetworkInterfacesInput, _ ...func(*ec2.Options)) (*ec2.DescribeNetworkInterfacesOutput, error) {
 					Expect(input.Filters).To(ConsistOf(
@@ -2563,12 +2443,10 @@ var _ = Describe("AWSProvider", func() {
 					return &ec2.DescribeNetworkInterfacesOutput{}, fmt.Errorf("describe network interfaces error")
 				})
 
-			// 2. Act: Call the function under test
 			status, err := provider.ReconcileFirewallRule(ctx, log, nodeName, instanceID, firewallRule, firewallrules)
-			// 3. Assert: Check the result
 			Expect(status).To(MatchFields(IgnoreExtras, Fields{
 				"State": Equal(v1alpha1.FirewallRuleStatePending),
-				"Conditions": HaveExactElements(MatchConditions([]kmetav1.Condition{
+				"Conditions": HaveExactElements(matchConditions([]kmetav1.Condition{
 					{
 						Type:   v1alpha1.FirewallRuleConditionTypeSecurityGroupCreated,
 						Status: kmetav1.ConditionTrue,
@@ -2586,8 +2464,7 @@ var _ = Describe("AWSProvider", func() {
 
 		When("the instance's networkInterfaces is not empty and an ENI is already associated with the security group", func() {
 			It("should return a pending state and an error when an AWS API call (ModifyNetworkInterfaceAttribute) fails", func() {
-				// 1. Arrange: Set up mock return values
-				mockEC2API.EXPECT().
+				mockec2Client.EXPECT().
 					DescribeInstances(ctx, gomock.AssignableToTypeOf(&ec2.DescribeInstancesInput{})).
 					DoAndReturn(func(_ context.Context, input *ec2.DescribeInstancesInput, _ ...func(*ec2.Options)) (*ec2.DescribeInstancesOutput, error) {
 						Expect(input.InstanceIds).To(ConsistOf(instanceID))
@@ -2613,7 +2490,7 @@ var _ = Describe("AWSProvider", func() {
 							},
 						}, nil
 					})
-				mockEC2API.EXPECT().
+				mockec2Client.EXPECT().
 					DescribeSecurityGroups(ctx, gomock.AssignableToTypeOf(&ec2.DescribeSecurityGroupsInput{})).
 					DoAndReturn(func(_ context.Context, input *ec2.DescribeSecurityGroupsInput, _ ...func(*ec2.Options)) (*ec2.DescribeSecurityGroupsOutput, error) {
 						Expect(input.Filters).To(ConsistOf(
@@ -2638,7 +2515,7 @@ var _ = Describe("AWSProvider", func() {
 							},
 						}, nil
 					})
-				mockEC2API.EXPECT().
+				mockec2Client.EXPECT().
 					DescribeNetworkInterfaces(ctx, gomock.AssignableToTypeOf(&ec2.DescribeNetworkInterfacesInput{})).
 					DoAndReturn(func(_ context.Context, input *ec2.DescribeNetworkInterfacesInput, _ ...func(*ec2.Options)) (*ec2.DescribeNetworkInterfacesOutput, error) {
 						Expect(input.Filters).To(ConsistOf(
@@ -2682,7 +2559,7 @@ var _ = Describe("AWSProvider", func() {
 							},
 						}, nil
 					})
-				mockEC2API.EXPECT().
+				mockec2Client.EXPECT().
 					ModifyNetworkInterfaceAttribute(ctx, gomock.AssignableToTypeOf(&ec2.ModifyNetworkInterfaceAttributeInput{})).
 					DoAndReturn(func(_ context.Context, input *ec2.ModifyNetworkInterfaceAttributeInput, _ ...func(*ec2.Options)) (*ec2.ModifyNetworkInterfaceAttributeOutput, error) {
 						switch aws.ToString(input.NetworkInterfaceId) {
@@ -2699,12 +2576,10 @@ var _ = Describe("AWSProvider", func() {
 						}
 					}).Times(2)
 
-				// 2. Act: Call the function under test
 				status, err := provider.ReconcileFirewallRule(ctx, log, nodeName, instanceID, firewallRule, firewallrules)
-				// 3. Assert: Check the result
 				Expect(status).To(MatchFields(IgnoreExtras, Fields{
 					"State": Equal(v1alpha1.FirewallRuleStatePending),
-					"Conditions": HaveExactElements(MatchConditions([]kmetav1.Condition{
+					"Conditions": HaveExactElements(matchConditions([]kmetav1.Condition{
 						{
 							Type:   v1alpha1.FirewallRuleConditionTypeSecurityGroupCreated,
 							Status: kmetav1.ConditionTrue,
@@ -2723,8 +2598,7 @@ var _ = Describe("AWSProvider", func() {
 
 		When("the security group is not associated with the instance's network interfaces", func() {
 			It("should return a pending state and an error when an AWS API call (ModifyNetworkInterfaceAttribute) fails", func() {
-				// 1. Arrange: Set up mock return values
-				mockEC2API.EXPECT().
+				mockec2Client.EXPECT().
 					DescribeInstances(ctx, gomock.AssignableToTypeOf(&ec2.DescribeInstancesInput{})).
 					DoAndReturn(func(_ context.Context, input *ec2.DescribeInstancesInput, _ ...func(*ec2.Options)) (*ec2.DescribeInstancesOutput, error) {
 						Expect(input.InstanceIds).To(ConsistOf(instanceID))
@@ -2758,7 +2632,7 @@ var _ = Describe("AWSProvider", func() {
 							},
 						}, nil
 					})
-				mockEC2API.EXPECT().
+				mockec2Client.EXPECT().
 					DescribeSecurityGroups(ctx, gomock.AssignableToTypeOf(&ec2.DescribeSecurityGroupsInput{})).
 					DoAndReturn(func(_ context.Context, input *ec2.DescribeSecurityGroupsInput, _ ...func(*ec2.Options)) (*ec2.DescribeSecurityGroupsOutput, error) {
 						Expect(input.Filters).To(ConsistOf(
@@ -2783,7 +2657,7 @@ var _ = Describe("AWSProvider", func() {
 							},
 						}, nil
 					})
-				mockEC2API.EXPECT().
+				mockec2Client.EXPECT().
 					DescribeNetworkInterfaces(ctx, gomock.AssignableToTypeOf(&ec2.DescribeNetworkInterfacesInput{})).
 					DoAndReturn(func(_ context.Context, input *ec2.DescribeNetworkInterfacesInput, _ ...func(*ec2.Options)) (*ec2.DescribeNetworkInterfacesOutput, error) {
 						Expect(input.Filters).To(ConsistOf(
@@ -2794,7 +2668,7 @@ var _ = Describe("AWSProvider", func() {
 						))
 						return &ec2.DescribeNetworkInterfacesOutput{}, nil
 					})
-				mockEC2API.EXPECT().
+				mockec2Client.EXPECT().
 					ModifyNetworkInterfaceAttribute(ctx, gomock.AssignableToTypeOf(&ec2.ModifyNetworkInterfaceAttributeInput{})).
 					DoAndReturn(func(_ context.Context, input *ec2.ModifyNetworkInterfaceAttributeInput, _ ...func(*ec2.Options)) (*ec2.ModifyNetworkInterfaceAttributeOutput, error) {
 						Expect(aws.ToString(input.NetworkInterfaceId)).To(Equal(aws.ToString(eniID)))
@@ -2802,12 +2676,10 @@ var _ = Describe("AWSProvider", func() {
 						return &ec2.ModifyNetworkInterfaceAttributeOutput{}, fmt.Errorf("modify network interface attribute error")
 					})
 
-				// 2. Act: Call the function under test
 				status, err := provider.ReconcileFirewallRule(ctx, log, nodeName, instanceID, firewallRule, firewallrules)
-				// 3. Assert: Check the result
 				Expect(status).To(MatchFields(IgnoreExtras, Fields{
 					"State": Equal(v1alpha1.FirewallRuleStatePending),
-					"Conditions": HaveExactElements(MatchConditions([]kmetav1.Condition{
+					"Conditions": HaveExactElements(matchConditions([]kmetav1.Condition{
 						{
 							Type:   v1alpha1.FirewallRuleConditionTypeSecurityGroupCreated,
 							Status: kmetav1.ConditionTrue,
@@ -2824,8 +2696,7 @@ var _ = Describe("AWSProvider", func() {
 			})
 
 			It("should return a pending state and an error when an AWS API call (revokeSecurityGroupIngress) fails", func() {
-				// 1. Arrange: Set up mock return values
-				mockEC2API.EXPECT().
+				mockec2Client.EXPECT().
 					DescribeInstances(ctx, gomock.AssignableToTypeOf(&ec2.DescribeInstancesInput{})).
 					DoAndReturn(func(_ context.Context, input *ec2.DescribeInstancesInput, _ ...func(*ec2.Options)) (*ec2.DescribeInstancesOutput, error) {
 						Expect(input.InstanceIds).To(ConsistOf(instanceID))
@@ -2859,7 +2730,7 @@ var _ = Describe("AWSProvider", func() {
 							},
 						}, nil
 					})
-				mockEC2API.EXPECT().
+				mockec2Client.EXPECT().
 					DescribeSecurityGroups(ctx, gomock.AssignableToTypeOf(&ec2.DescribeSecurityGroupsInput{})).
 					DoAndReturn(func(_ context.Context, input *ec2.DescribeSecurityGroupsInput, _ ...func(*ec2.Options)) (*ec2.DescribeSecurityGroupsOutput, error) {
 						Expect(input.Filters).To(ConsistOf(
@@ -2891,7 +2762,7 @@ var _ = Describe("AWSProvider", func() {
 							},
 						}, nil
 					})
-				mockEC2API.EXPECT().
+				mockec2Client.EXPECT().
 					DescribeNetworkInterfaces(ctx, gomock.AssignableToTypeOf(&ec2.DescribeNetworkInterfacesInput{})).
 					DoAndReturn(func(_ context.Context, input *ec2.DescribeNetworkInterfacesInput, _ ...func(*ec2.Options)) (*ec2.DescribeNetworkInterfacesOutput, error) {
 						Expect(input.Filters).To(ConsistOf(
@@ -2902,14 +2773,14 @@ var _ = Describe("AWSProvider", func() {
 						))
 						return &ec2.DescribeNetworkInterfacesOutput{}, nil
 					})
-				mockEC2API.EXPECT().
+				mockec2Client.EXPECT().
 					ModifyNetworkInterfaceAttribute(ctx, gomock.AssignableToTypeOf(&ec2.ModifyNetworkInterfaceAttributeInput{})).
 					DoAndReturn(func(_ context.Context, input *ec2.ModifyNetworkInterfaceAttributeInput, _ ...func(*ec2.Options)) (*ec2.ModifyNetworkInterfaceAttributeOutput, error) {
 						Expect(aws.ToString(input.NetworkInterfaceId)).To(Equal(aws.ToString(eniID)))
 						Expect(input.Groups).To(ConsistOf(securityGroupID, securityGroup01ID))
 						return &ec2.ModifyNetworkInterfaceAttributeOutput{}, nil
 					})
-				mockEC2API.EXPECT().
+				mockec2Client.EXPECT().
 					RevokeSecurityGroupIngress(ctx, gomock.AssignableToTypeOf(&ec2.RevokeSecurityGroupIngressInput{})).
 					DoAndReturn(func(_ context.Context, input *ec2.RevokeSecurityGroupIngressInput, _ ...func(*ec2.Options)) (*ec2.RevokeSecurityGroupIngressOutput, error) {
 						Expect(aws.ToString(input.GroupId)).To(Equal(aws.ToString(&securityGroupID)))
@@ -2924,12 +2795,10 @@ var _ = Describe("AWSProvider", func() {
 						return &ec2.RevokeSecurityGroupIngressOutput{}, fmt.Errorf("revoke security group ingress error")
 					})
 
-				// 2. Act: Call the function under test
 				status, err := provider.ReconcileFirewallRule(ctx, log, nodeName, instanceID, firewallRule, firewallrules)
-				// 3. Assert: Check the result
 				Expect(status).To(MatchFields(IgnoreExtras, Fields{
 					"State": Equal(v1alpha1.FirewallRuleStatePending),
-					"Conditions": HaveExactElements(MatchConditions([]kmetav1.Condition{
+					"Conditions": HaveExactElements(matchConditions([]kmetav1.Condition{
 						{
 							Type:   v1alpha1.FirewallRuleConditionTypeSecurityGroupCreated,
 							Status: kmetav1.ConditionTrue,
@@ -2946,8 +2815,7 @@ var _ = Describe("AWSProvider", func() {
 			})
 
 			It("should return a pending state and an error when an AWS API call (revokeSecurityGroupEgress) fails", func() {
-				// 1. Arrange: Set up mock return values
-				mockEC2API.EXPECT().
+				mockec2Client.EXPECT().
 					DescribeInstances(ctx, gomock.AssignableToTypeOf(&ec2.DescribeInstancesInput{})).
 					DoAndReturn(func(_ context.Context, input *ec2.DescribeInstancesInput, _ ...func(*ec2.Options)) (*ec2.DescribeInstancesOutput, error) {
 						Expect(input.InstanceIds).To(ConsistOf(instanceID))
@@ -2981,7 +2849,7 @@ var _ = Describe("AWSProvider", func() {
 							},
 						}, nil
 					})
-				mockEC2API.EXPECT().
+				mockec2Client.EXPECT().
 					DescribeSecurityGroups(ctx, gomock.AssignableToTypeOf(&ec2.DescribeSecurityGroupsInput{})).
 					DoAndReturn(func(_ context.Context, input *ec2.DescribeSecurityGroupsInput, _ ...func(*ec2.Options)) (*ec2.DescribeSecurityGroupsOutput, error) {
 						Expect(input.Filters).To(ConsistOf(
@@ -3020,7 +2888,7 @@ var _ = Describe("AWSProvider", func() {
 							},
 						}, nil
 					})
-				mockEC2API.EXPECT().
+				mockec2Client.EXPECT().
 					DescribeNetworkInterfaces(ctx, gomock.AssignableToTypeOf(&ec2.DescribeNetworkInterfacesInput{})).
 					DoAndReturn(func(_ context.Context, input *ec2.DescribeNetworkInterfacesInput, _ ...func(*ec2.Options)) (*ec2.DescribeNetworkInterfacesOutput, error) {
 						Expect(input.Filters).To(ConsistOf(
@@ -3031,14 +2899,14 @@ var _ = Describe("AWSProvider", func() {
 						))
 						return &ec2.DescribeNetworkInterfacesOutput{}, nil
 					})
-				mockEC2API.EXPECT().
+				mockec2Client.EXPECT().
 					ModifyNetworkInterfaceAttribute(ctx, gomock.AssignableToTypeOf(&ec2.ModifyNetworkInterfaceAttributeInput{})).
 					DoAndReturn(func(_ context.Context, input *ec2.ModifyNetworkInterfaceAttributeInput, _ ...func(*ec2.Options)) (*ec2.ModifyNetworkInterfaceAttributeOutput, error) {
 						Expect(aws.ToString(input.NetworkInterfaceId)).To(Equal(aws.ToString(eniID)))
 						Expect(input.Groups).To(ConsistOf(securityGroupID, securityGroup01ID))
 						return &ec2.ModifyNetworkInterfaceAttributeOutput{}, nil
 					})
-				mockEC2API.EXPECT().
+				mockec2Client.EXPECT().
 					RevokeSecurityGroupIngress(ctx, gomock.AssignableToTypeOf(&ec2.RevokeSecurityGroupIngressInput{})).
 					DoAndReturn(func(_ context.Context, input *ec2.RevokeSecurityGroupIngressInput, _ ...func(*ec2.Options)) (*ec2.RevokeSecurityGroupIngressOutput, error) {
 						Expect(aws.ToString(input.GroupId)).To(Equal(aws.ToString(&securityGroupID)))
@@ -3052,7 +2920,7 @@ var _ = Describe("AWSProvider", func() {
 						))
 						return &ec2.RevokeSecurityGroupIngressOutput{}, nil
 					})
-				mockEC2API.EXPECT().
+				mockec2Client.EXPECT().
 					RevokeSecurityGroupEgress(ctx, gomock.AssignableToTypeOf(&ec2.RevokeSecurityGroupEgressInput{})).
 					DoAndReturn(func(_ context.Context, input *ec2.RevokeSecurityGroupEgressInput, _ ...func(*ec2.Options)) (*ec2.RevokeSecurityGroupEgressOutput, error) {
 						Expect(aws.ToString(input.GroupId)).To(Equal(aws.ToString(&securityGroupID)))
@@ -3067,12 +2935,10 @@ var _ = Describe("AWSProvider", func() {
 						return &ec2.RevokeSecurityGroupEgressOutput{}, fmt.Errorf("revoke security group egress error")
 					})
 
-				// 2. Act: Call the function under test
 				status, err := provider.ReconcileFirewallRule(ctx, log, nodeName, instanceID, firewallRule, firewallrules)
-				// 3. Assert: Check the result
 				Expect(status).To(MatchFields(IgnoreExtras, Fields{
 					"State": Equal(v1alpha1.FirewallRuleStatePending),
-					"Conditions": HaveExactElements(MatchConditions([]kmetav1.Condition{
+					"Conditions": HaveExactElements(matchConditions([]kmetav1.Condition{
 						{
 							Type:   v1alpha1.FirewallRuleConditionTypeSecurityGroupCreated,
 							Status: kmetav1.ConditionTrue,
@@ -3096,8 +2962,7 @@ var _ = Describe("AWSProvider", func() {
 
 			When("the firewallrule is an ingress rule and the last rule", func() {
 				It("should return an error when ReconcileFirewallRulesDeletion fails", func() {
-					// 1. Arrange: Set up mock return values
-					mockEC2API.EXPECT().
+					mockec2Client.EXPECT().
 						DescribeInstances(ctx, gomock.AssignableToTypeOf(&ec2.DescribeInstancesInput{})).
 						DoAndReturn(func(_ context.Context, input *ec2.DescribeInstancesInput, _ ...func(*ec2.Options)) (*ec2.DescribeInstancesOutput, error) {
 							Expect(input.InstanceIds).To(ConsistOf(instanceID))
@@ -3128,7 +2993,7 @@ var _ = Describe("AWSProvider", func() {
 								},
 							}, nil
 						})
-					mockEC2API.EXPECT().
+					mockec2Client.EXPECT().
 						DescribeSecurityGroups(ctx, gomock.AssignableToTypeOf(&ec2.DescribeSecurityGroupsInput{})).
 						DoAndReturn(func(_ context.Context, input *ec2.DescribeSecurityGroupsInput, _ ...func(*ec2.Options)) (*ec2.DescribeSecurityGroupsOutput, error) {
 							switch len(input.Filters) {
@@ -3184,7 +3049,7 @@ var _ = Describe("AWSProvider", func() {
 
 							}
 						}).Times(2)
-					mockEC2API.EXPECT().
+					mockec2Client.EXPECT().
 						DescribeNetworkInterfaces(ctx, gomock.AssignableToTypeOf(&ec2.DescribeNetworkInterfacesInput{})).
 						DoAndReturn(func(_ context.Context, input *ec2.DescribeNetworkInterfacesInput, _ ...func(*ec2.Options)) (*ec2.DescribeNetworkInterfacesOutput, error) {
 							Expect(input.Filters).To(ConsistOf(
@@ -3207,12 +3072,10 @@ var _ = Describe("AWSProvider", func() {
 							}, nil
 						})
 
-					// 2. Act: Call the function under test
 					status, err := provider.ReconcileFirewallRule(ctx, log, nodeName, instanceID, firewallRule, firewallrules)
-					// 3. Assert: Check the result
 					Expect(status).To(MatchFields(IgnoreExtras, Fields{
 						"State": Equal(v1alpha1.FirewallRuleStatePending),
-						"Conditions": HaveExactElements(MatchConditions([]kmetav1.Condition{
+						"Conditions": HaveExactElements(matchConditions([]kmetav1.Condition{
 							{
 								Type:   v1alpha1.FirewallRuleConditionTypeSecurityGroupCreated,
 								Status: kmetav1.ConditionTrue,
@@ -3231,8 +3094,7 @@ var _ = Describe("AWSProvider", func() {
 
 			When("the firewallrule is an ingress rule and not the last rule (has at least another ingress rule)", func() {
 				It("should return an error when an AWS API call (RevokeSecurityGroupIngress) fails", func() {
-					// 1. Arrange: Set up mock return values
-					mockEC2API.EXPECT().
+					mockec2Client.EXPECT().
 						DescribeInstances(ctx, gomock.AssignableToTypeOf(&ec2.DescribeInstancesInput{})).
 						DoAndReturn(func(_ context.Context, input *ec2.DescribeInstancesInput, _ ...func(*ec2.Options)) (*ec2.DescribeInstancesOutput, error) {
 							Expect(input.InstanceIds).To(ConsistOf(instanceID))
@@ -3263,7 +3125,7 @@ var _ = Describe("AWSProvider", func() {
 								},
 							}, nil
 						})
-					mockEC2API.EXPECT().
+					mockec2Client.EXPECT().
 						DescribeSecurityGroups(ctx, gomock.AssignableToTypeOf(&ec2.DescribeSecurityGroupsInput{})).
 						DoAndReturn(func(_ context.Context, input *ec2.DescribeSecurityGroupsInput, _ ...func(*ec2.Options)) (*ec2.DescribeSecurityGroupsOutput, error) {
 							Expect(input.Filters).To(ConsistOf(
@@ -3310,7 +3172,7 @@ var _ = Describe("AWSProvider", func() {
 								},
 							}, nil
 						})
-					mockEC2API.EXPECT().
+					mockec2Client.EXPECT().
 						DescribeNetworkInterfaces(ctx, gomock.AssignableToTypeOf(&ec2.DescribeNetworkInterfacesInput{})).
 						DoAndReturn(func(_ context.Context, input *ec2.DescribeNetworkInterfacesInput, _ ...func(*ec2.Options)) (*ec2.DescribeNetworkInterfacesOutput, error) {
 							Expect(input.Filters).To(ConsistOf(
@@ -3332,7 +3194,7 @@ var _ = Describe("AWSProvider", func() {
 								},
 							}, nil
 						})
-					mockEC2API.EXPECT().
+					mockec2Client.EXPECT().
 						RevokeSecurityGroupIngress(ctx, gomock.AssignableToTypeOf(&ec2.RevokeSecurityGroupIngressInput{})).
 						DoAndReturn(func(_ context.Context, input *ec2.RevokeSecurityGroupIngressInput, _ ...func(*ec2.Options)) (*ec2.RevokeSecurityGroupIngressOutput, error) {
 							Expect(aws.ToString(input.GroupId)).To(Equal(aws.ToString(&securityGroupID)))
@@ -3351,12 +3213,10 @@ var _ = Describe("AWSProvider", func() {
 							return &ec2.RevokeSecurityGroupIngressOutput{}, fmt.Errorf("revoke security group ingress error")
 						})
 
-					// 2. Act: Call the function under test
 					status, err := provider.ReconcileFirewallRule(ctx, log, nodeName, instanceID, firewallRule, firewallrules)
-					// 3. Assert: Check the result
 					Expect(status).To(MatchFields(IgnoreExtras, Fields{
 						"State": Equal(v1alpha1.FirewallRuleStatePending),
-						"Conditions": HaveExactElements(MatchConditions([]kmetav1.Condition{
+						"Conditions": HaveExactElements(matchConditions([]kmetav1.Condition{
 							{
 								Type:   v1alpha1.FirewallRuleConditionTypeSecurityGroupCreated,
 								Status: kmetav1.ConditionTrue,
@@ -3379,8 +3239,7 @@ var _ = Describe("AWSProvider", func() {
 					firewallrules = []v1alpha1.FirewallRule{*firewallRule, *firewallRule01}
 				})
 				It("should return an error when an AWS API call (RevokeSecurityGroupIngress) fails", func() {
-					// 1. Arrange: Set up mock return values
-					mockEC2API.EXPECT().
+					mockec2Client.EXPECT().
 						DescribeInstances(ctx, gomock.AssignableToTypeOf(&ec2.DescribeInstancesInput{})).
 						DoAndReturn(func(_ context.Context, input *ec2.DescribeInstancesInput, _ ...func(*ec2.Options)) (*ec2.DescribeInstancesOutput, error) {
 							Expect(input.InstanceIds).To(ConsistOf(instanceID))
@@ -3411,7 +3270,7 @@ var _ = Describe("AWSProvider", func() {
 								},
 							}, nil
 						})
-					mockEC2API.EXPECT().
+					mockec2Client.EXPECT().
 						DescribeSecurityGroups(ctx, gomock.AssignableToTypeOf(&ec2.DescribeSecurityGroupsInput{})).
 						DoAndReturn(func(_ context.Context, input *ec2.DescribeSecurityGroupsInput, _ ...func(*ec2.Options)) (*ec2.DescribeSecurityGroupsOutput, error) {
 							Expect(input.Filters).To(ConsistOf(
@@ -3460,7 +3319,7 @@ var _ = Describe("AWSProvider", func() {
 								},
 							}, nil
 						})
-					mockEC2API.EXPECT().
+					mockec2Client.EXPECT().
 						DescribeNetworkInterfaces(ctx, gomock.AssignableToTypeOf(&ec2.DescribeNetworkInterfacesInput{})).
 						DoAndReturn(func(_ context.Context, input *ec2.DescribeNetworkInterfacesInput, _ ...func(*ec2.Options)) (*ec2.DescribeNetworkInterfacesOutput, error) {
 							Expect(input.Filters).To(ConsistOf(
@@ -3482,7 +3341,7 @@ var _ = Describe("AWSProvider", func() {
 								},
 							}, nil
 						})
-					mockEC2API.EXPECT().
+					mockec2Client.EXPECT().
 						RevokeSecurityGroupIngress(ctx, gomock.AssignableToTypeOf(&ec2.RevokeSecurityGroupIngressInput{})).
 						DoAndReturn(func(_ context.Context, input *ec2.RevokeSecurityGroupIngressInput, _ ...func(*ec2.Options)) (*ec2.RevokeSecurityGroupIngressOutput, error) {
 							Expect(aws.ToString(input.GroupId)).To(Equal(aws.ToString(&securityGroupID)))
@@ -3501,12 +3360,10 @@ var _ = Describe("AWSProvider", func() {
 							return &ec2.RevokeSecurityGroupIngressOutput{}, fmt.Errorf("revoke security group ingress error")
 						})
 
-					// 2. Act: Call the function under test
 					status, err := provider.ReconcileFirewallRule(ctx, log, nodeName, instanceID, firewallRule, firewallrules)
-					// 3. Assert: Check the result
 					Expect(status).To(MatchFields(IgnoreExtras, Fields{
 						"State": Equal(v1alpha1.FirewallRuleStatePending),
-						"Conditions": HaveExactElements(MatchConditions([]kmetav1.Condition{
+						"Conditions": HaveExactElements(matchConditions([]kmetav1.Condition{
 							{
 								Type:   v1alpha1.FirewallRuleConditionTypeSecurityGroupCreated,
 								Status: kmetav1.ConditionTrue,
@@ -3529,8 +3386,7 @@ var _ = Describe("AWSProvider", func() {
 					firewallrules = []v1alpha1.FirewallRule{*firewallRule, *firewallRule01}
 				})
 				It("should return an error when ReconcileFirewallRulesDeletion fails", func() {
-					// 1. Arrange: Set up mock return values
-					mockEC2API.EXPECT().
+					mockec2Client.EXPECT().
 						DescribeInstances(ctx, gomock.AssignableToTypeOf(&ec2.DescribeInstancesInput{})).
 						DoAndReturn(func(_ context.Context, input *ec2.DescribeInstancesInput, _ ...func(*ec2.Options)) (*ec2.DescribeInstancesOutput, error) {
 							Expect(input.InstanceIds).To(ConsistOf(instanceID))
@@ -3561,7 +3417,7 @@ var _ = Describe("AWSProvider", func() {
 								},
 							}, nil
 						})
-					mockEC2API.EXPECT().
+					mockec2Client.EXPECT().
 						DescribeSecurityGroups(ctx, gomock.AssignableToTypeOf(&ec2.DescribeSecurityGroupsInput{})).
 						DoAndReturn(func(_ context.Context, input *ec2.DescribeSecurityGroupsInput, _ ...func(*ec2.Options)) (*ec2.DescribeSecurityGroupsOutput, error) {
 							switch len(input.Filters) {
@@ -3617,7 +3473,7 @@ var _ = Describe("AWSProvider", func() {
 
 							}
 						}).Times(2)
-					mockEC2API.EXPECT().
+					mockec2Client.EXPECT().
 						DescribeNetworkInterfaces(ctx, gomock.AssignableToTypeOf(&ec2.DescribeNetworkInterfacesInput{})).
 						DoAndReturn(func(_ context.Context, input *ec2.DescribeNetworkInterfacesInput, _ ...func(*ec2.Options)) (*ec2.DescribeNetworkInterfacesOutput, error) {
 							Expect(input.Filters).To(ConsistOf(
@@ -3640,12 +3496,10 @@ var _ = Describe("AWSProvider", func() {
 							}, nil
 						})
 
-					// 2. Act: Call the function under test
 					status, err := provider.ReconcileFirewallRule(ctx, log, nodeName, instanceID, firewallRule, firewallrules)
-					// 3. Assert: Check the result
 					Expect(status).To(MatchFields(IgnoreExtras, Fields{
 						"State": Equal(v1alpha1.FirewallRuleStatePending),
-						"Conditions": HaveExactElements(MatchConditions([]kmetav1.Condition{
+						"Conditions": HaveExactElements(matchConditions([]kmetav1.Condition{
 							{
 								Type:   v1alpha1.FirewallRuleConditionTypeSecurityGroupCreated,
 								Status: kmetav1.ConditionTrue,
@@ -3669,8 +3523,7 @@ var _ = Describe("AWSProvider", func() {
 					firewallrules = []v1alpha1.FirewallRule{*firewallRule, *firewallRule01}
 				})
 				It("should return an error when an AWS API call (RevokeSecurityGroupEgress) fails", func() {
-					// 1. Arrange: Set up mock return values
-					mockEC2API.EXPECT().
+					mockec2Client.EXPECT().
 						DescribeInstances(ctx, gomock.AssignableToTypeOf(&ec2.DescribeInstancesInput{})).
 						DoAndReturn(func(_ context.Context, input *ec2.DescribeInstancesInput, _ ...func(*ec2.Options)) (*ec2.DescribeInstancesOutput, error) {
 							Expect(input.InstanceIds).To(ConsistOf(instanceID))
@@ -3701,7 +3554,7 @@ var _ = Describe("AWSProvider", func() {
 								},
 							}, nil
 						})
-					mockEC2API.EXPECT().
+					mockec2Client.EXPECT().
 						DescribeSecurityGroups(ctx, gomock.AssignableToTypeOf(&ec2.DescribeSecurityGroupsInput{})).
 						DoAndReturn(func(_ context.Context, input *ec2.DescribeSecurityGroupsInput, _ ...func(*ec2.Options)) (*ec2.DescribeSecurityGroupsOutput, error) {
 							Expect(input.Filters).To(ConsistOf(
@@ -3748,7 +3601,7 @@ var _ = Describe("AWSProvider", func() {
 								},
 							}, nil
 						})
-					mockEC2API.EXPECT().
+					mockec2Client.EXPECT().
 						DescribeNetworkInterfaces(ctx, gomock.AssignableToTypeOf(&ec2.DescribeNetworkInterfacesInput{})).
 						DoAndReturn(func(_ context.Context, input *ec2.DescribeNetworkInterfacesInput, _ ...func(*ec2.Options)) (*ec2.DescribeNetworkInterfacesOutput, error) {
 							Expect(input.Filters).To(ConsistOf(
@@ -3770,7 +3623,7 @@ var _ = Describe("AWSProvider", func() {
 								},
 							}, nil
 						})
-					mockEC2API.EXPECT().
+					mockec2Client.EXPECT().
 						RevokeSecurityGroupEgress(ctx, gomock.AssignableToTypeOf(&ec2.RevokeSecurityGroupEgressInput{})).
 						DoAndReturn(func(_ context.Context, input *ec2.RevokeSecurityGroupEgressInput, _ ...func(*ec2.Options)) (*ec2.RevokeSecurityGroupEgressOutput, error) {
 							Expect(aws.ToString(input.GroupId)).To(Equal(aws.ToString(&securityGroupID)))
@@ -3789,12 +3642,10 @@ var _ = Describe("AWSProvider", func() {
 							return &ec2.RevokeSecurityGroupEgressOutput{}, fmt.Errorf("revoke security group egress error")
 						})
 
-					// 2. Act: Call the function under test
 					status, err := provider.ReconcileFirewallRule(ctx, log, nodeName, instanceID, firewallRule, firewallrules)
-					// 3. Assert: Check the result
 					Expect(status).To(MatchFields(IgnoreExtras, Fields{
 						"State": Equal(v1alpha1.FirewallRuleStatePending),
-						"Conditions": HaveExactElements(MatchConditions([]kmetav1.Condition{
+						"Conditions": HaveExactElements(matchConditions([]kmetav1.Condition{
 							{
 								Type:   v1alpha1.FirewallRuleConditionTypeSecurityGroupCreated,
 								Status: kmetav1.ConditionTrue,
@@ -3817,8 +3668,7 @@ var _ = Describe("AWSProvider", func() {
 					firewallrules = []v1alpha1.FirewallRule{*firewallRule, *firewallRule01}
 				})
 				It("should return an error when an AWS API call (RevokeSecurityGroupEgress) fails", func() {
-					// 1. Arrange: Set up mock return values
-					mockEC2API.EXPECT().
+					mockec2Client.EXPECT().
 						DescribeInstances(ctx, gomock.AssignableToTypeOf(&ec2.DescribeInstancesInput{})).
 						DoAndReturn(func(_ context.Context, input *ec2.DescribeInstancesInput, _ ...func(*ec2.Options)) (*ec2.DescribeInstancesOutput, error) {
 							Expect(input.InstanceIds).To(ConsistOf(instanceID))
@@ -3849,7 +3699,7 @@ var _ = Describe("AWSProvider", func() {
 								},
 							}, nil
 						})
-					mockEC2API.EXPECT().
+					mockec2Client.EXPECT().
 						DescribeSecurityGroups(ctx, gomock.AssignableToTypeOf(&ec2.DescribeSecurityGroupsInput{})).
 						DoAndReturn(func(_ context.Context, input *ec2.DescribeSecurityGroupsInput, _ ...func(*ec2.Options)) (*ec2.DescribeSecurityGroupsOutput, error) {
 							Expect(input.Filters).To(ConsistOf(
@@ -3898,7 +3748,7 @@ var _ = Describe("AWSProvider", func() {
 								},
 							}, nil
 						})
-					mockEC2API.EXPECT().
+					mockec2Client.EXPECT().
 						DescribeNetworkInterfaces(ctx, gomock.AssignableToTypeOf(&ec2.DescribeNetworkInterfacesInput{})).
 						DoAndReturn(func(_ context.Context, input *ec2.DescribeNetworkInterfacesInput, _ ...func(*ec2.Options)) (*ec2.DescribeNetworkInterfacesOutput, error) {
 							Expect(input.Filters).To(ConsistOf(
@@ -3920,7 +3770,7 @@ var _ = Describe("AWSProvider", func() {
 								},
 							}, nil
 						})
-					mockEC2API.EXPECT().
+					mockec2Client.EXPECT().
 						RevokeSecurityGroupEgress(ctx, gomock.AssignableToTypeOf(&ec2.RevokeSecurityGroupEgressInput{})).
 						DoAndReturn(func(_ context.Context, input *ec2.RevokeSecurityGroupEgressInput, _ ...func(*ec2.Options)) (*ec2.RevokeSecurityGroupEgressOutput, error) {
 							Expect(aws.ToString(input.GroupId)).To(Equal(aws.ToString(&securityGroupID)))
@@ -3939,12 +3789,10 @@ var _ = Describe("AWSProvider", func() {
 							return &ec2.RevokeSecurityGroupEgressOutput{}, fmt.Errorf("revoke security group Egress error")
 						})
 
-					// 2. Act: Call the function under test
 					status, err := provider.ReconcileFirewallRule(ctx, log, nodeName, instanceID, firewallRule, firewallrules)
-					// 3. Assert: Check the result
 					Expect(status).To(MatchFields(IgnoreExtras, Fields{
 						"State": Equal(v1alpha1.FirewallRuleStatePending),
-						"Conditions": HaveExactElements(MatchConditions([]kmetav1.Condition{
+						"Conditions": HaveExactElements(matchConditions([]kmetav1.Condition{
 							{
 								Type:   v1alpha1.FirewallRuleConditionTypeSecurityGroupCreated,
 								Status: kmetav1.ConditionTrue,
@@ -3962,7 +3810,7 @@ var _ = Describe("AWSProvider", func() {
 			})
 
 			It("should return a status and nil when it succeeds", func() {
-				mockEC2API.EXPECT().
+				mockec2Client.EXPECT().
 					DescribeInstances(ctx, gomock.AssignableToTypeOf(&ec2.DescribeInstancesInput{})).
 					DoAndReturn(func(_ context.Context, input *ec2.DescribeInstancesInput, _ ...func(*ec2.Options)) (*ec2.DescribeInstancesOutput, error) {
 						Expect(input.InstanceIds).To(ConsistOf(instanceID))
@@ -3993,7 +3841,7 @@ var _ = Describe("AWSProvider", func() {
 							},
 						}, nil
 					})
-				mockEC2API.EXPECT().
+				mockec2Client.EXPECT().
 					DescribeSecurityGroups(ctx, gomock.AssignableToTypeOf(&ec2.DescribeSecurityGroupsInput{})).
 					DoAndReturn(func(_ context.Context, input *ec2.DescribeSecurityGroupsInput, _ ...func(*ec2.Options)) (*ec2.DescribeSecurityGroupsOutput, error) {
 						Expect(input.Filters).To(ConsistOf(
@@ -4040,7 +3888,7 @@ var _ = Describe("AWSProvider", func() {
 							},
 						}, nil
 					})
-				mockEC2API.EXPECT().
+				mockec2Client.EXPECT().
 					DescribeNetworkInterfaces(ctx, gomock.AssignableToTypeOf(&ec2.DescribeNetworkInterfacesInput{})).
 					DoAndReturn(func(_ context.Context, input *ec2.DescribeNetworkInterfacesInput, _ ...func(*ec2.Options)) (*ec2.DescribeNetworkInterfacesOutput, error) {
 						Expect(input.Filters).To(ConsistOf(
@@ -4062,7 +3910,7 @@ var _ = Describe("AWSProvider", func() {
 							},
 						}, nil
 					})
-				mockEC2API.EXPECT().
+				mockec2Client.EXPECT().
 					RevokeSecurityGroupIngress(ctx, gomock.AssignableToTypeOf(&ec2.RevokeSecurityGroupIngressInput{})).
 					DoAndReturn(func(_ context.Context, input *ec2.RevokeSecurityGroupIngressInput, _ ...func(*ec2.Options)) (*ec2.RevokeSecurityGroupIngressOutput, error) {
 						Expect(aws.ToString(input.GroupId)).To(Equal(aws.ToString(&securityGroupID)))
@@ -4081,12 +3929,10 @@ var _ = Describe("AWSProvider", func() {
 						return &ec2.RevokeSecurityGroupIngressOutput{}, nil
 					})
 
-				// 2. Act: Call the function under test
 				status, err := provider.ReconcileFirewallRule(ctx, log, nodeName, instanceID, firewallRule, firewallrules)
-				// 3. Assert: Check the result
 				Expect(status).To(MatchFields(IgnoreExtras, Fields{
 					"State": Equal(v1alpha1.FirewallRuleStatePending),
-					"Conditions": HaveExactElements(MatchConditions([]kmetav1.Condition{
+					"Conditions": HaveExactElements(matchConditions([]kmetav1.Condition{
 						{
 							Type:   v1alpha1.FirewallRuleConditionTypeSecurityGroupCreated,
 							Status: kmetav1.ConditionTrue,
@@ -4105,8 +3951,7 @@ var _ = Describe("AWSProvider", func() {
 
 		When("the firewallrule is an ingress rule", func() {
 			It("should return a pending state, specify in the condition when the maximum rule is reached and an error when an AWS API call  (AuthorizeSecurityGroupIngress) fails", func() {
-				// 1. Arrange: Set up mock return values
-				mockEC2API.EXPECT().
+				mockec2Client.EXPECT().
 					DescribeInstances(ctx, gomock.AssignableToTypeOf(&ec2.DescribeInstancesInput{})).
 					DoAndReturn(func(_ context.Context, input *ec2.DescribeInstancesInput, _ ...func(*ec2.Options)) (*ec2.DescribeInstancesOutput, error) {
 						Expect(input.InstanceIds).To(ConsistOf(instanceID))
@@ -4137,7 +3982,7 @@ var _ = Describe("AWSProvider", func() {
 							},
 						}, nil
 					})
-				mockEC2API.EXPECT().
+				mockec2Client.EXPECT().
 					DescribeSecurityGroups(ctx, gomock.AssignableToTypeOf(&ec2.DescribeSecurityGroupsInput{})).
 					DoAndReturn(func(_ context.Context, input *ec2.DescribeSecurityGroupsInput, _ ...func(*ec2.Options)) (*ec2.DescribeSecurityGroupsOutput, error) {
 						Expect(input.Filters).To(ConsistOf(
@@ -4175,7 +4020,7 @@ var _ = Describe("AWSProvider", func() {
 							},
 						}, nil
 					})
-				mockEC2API.EXPECT().
+				mockec2Client.EXPECT().
 					DescribeNetworkInterfaces(ctx, gomock.AssignableToTypeOf(&ec2.DescribeNetworkInterfacesInput{})).
 					DoAndReturn(func(_ context.Context, input *ec2.DescribeNetworkInterfacesInput, _ ...func(*ec2.Options)) (*ec2.DescribeNetworkInterfacesOutput, error) {
 						Expect(input.Filters).To(ConsistOf(
@@ -4197,7 +4042,7 @@ var _ = Describe("AWSProvider", func() {
 							},
 						}, nil
 					})
-				mockEC2API.EXPECT().
+				mockec2Client.EXPECT().
 					AuthorizeSecurityGroupIngress(ctx, gomock.AssignableToTypeOf(&ec2.AuthorizeSecurityGroupIngressInput{})).
 					DoAndReturn(func(_ context.Context, input *ec2.AuthorizeSecurityGroupIngressInput, _ ...func(*ec2.Options)) (*ec2.AuthorizeSecurityGroupIngressOutput, error) {
 						Expect(aws.ToString(input.GroupId)).To(Equal(securityGroupID))
@@ -4220,12 +4065,10 @@ var _ = Describe("AWSProvider", func() {
 						}
 					})
 
-				// 2. Act: Call the function under test
 				status, err := provider.ReconcileFirewallRule(ctx, log, nodeName, instanceID, firewallRule, firewallrules)
-				// 3. Assert: Check the result
 				Expect(status).To(MatchFields(IgnoreExtras, Fields{
 					"State": Equal(v1alpha1.FirewallRuleStatePending),
-					"Conditions": HaveExactElements(MatchConditions([]kmetav1.Condition{
+					"Conditions": HaveExactElements(matchConditions([]kmetav1.Condition{
 						{
 							Type:   v1alpha1.FirewallRuleConditionTypeSecurityGroupCreated,
 							Status: kmetav1.ConditionTrue,
@@ -4247,8 +4090,7 @@ var _ = Describe("AWSProvider", func() {
 			})
 
 			It("should return a pending state and an error when an AWS API call (AuthorizeSecurityGroupIngress) fails", func() {
-				// 1. Arrange: Set up mock return values
-				mockEC2API.EXPECT().
+				mockec2Client.EXPECT().
 					DescribeInstances(ctx, gomock.AssignableToTypeOf(&ec2.DescribeInstancesInput{})).
 					DoAndReturn(func(_ context.Context, input *ec2.DescribeInstancesInput, _ ...func(*ec2.Options)) (*ec2.DescribeInstancesOutput, error) {
 						Expect(input.InstanceIds).To(ConsistOf(instanceID))
@@ -4279,7 +4121,7 @@ var _ = Describe("AWSProvider", func() {
 							},
 						}, nil
 					})
-				mockEC2API.EXPECT().
+				mockec2Client.EXPECT().
 					DescribeSecurityGroups(ctx, gomock.AssignableToTypeOf(&ec2.DescribeSecurityGroupsInput{})).
 					DoAndReturn(func(_ context.Context, input *ec2.DescribeSecurityGroupsInput, _ ...func(*ec2.Options)) (*ec2.DescribeSecurityGroupsOutput, error) {
 						Expect(input.Filters).To(ConsistOf(
@@ -4317,7 +4159,7 @@ var _ = Describe("AWSProvider", func() {
 							},
 						}, nil
 					})
-				mockEC2API.EXPECT().
+				mockec2Client.EXPECT().
 					DescribeNetworkInterfaces(ctx, gomock.AssignableToTypeOf(&ec2.DescribeNetworkInterfacesInput{})).
 					DoAndReturn(func(_ context.Context, input *ec2.DescribeNetworkInterfacesInput, _ ...func(*ec2.Options)) (*ec2.DescribeNetworkInterfacesOutput, error) {
 						Expect(input.Filters).To(ConsistOf(
@@ -4339,7 +4181,7 @@ var _ = Describe("AWSProvider", func() {
 							},
 						}, nil
 					})
-				mockEC2API.EXPECT().
+				mockec2Client.EXPECT().
 					AuthorizeSecurityGroupIngress(ctx, gomock.AssignableToTypeOf(&ec2.AuthorizeSecurityGroupIngressInput{})).
 					DoAndReturn(func(_ context.Context, input *ec2.AuthorizeSecurityGroupIngressInput, _ ...func(*ec2.Options)) (*ec2.AuthorizeSecurityGroupIngressOutput, error) {
 						Expect(aws.ToString(input.GroupId)).To(Equal(securityGroupID))
@@ -4358,12 +4200,10 @@ var _ = Describe("AWSProvider", func() {
 						return &ec2.AuthorizeSecurityGroupIngressOutput{}, fmt.Errorf("authorize security group ingress error")
 					})
 
-				// 2. Act: Call the function under test
 				status, err := provider.ReconcileFirewallRule(ctx, log, nodeName, instanceID, firewallRule, firewallrules)
-				// 3. Assert: Check the result
 				Expect(status).To(MatchFields(IgnoreExtras, Fields{
 					"State": Equal(v1alpha1.FirewallRuleStatePending),
-					"Conditions": HaveExactElements(MatchConditions([]kmetav1.Condition{
+					"Conditions": HaveExactElements(matchConditions([]kmetav1.Condition{
 						{
 							Type:   v1alpha1.FirewallRuleConditionTypeSecurityGroupCreated,
 							Status: kmetav1.ConditionTrue,
@@ -4391,8 +4231,7 @@ var _ = Describe("AWSProvider", func() {
 				firewallrules = []v1alpha1.FirewallRule{*firewallRule, *firewallRule01}
 			})
 			It("should return a pending state, specify in the condition when the maximum rule is reached and an error when an AWS API call  (AuthorizeSecurityGroupIngress) fails", func() {
-				// 1. Arrange: Set up mock return values
-				mockEC2API.EXPECT().
+				mockec2Client.EXPECT().
 					DescribeInstances(ctx, gomock.AssignableToTypeOf(&ec2.DescribeInstancesInput{})).
 					DoAndReturn(func(_ context.Context, input *ec2.DescribeInstancesInput, _ ...func(*ec2.Options)) (*ec2.DescribeInstancesOutput, error) {
 						Expect(input.InstanceIds).To(ConsistOf(instanceID))
@@ -4423,7 +4262,7 @@ var _ = Describe("AWSProvider", func() {
 							},
 						}, nil
 					})
-				mockEC2API.EXPECT().
+				mockec2Client.EXPECT().
 					DescribeSecurityGroups(ctx, gomock.AssignableToTypeOf(&ec2.DescribeSecurityGroupsInput{})).
 					DoAndReturn(func(_ context.Context, input *ec2.DescribeSecurityGroupsInput, _ ...func(*ec2.Options)) (*ec2.DescribeSecurityGroupsOutput, error) {
 						Expect(input.Filters).To(ConsistOf(
@@ -4461,7 +4300,7 @@ var _ = Describe("AWSProvider", func() {
 							},
 						}, nil
 					})
-				mockEC2API.EXPECT().
+				mockec2Client.EXPECT().
 					DescribeNetworkInterfaces(ctx, gomock.AssignableToTypeOf(&ec2.DescribeNetworkInterfacesInput{})).
 					DoAndReturn(func(_ context.Context, input *ec2.DescribeNetworkInterfacesInput, _ ...func(*ec2.Options)) (*ec2.DescribeNetworkInterfacesOutput, error) {
 						Expect(input.Filters).To(ConsistOf(
@@ -4483,7 +4322,7 @@ var _ = Describe("AWSProvider", func() {
 							},
 						}, nil
 					})
-				mockEC2API.EXPECT().
+				mockec2Client.EXPECT().
 					AuthorizeSecurityGroupEgress(ctx, gomock.AssignableToTypeOf(&ec2.AuthorizeSecurityGroupEgressInput{})).
 					DoAndReturn(func(_ context.Context, input *ec2.AuthorizeSecurityGroupEgressInput, _ ...func(*ec2.Options)) (*ec2.AuthorizeSecurityGroupEgressOutput, error) {
 						Expect(aws.ToString(input.GroupId)).To(Equal(securityGroupID))
@@ -4506,12 +4345,10 @@ var _ = Describe("AWSProvider", func() {
 						}
 					})
 
-				// 2. Act: Call the function under test
 				status, err := provider.ReconcileFirewallRule(ctx, log, nodeName, instanceID, firewallRule, firewallrules)
-				// 3. Assert: Check the result
 				Expect(status).To(MatchFields(IgnoreExtras, Fields{
 					"State": Equal(v1alpha1.FirewallRuleStatePending),
-					"Conditions": HaveExactElements(MatchConditions([]kmetav1.Condition{
+					"Conditions": HaveExactElements(matchConditions([]kmetav1.Condition{
 						{
 							Type:   v1alpha1.FirewallRuleConditionTypeSecurityGroupCreated,
 							Status: kmetav1.ConditionTrue,
@@ -4533,8 +4370,7 @@ var _ = Describe("AWSProvider", func() {
 			})
 
 			It("should return a pending state and an error when an AWS API call (AuthorizeSecurityGroupEgress) fails", func() {
-				// 1. Arrange: Set up mock return values
-				mockEC2API.EXPECT().
+				mockec2Client.EXPECT().
 					DescribeInstances(ctx, gomock.AssignableToTypeOf(&ec2.DescribeInstancesInput{})).
 					DoAndReturn(func(_ context.Context, input *ec2.DescribeInstancesInput, _ ...func(*ec2.Options)) (*ec2.DescribeInstancesOutput, error) {
 						Expect(input.InstanceIds).To(ConsistOf(instanceID))
@@ -4565,7 +4401,7 @@ var _ = Describe("AWSProvider", func() {
 							},
 						}, nil
 					})
-				mockEC2API.EXPECT().
+				mockec2Client.EXPECT().
 					DescribeSecurityGroups(ctx, gomock.AssignableToTypeOf(&ec2.DescribeSecurityGroupsInput{})).
 					DoAndReturn(func(_ context.Context, input *ec2.DescribeSecurityGroupsInput, _ ...func(*ec2.Options)) (*ec2.DescribeSecurityGroupsOutput, error) {
 						Expect(input.Filters).To(ConsistOf(
@@ -4603,7 +4439,7 @@ var _ = Describe("AWSProvider", func() {
 							},
 						}, nil
 					})
-				mockEC2API.EXPECT().
+				mockec2Client.EXPECT().
 					DescribeNetworkInterfaces(ctx, gomock.AssignableToTypeOf(&ec2.DescribeNetworkInterfacesInput{})).
 					DoAndReturn(func(_ context.Context, input *ec2.DescribeNetworkInterfacesInput, _ ...func(*ec2.Options)) (*ec2.DescribeNetworkInterfacesOutput, error) {
 						Expect(input.Filters).To(ConsistOf(
@@ -4625,7 +4461,7 @@ var _ = Describe("AWSProvider", func() {
 							},
 						}, nil
 					})
-				mockEC2API.EXPECT().
+				mockec2Client.EXPECT().
 					AuthorizeSecurityGroupEgress(ctx, gomock.AssignableToTypeOf(&ec2.AuthorizeSecurityGroupEgressInput{})).
 					DoAndReturn(func(_ context.Context, input *ec2.AuthorizeSecurityGroupEgressInput, _ ...func(*ec2.Options)) (*ec2.AuthorizeSecurityGroupEgressOutput, error) {
 						Expect(aws.ToString(input.GroupId)).To(Equal(securityGroupID))
@@ -4644,12 +4480,10 @@ var _ = Describe("AWSProvider", func() {
 						return &ec2.AuthorizeSecurityGroupEgressOutput{}, fmt.Errorf("authorize security group egress error")
 					})
 
-				// 2. Act: Call the function under test
 				status, err := provider.ReconcileFirewallRule(ctx, log, nodeName, instanceID, firewallRule, firewallrules)
-				// 3. Assert: Check the result
 				Expect(status).To(MatchFields(IgnoreExtras, Fields{
 					"State": Equal(v1alpha1.FirewallRuleStatePending),
-					"Conditions": HaveExactElements(MatchConditions([]kmetav1.Condition{
+					"Conditions": HaveExactElements(matchConditions([]kmetav1.Condition{
 						{
 							Type:   v1alpha1.FirewallRuleConditionTypeSecurityGroupCreated,
 							Status: kmetav1.ConditionTrue,
@@ -4672,8 +4506,7 @@ var _ = Describe("AWSProvider", func() {
 		})
 
 		It("should return an applied status when the firewallRule is added without error", func() {
-			// 1. Arrange: Set up mock return values
-			mockEC2API.EXPECT().
+			mockec2Client.EXPECT().
 				DescribeInstances(ctx, gomock.AssignableToTypeOf(&ec2.DescribeInstancesInput{})).
 				DoAndReturn(func(_ context.Context, input *ec2.DescribeInstancesInput, _ ...func(*ec2.Options)) (*ec2.DescribeInstancesOutput, error) {
 					Expect(input.InstanceIds).To(ConsistOf(instanceID))
@@ -4704,7 +4537,7 @@ var _ = Describe("AWSProvider", func() {
 						},
 					}, nil
 				})
-			mockEC2API.EXPECT().
+			mockec2Client.EXPECT().
 				DescribeSecurityGroups(ctx, gomock.AssignableToTypeOf(&ec2.DescribeSecurityGroupsInput{})).
 				DoAndReturn(func(_ context.Context, input *ec2.DescribeSecurityGroupsInput, _ ...func(*ec2.Options)) (*ec2.DescribeSecurityGroupsOutput, error) {
 					Expect(input.Filters).To(ConsistOf(
@@ -4742,7 +4575,7 @@ var _ = Describe("AWSProvider", func() {
 						},
 					}, nil
 				})
-			mockEC2API.EXPECT().
+			mockec2Client.EXPECT().
 				DescribeNetworkInterfaces(ctx, gomock.AssignableToTypeOf(&ec2.DescribeNetworkInterfacesInput{})).
 				DoAndReturn(func(_ context.Context, input *ec2.DescribeNetworkInterfacesInput, _ ...func(*ec2.Options)) (*ec2.DescribeNetworkInterfacesOutput, error) {
 					Expect(input.Filters).To(ConsistOf(
@@ -4764,7 +4597,7 @@ var _ = Describe("AWSProvider", func() {
 						},
 					}, nil
 				})
-			mockEC2API.EXPECT().
+			mockec2Client.EXPECT().
 				AuthorizeSecurityGroupIngress(ctx, gomock.AssignableToTypeOf(&ec2.AuthorizeSecurityGroupIngressInput{})).
 				DoAndReturn(func(_ context.Context, input *ec2.AuthorizeSecurityGroupIngressInput, _ ...func(*ec2.Options)) (*ec2.AuthorizeSecurityGroupIngressOutput, error) {
 					Expect(aws.ToString(input.GroupId)).To(Equal(securityGroupID))
@@ -4783,12 +4616,10 @@ var _ = Describe("AWSProvider", func() {
 					return &ec2.AuthorizeSecurityGroupIngressOutput{}, nil
 				})
 
-			// 2. Act: Call the function under test
 			status, err := provider.ReconcileFirewallRule(ctx, log, nodeName, instanceID, firewallRule, firewallrules)
-			// 3. Assert: Check the result
 			Expect(status).To(MatchFields(IgnoreExtras, Fields{
 				"State": Equal(v1alpha1.FirewallRuleStateApplied),
-				"Conditions": HaveExactElements(MatchConditions([]kmetav1.Condition{
+				"Conditions": HaveExactElements(matchConditions([]kmetav1.Condition{
 					{
 						Type:   v1alpha1.FirewallRuleConditionTypeSecurityGroupCreated,
 						Status: kmetav1.ConditionTrue,

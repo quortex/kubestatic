@@ -18,7 +18,7 @@ import (
 //
 // Returns:
 //   - A GomegaMatcher that matches the fields of the provided Kubernetes condition.
-func MatchCondition(obj kmetav1.Condition, ignoredFields ...string) types.GomegaMatcher {
+func matchCondition(obj kmetav1.Condition, ignoredFields ...string) types.GomegaMatcher {
 	fields := Fields{
 		"Type":               BeEquivalentTo(obj.Type),
 		"Status":             BeEquivalentTo(obj.Status),
@@ -34,7 +34,7 @@ func MatchCondition(obj kmetav1.Condition, ignoredFields ...string) types.Gomega
 	return MatchFields(IgnoreExtras, fields)
 }
 
-// MatchConditions returns a slice of custom Gomega matchers to check the fields of multiple Kubernetes conditions.
+// matchConditions returns a slice of custom Gomega matchers to check the fields of multiple Kubernetes conditions.
 //
 // Parameters:
 //   - obj: A slice of Kubernetes conditions to be matched.
@@ -42,10 +42,10 @@ func MatchCondition(obj kmetav1.Condition, ignoredFields ...string) types.Gomega
 //
 // Returns:
 //   - A slice of GomegaMatchers that match the fields of the provided Kubernetes conditions.
-func MatchConditions(obj []kmetav1.Condition, ignoredFields ...string) []types.GomegaMatcher {
+func matchConditions(obj []kmetav1.Condition, ignoredFields ...string) []types.GomegaMatcher {
 	res := make([]types.GomegaMatcher, len(obj))
 	for i, condition := range obj {
-		res[i] = MatchCondition(condition, ignoredFields...)
+		res[i] = matchCondition(condition, ignoredFields...)
 	}
 	return res
 }

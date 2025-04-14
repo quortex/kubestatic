@@ -159,7 +159,7 @@ func WithClusterID(clusterID string) ClusterIDFilter {
 type awsProvider struct {
 	clusterID string
 	vpcID     string
-	ec2       ec2.Client
+	ec2       ec2Client
 	// These Mutexes ensure that when a cache miss occurs, only one controller makes
 	// the AWS API call while others wait for the result, preventing duplicate
 	// requests for the same data.
