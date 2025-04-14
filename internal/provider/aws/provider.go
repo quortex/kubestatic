@@ -159,7 +159,7 @@ func WithClusterID(clusterID string) ClusterIDFilter {
 type awsProvider struct {
 	clusterID string
 	vpcID     string
-	ec2       *ec2.Client
+	ec2       ec2.Client
 	// These Mutexes ensure that when a cache miss occurs, only one controller makes
 	// the AWS API call while others wait for the result, preventing duplicate
 	// requests for the same data.
@@ -186,18 +186,24 @@ func NewProvider(defaultTTL, defaultCleanupInterval time.Duration, clusterID, vp
 		return nil, err
 	}
 
+	ec2Client := ec2.NewFromConfig(cfg, func(o *ec2.Options) {
+		o.MeterProvider = smithyotelmetrics.Adapt(meterProvider)
+	})
+
+	return NewProviderWithClient(ec2Client, defaultTTL, defaultCleanupInterval, clusterID, vpcID), nil
+}
+
+// NewProviderWithClient instantiate a Provider implementation for AWS with a custom EC2 client
+func NewProviderWithClient(ec2Client ec2Client, defaultTTL, defaultCleanupInterval time.Duration, clusterID, vpcID string) provider.Provider {
 	return &awsProvider{
-		clusterID: clusterID,
-		vpcID:     vpcID,
-		ec2: ec2.NewFromConfig(cfg, func(o *ec2.Options) {
-			// https://github.com/aws/aws-sdk-go-v2/discussions/2810
-			o.MeterProvider = smithyotelmetrics.Adapt(meterProvider)
-		}),
+		clusterID:              clusterID,
+		vpcID:                  vpcID,
+		ec2:                    ec2Client,
 		instancesCache:         cache.New(defaultTTL, defaultCleanupInterval),
 		securityGroupsCache:    cache.New(defaultTTL, defaultCleanupInterval),
 		networkInterfacesCache: cache.New(defaultTTL, defaultCleanupInterval),
 		addressesCache:         cache.New(defaultTTL, defaultCleanupInterval),
-	}, nil
+	}
 }
 
 // Standalone generic function for fetching AWS resources
@@ -217,7 +223,7 @@ func getResource[T any](
 	defer mu.Unlock()
 
 	// Convert filter options to AWS filters
-	filters := make([]types.Filter, len(opts))
+	filters := make([]types.Filter, 0, len(opts))
 	for _, opt := range opts {
 		filters = append(filters, opt.Filter())
 	}
@@ -698,6 +704,14 @@ func (p *awsProvider) ReconcileFirewallRule(
 			return status, fmt.Errorf("failed to create security group: %w", err)
 		}
 
+		meta.SetStatusCondition(&status.Conditions, kmetav1.Condition{
+			Type:               v1alpha1.FirewallRuleConditionTypeSecurityGroupCreated,
+			Status:             kmetav1.ConditionTrue,
+			ObservedGeneration: firewallRule.Generation,
+			Reason:             v1alpha1.FirewallRuleConditionReasonSecurityGroupCreated,
+			Message:            fmt.Sprintf("Security group created with nodename %s in %s", nodeName, aws.ToString(instance.VpcId)),
+		})
+
 		log.Info("Security group created", "securityGroupID", securityGroupID)
 
 		securityGroup, err = p.getSecurityGroup(
@@ -1068,7 +1082,7 @@ func (p *awsProvider) ReconcileExternalIP(
 			Type:               v1alpha1.ExternalIPConditionReasonIPCreated,
 			Status:             kmetav1.ConditionUnknown,
 			ObservedGeneration: externalIP.Generation,
-			Reason:             v1alpha1.FirewallRuleConditionReasonProviderError,
+			Reason:             v1alpha1.ExternalIPConditionReasonProviderError,
 			Message:            fmt.Sprintf("Failed to get address: %s", err),
 		})
 		return status, fmt.Errorf("failed to get address: %w", err)

@@ -1,0 +1,4812 @@
+package aws
+
+import (
+	"context"
+	"fmt"
+	"os"
+	"time"
+
+	"github.com/aws/aws-sdk-go-v2/aws"
+	"github.com/aws/aws-sdk-go-v2/service/ec2"
+	"github.com/aws/aws-sdk-go-v2/service/ec2/types"
+	"github.com/aws/smithy-go"
+	"github.com/aws/smithy-go/ptr"
+	. "github.com/onsi/ginkgo/v2"
+	. "github.com/onsi/gomega"
+	. "github.com/onsi/gomega/gstruct"
+	gomock "go.uber.org/mock/gomock"
+	kmetav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/util/rand"
+	logf "sigs.k8s.io/controller-runtime/pkg/log"
+
+	"github.com/quortex/kubestatic/api/v1alpha1"
+	"github.com/quortex/kubestatic/internal/provider"
+	"github.com/quortex/kubestatic/internal/provider/aws/mocks"
+)
+
+var _ = Describe("AWSProvider", func() {
+	var (
+		mockCtrl   *gomock.Controller
+		mockEC2API *mocks.MockEC2API
+		provider   provider.Provider
+	)
+
+	ctx := context.Background()
+	log := logf.Log.WithName("input-controller-test")
+
+	BeforeEach(func() {
+		mockCtrl = gomock.NewController(GinkgoT())
+		mockEC2API = mocks.NewMockEC2API(mockCtrl)
+
+		// Inject the mock EC2 into the provider
+		provider = NewProviderWithClient(mockEC2API, 5*time.Minute, 10*time.Minute)
+	})
+
+	AfterEach(func() {
+		mockCtrl.Finish()
+	})
+
+	Context("ReconcileFirewallRulesDeletion", func() {
+		var (
+			nodeName, resourcesNamePrefix, testID string
+			groupID, sgName, eniID, eni01ID       *string
+		)
+
+		BeforeEach(func() {
+			testID = rand.String(5)
+			nodeName = "node-" + testID
+			resourcesNamePrefix = "test-" + testID
+			groupID = aws.String("sg-" + testID)
+			sgName = aws.String(resourcesNamePrefix + "-sg")
+			eniID = aws.String("eni-" + testID)
+			eni01ID = aws.String("eni-1-" + testID)
+		})
+
+		It("should return an error when an AWS API call (DescribeSecurityGroups) fails", func() {
+			// 1. Arrange: Set up mock return values
+			mockEC2API.EXPECT().
+				DescribeSecurityGroups(ctx, gomock.AssignableToTypeOf(&ec2.DescribeSecurityGroupsInput{})).
+				DoAndReturn(func(_ context.Context, input *ec2.DescribeSecurityGroupsInput, _ ...func(*ec2.Options)) (*ec2.DescribeSecurityGroupsOutput, error) {
+					Expect(input.Filters).To(ConsistOf(
+						types.Filter{
+							Name:   aws.String(fmt.Sprintf("tag:%s", TagKeyNodeName)),
+							Values: []string{nodeName},
+						},
+						types.Filter{
+							Name:   aws.String(fmt.Sprintf("tag:%s", TagKeyManaged)),
+							Values: []string{"true"},
+						},
+					))
+					return &ec2.DescribeSecurityGroupsOutput{}, fmt.Errorf("describe security groups error")
+				})
+
+			// 2. Act: Call the function under test
+			err := provider.ReconcileFirewallRulesDeletion(ctx, log, nodeName)
+			// 3. Assert: Check the result
+			Expect(err).To(HaveOccurred())
+		})
+
+		It("should return nil when the security group is not found", func() {
+			// 1. Arrange: Set up mock return values
+			mockEC2API.EXPECT().
+				DescribeSecurityGroups(ctx, gomock.AssignableToTypeOf(&ec2.DescribeSecurityGroupsInput{})).
+				DoAndReturn(func(_ context.Context, input *ec2.DescribeSecurityGroupsInput, _ ...func(*ec2.Options)) (*ec2.DescribeSecurityGroupsOutput, error) {
+					Expect(input.Filters).To(ConsistOf(
+						types.Filter{
+							Name:   aws.String(fmt.Sprintf("tag:%s", TagKeyNodeName)),
+							Values: []string{nodeName},
+						},
+						types.Filter{
+							Name:   aws.String(fmt.Sprintf("tag:%s", TagKeyManaged)),
+							Values: []string{"true"},
+						},
+					))
+					return &ec2.DescribeSecurityGroupsOutput{
+						SecurityGroups: []types.SecurityGroup{},
+					}, nil
+				})
+			// 2. Act: Call the function under test
+			err := provider.ReconcileFirewallRulesDeletion(ctx, log, nodeName)
+			// 3. Assert: Check the result
+			Expect(err).ToNot(HaveOccurred())
+		})
+
+		It("should return an error when an AWS API call (DescribeNetworkInterfaces) fails", func() {
+			// 1. Arrange: Set up mock return values
+			mockEC2API.EXPECT().
+				DescribeSecurityGroups(ctx, gomock.AssignableToTypeOf(&ec2.DescribeSecurityGroupsInput{})).
+				DoAndReturn(func(_ context.Context, input *ec2.DescribeSecurityGroupsInput, _ ...func(*ec2.Options)) (*ec2.DescribeSecurityGroupsOutput, error) {
+					Expect(input.Filters).To(ConsistOf(
+						types.Filter{
+							Name:   aws.String(fmt.Sprintf("tag:%s", TagKeyNodeName)),
+							Values: []string{nodeName},
+						},
+						types.Filter{
+							Name:   aws.String(fmt.Sprintf("tag:%s", TagKeyManaged)),
+							Values: []string{"true"},
+						},
+					))
+					return &ec2.DescribeSecurityGroupsOutput{
+						SecurityGroups: []types.SecurityGroup{
+							{
+								GroupId:   groupID,
+								GroupName: sgName,
+							},
+						},
+					}, nil
+				})
+			mockEC2API.EXPECT().
+				DescribeNetworkInterfaces(ctx, gomock.AssignableToTypeOf(&ec2.DescribeNetworkInterfacesInput{})).
+				DoAndReturn(func(_ context.Context, input *ec2.DescribeNetworkInterfacesInput, _ ...func(*ec2.Options)) (*ec2.DescribeNetworkInterfacesOutput, error) {
+					Expect(input.Filters).To(HaveLen(1))
+					Expect(aws.ToString(input.Filters[0].Name)).To(Equal("group-id"))
+					Expect(input.Filters[0].Values).To(ConsistOf(ptr.ToString(groupID)))
+					return &ec2.DescribeNetworkInterfacesOutput{
+						NetworkInterfaces: []types.NetworkInterface{},
+					}, fmt.Errorf("describe network interfaces error")
+				})
+
+			// 2. Act: Call the function under test
+			err := provider.ReconcileFirewallRulesDeletion(ctx, log, nodeName)
+			// 3. Assert: Check the result
+			Expect(err).To(HaveOccurred())
+		})
+
+		It("should return an error when an AWS API call (ModifyNetworkInterfaceAttribute) fails", func() {
+			// 1. Arrange: Set up mock return values
+			mockEC2API.EXPECT().
+				DescribeSecurityGroups(ctx, gomock.AssignableToTypeOf(&ec2.DescribeSecurityGroupsInput{})).
+				DoAndReturn(func(_ context.Context, input *ec2.DescribeSecurityGroupsInput, _ ...func(*ec2.Options)) (*ec2.DescribeSecurityGroupsOutput, error) {
+					Expect(input.Filters).To(ConsistOf(
+						types.Filter{
+							Name:   aws.String(fmt.Sprintf("tag:%s", TagKeyNodeName)),
+							Values: []string{nodeName},
+						},
+						types.Filter{
+							Name:   aws.String(fmt.Sprintf("tag:%s", TagKeyManaged)),
+							Values: []string{"true"},
+						},
+					))
+					return &ec2.DescribeSecurityGroupsOutput{
+						SecurityGroups: []types.SecurityGroup{
+							{
+								GroupId:   groupID,
+								GroupName: sgName,
+							},
+						},
+					}, nil
+				})
+			mockEC2API.EXPECT().
+				DescribeNetworkInterfaces(ctx, gomock.AssignableToTypeOf(&ec2.DescribeNetworkInterfacesInput{})).
+				DoAndReturn(func(_ context.Context, input *ec2.DescribeNetworkInterfacesInput, _ ...func(*ec2.Options)) (*ec2.DescribeNetworkInterfacesOutput, error) {
+					Expect(input.Filters).To(HaveLen(1))
+					Expect(aws.ToString(input.Filters[0].Name)).To(Equal("group-id"))
+					Expect(input.Filters[0].Values).To(ConsistOf(ptr.ToString(groupID)))
+					return &ec2.DescribeNetworkInterfacesOutput{
+						NetworkInterfaces: []types.NetworkInterface{
+							{
+								NetworkInterfaceId: eniID,
+								Attachment: &types.NetworkInterfaceAttachment{
+									AttachmentId: aws.String("eni-attach-" + testID),
+									InstanceId:   aws.String("i-" + testID),
+								},
+								Groups: []types.GroupIdentifier{
+									{
+										GroupId:   groupID,
+										GroupName: sgName,
+									},
+									{
+										GroupId:   aws.String("sg-01"),
+										GroupName: aws.String("sg-01"),
+									},
+									{
+										GroupId:   aws.String("sg-02"),
+										GroupName: aws.String("sg-02"),
+									},
+								},
+							},
+							{
+								NetworkInterfaceId: eni01ID,
+								Attachment: &types.NetworkInterfaceAttachment{
+									AttachmentId: aws.String("eni-attach-1" + testID),
+									InstanceId:   aws.String("i-1-" + testID),
+								},
+								Groups: []types.GroupIdentifier{
+									{
+										GroupId:   groupID,
+										GroupName: sgName,
+									},
+									{
+										GroupId:   aws.String("sg-01"),
+										GroupName: aws.String("sg-01"),
+									},
+									{
+										GroupId:   aws.String("sg-02"),
+										GroupName: aws.String("sg-02"),
+									},
+								},
+							},
+						},
+					}, nil
+				})
+
+			mockEC2API.EXPECT().
+				ModifyNetworkInterfaceAttribute(ctx, gomock.AssignableToTypeOf(&ec2.ModifyNetworkInterfaceAttributeInput{})).
+				DoAndReturn(func(_ context.Context, input *ec2.ModifyNetworkInterfaceAttributeInput, _ ...func(*ec2.Options)) (*ec2.ModifyNetworkInterfaceAttributeOutput, error) {
+					switch aws.ToString(input.NetworkInterfaceId) {
+					case aws.ToString(eniID):
+						Expect(input.Groups).To(ConsistOf("sg-01", "sg-02"))
+						return &ec2.ModifyNetworkInterfaceAttributeOutput{}, nil
+					case aws.ToString(eni01ID):
+						Expect(input.Groups).To(ConsistOf("sg-01", "sg-02"))
+						return &ec2.ModifyNetworkInterfaceAttributeOutput{}, fmt.Errorf("modify network interface attribute error")
+					default:
+						return nil, fmt.Errorf("unexpected interface ID: %s", aws.ToString(input.NetworkInterfaceId))
+					}
+				}).Times(2)
+
+			// 2. Act: Call the function under test
+			err := provider.ReconcileFirewallRulesDeletion(ctx, log, nodeName)
+			// 3. Assert: Check the result
+			Expect(err).To(HaveOccurred())
+		})
+
+		It("should return an error when an AWS API call (DeleteSecurityGroup) fails", func() {
+			// 1. Arrange: Set up mock return values
+			mockEC2API.EXPECT().
+				DescribeSecurityGroups(ctx, gomock.AssignableToTypeOf(&ec2.DescribeSecurityGroupsInput{})).
+				DoAndReturn(func(_ context.Context, input *ec2.DescribeSecurityGroupsInput, _ ...func(*ec2.Options)) (*ec2.DescribeSecurityGroupsOutput, error) {
+					Expect(input.Filters).To(ConsistOf(
+						types.Filter{
+							Name:   aws.String(fmt.Sprintf("tag:%s", TagKeyNodeName)),
+							Values: []string{nodeName},
+						},
+						types.Filter{
+							Name:   aws.String(fmt.Sprintf("tag:%s", TagKeyManaged)),
+							Values: []string{"true"},
+						},
+					))
+					return &ec2.DescribeSecurityGroupsOutput{
+						SecurityGroups: []types.SecurityGroup{
+							{
+								GroupId:   groupID,
+								GroupName: sgName,
+							},
+						},
+					}, nil
+				})
+			mockEC2API.EXPECT().
+				DescribeNetworkInterfaces(ctx, gomock.AssignableToTypeOf(&ec2.DescribeNetworkInterfacesInput{})).
+				DoAndReturn(func(_ context.Context, input *ec2.DescribeNetworkInterfacesInput, _ ...func(*ec2.Options)) (*ec2.DescribeNetworkInterfacesOutput, error) {
+					Expect(input.Filters).To(HaveLen(1))
+					Expect(aws.ToString(input.Filters[0].Name)).To(Equal("group-id"))
+					Expect(input.Filters[0].Values).To(ConsistOf(ptr.ToString(groupID)))
+					return &ec2.DescribeNetworkInterfacesOutput{
+						NetworkInterfaces: []types.NetworkInterface{
+							{
+								NetworkInterfaceId: eniID,
+								Attachment: &types.NetworkInterfaceAttachment{
+									AttachmentId: aws.String("eni-attach-" + testID),
+									InstanceId:   aws.String("i-" + testID),
+								},
+								Groups: []types.GroupIdentifier{
+									{
+										GroupId:   groupID,
+										GroupName: sgName,
+									},
+									{
+										GroupId:   aws.String("sg-01"),
+										GroupName: aws.String("sg-01"),
+									},
+									{
+										GroupId:   aws.String("sg-02"),
+										GroupName: aws.String("sg-02"),
+									},
+								},
+							},
+							{
+								NetworkInterfaceId: eni01ID,
+								Attachment: &types.NetworkInterfaceAttachment{
+									AttachmentId: aws.String("eni-attach-1" + testID),
+									InstanceId:   aws.String("i-1-" + testID),
+								},
+								Groups: []types.GroupIdentifier{
+									{
+										GroupId:   groupID,
+										GroupName: sgName,
+									},
+									{
+										GroupId:   aws.String("sg-01"),
+										GroupName: aws.String("sg-01"),
+									},
+									{
+										GroupId:   aws.String("sg-02"),
+										GroupName: aws.String("sg-02"),
+									},
+								},
+							},
+						},
+					}, nil
+				})
+
+			mockEC2API.EXPECT().
+				ModifyNetworkInterfaceAttribute(ctx, gomock.AssignableToTypeOf(&ec2.ModifyNetworkInterfaceAttributeInput{})).
+				DoAndReturn(func(_ context.Context, input *ec2.ModifyNetworkInterfaceAttributeInput, _ ...func(*ec2.Options)) (*ec2.ModifyNetworkInterfaceAttributeOutput, error) {
+					switch aws.ToString(input.NetworkInterfaceId) {
+					case aws.ToString(eniID):
+						Expect(input.Groups).To(ConsistOf("sg-01", "sg-02"))
+						return &ec2.ModifyNetworkInterfaceAttributeOutput{}, nil
+					case aws.ToString(eni01ID):
+						Expect(input.Groups).To(ConsistOf("sg-01", "sg-02"))
+						return &ec2.ModifyNetworkInterfaceAttributeOutput{}, nil
+					default:
+						return nil, fmt.Errorf("unexpected interface ID: %s", aws.ToString(input.NetworkInterfaceId))
+					}
+				}).
+				Times(2)
+			mockEC2API.EXPECT().
+				DeleteSecurityGroup(ctx, gomock.AssignableToTypeOf(&ec2.DeleteSecurityGroupInput{})).
+				DoAndReturn(func(_ context.Context, input *ec2.DeleteSecurityGroupInput, _ ...func(*ec2.Options)) (*ec2.DeleteSecurityGroupOutput, error) {
+					Expect(aws.ToString(input.GroupId)).To(Equal(aws.ToString(groupID)))
+					return &ec2.DeleteSecurityGroupOutput{}, fmt.Errorf("delete security group error")
+				})
+
+			// 2. Act: Call the function under test
+			err := provider.ReconcileFirewallRulesDeletion(ctx, log, nodeName)
+			// 3. Assert: Check the result
+			Expect(err).To(HaveOccurred())
+		})
+
+		It("should return nil when no aws api call returns an error", func() {
+			// 1. Arrange: Set up mock return values
+			mockEC2API.EXPECT().
+				DescribeSecurityGroups(ctx, gomock.AssignableToTypeOf(&ec2.DescribeSecurityGroupsInput{})).
+				DoAndReturn(func(_ context.Context, input *ec2.DescribeSecurityGroupsInput, _ ...func(*ec2.Options)) (*ec2.DescribeSecurityGroupsOutput, error) {
+					Expect(input.Filters).To(ConsistOf(
+						types.Filter{
+							Name:   aws.String(fmt.Sprintf("tag:%s", TagKeyNodeName)),
+							Values: []string{nodeName},
+						},
+						types.Filter{
+							Name:   aws.String(fmt.Sprintf("tag:%s", TagKeyManaged)),
+							Values: []string{"true"},
+						},
+					))
+					return &ec2.DescribeSecurityGroupsOutput{
+						SecurityGroups: []types.SecurityGroup{
+							{
+								GroupId:   groupID,
+								GroupName: sgName,
+							},
+						},
+					}, nil
+				})
+			mockEC2API.EXPECT().
+				DescribeNetworkInterfaces(ctx, gomock.AssignableToTypeOf(&ec2.DescribeNetworkInterfacesInput{})).
+				DoAndReturn(func(_ context.Context, input *ec2.DescribeNetworkInterfacesInput, _ ...func(*ec2.Options)) (*ec2.DescribeNetworkInterfacesOutput, error) {
+					Expect(input.Filters).To(HaveLen(1))
+					Expect(aws.ToString(input.Filters[0].Name)).To(Equal("group-id"))
+					Expect(input.Filters[0].Values).To(ConsistOf(ptr.ToString(groupID)))
+					return &ec2.DescribeNetworkInterfacesOutput{
+						NetworkInterfaces: []types.NetworkInterface{
+							{
+								NetworkInterfaceId: eniID,
+								Attachment: &types.NetworkInterfaceAttachment{
+									AttachmentId: aws.String("eni-attach-" + testID),
+									InstanceId:   aws.String("i-" + testID),
+								},
+								Groups: []types.GroupIdentifier{
+									{
+										GroupId:   groupID,
+										GroupName: sgName,
+									},
+									{
+										GroupId:   aws.String("sg-01"),
+										GroupName: aws.String("sg-01"),
+									},
+									{
+										GroupId:   aws.String("sg-02"),
+										GroupName: aws.String("sg-02"),
+									},
+								},
+							},
+							{
+								NetworkInterfaceId: eni01ID,
+								Attachment: &types.NetworkInterfaceAttachment{
+									AttachmentId: aws.String("eni-attach-1" + testID),
+									InstanceId:   aws.String("i-1-" + testID),
+								},
+								Groups: []types.GroupIdentifier{
+									{
+										GroupId:   groupID,
+										GroupName: sgName,
+									},
+									{
+										GroupId:   aws.String("sg-01"),
+										GroupName: aws.String("sg-01"),
+									},
+									{
+										GroupId:   aws.String("sg-02"),
+										GroupName: aws.String("sg-02"),
+									},
+								},
+							},
+						},
+					}, nil
+				})
+			mockEC2API.EXPECT().
+				ModifyNetworkInterfaceAttribute(ctx, gomock.AssignableToTypeOf(&ec2.ModifyNetworkInterfaceAttributeInput{})).
+				DoAndReturn(func(_ context.Context, input *ec2.ModifyNetworkInterfaceAttributeInput, _ ...func(*ec2.Options)) (*ec2.ModifyNetworkInterfaceAttributeOutput, error) {
+					switch aws.ToString(input.NetworkInterfaceId) {
+					case aws.ToString(eniID):
+						Expect(input.Groups).To(ConsistOf("sg-01", "sg-02"))
+						return &ec2.ModifyNetworkInterfaceAttributeOutput{}, nil
+					case aws.ToString(eni01ID):
+						Expect(input.Groups).To(ConsistOf("sg-01", "sg-02"))
+						return &ec2.ModifyNetworkInterfaceAttributeOutput{}, nil
+					default:
+						return nil, fmt.Errorf("unexpected interface ID: %s", aws.ToString(input.NetworkInterfaceId))
+					}
+				}).
+				Times(2)
+			mockEC2API.EXPECT().
+				DeleteSecurityGroup(ctx, gomock.AssignableToTypeOf(&ec2.DeleteSecurityGroupInput{})).
+				DoAndReturn(func(_ context.Context, input *ec2.DeleteSecurityGroupInput, _ ...func(*ec2.Options)) (*ec2.DeleteSecurityGroupOutput, error) {
+					Expect(aws.ToString(input.GroupId)).To(Equal(aws.ToString(groupID)))
+					return &ec2.DeleteSecurityGroupOutput{}, nil
+				})
+
+			// 2. Act: Call the function under test
+			err := provider.ReconcileFirewallRulesDeletion(ctx, log, nodeName)
+			// 3. Assert: Check the result
+			Expect(err).ToNot(HaveOccurred())
+		})
+	})
+
+	Context("ReconcileExternalIPDeletion", func() {
+		var (
+			externalIP                  *v1alpha1.ExternalIP
+			testID                      string
+			associationID, allocationID *string
+		)
+
+		BeforeEach(func() {
+			testID = rand.String(5)
+			associationID = aws.String("eipassoc-" + testID)
+			allocationID = aws.String("eipalloc-" + testID)
+			externalIP = &v1alpha1.ExternalIP{
+				ObjectMeta: kmetav1.ObjectMeta{
+					Name:      "external-ip-" + testID,
+					Namespace: "default",
+					Labels: map[string]string{
+						"node-name": "node-" + testID,
+					},
+					Annotations: map[string]string{
+						"kubestatic.io/managed": "true",
+					},
+					Finalizers: []string{
+						"kubestatic.io/external-ip",
+					},
+				},
+				Spec: v1alpha1.ExternalIPSpec{
+					NodeName: "node-" + testID,
+				},
+			}
+		})
+
+		It("should return an error when an AWS API call (DescribeAddresses) fails", func() {
+			// 1. Arrange: Set up mock return values
+			mockEC2API.EXPECT().
+				DescribeAddresses(ctx, gomock.AssignableToTypeOf(&ec2.DescribeAddressesInput{})).
+				DoAndReturn(func(_ context.Context, input *ec2.DescribeAddressesInput, _ ...func(*ec2.Options)) (*ec2.DescribeAddressesOutput, error) {
+					Expect(input.Filters).To(ConsistOf(
+						types.Filter{
+							Name:   aws.String(fmt.Sprintf("tag:%s", TagKeyManaged)),
+							Values: []string{"true"},
+						},
+						types.Filter{
+							Name:   aws.String(fmt.Sprintf("tag:%s", TagKeyExternalIPName)),
+							Values: []string{externalIP.Name},
+						},
+					))
+					return &ec2.DescribeAddressesOutput{}, fmt.Errorf("describe addresses error")
+				})
+
+			// 2. Act: Call the function under test
+			err := provider.ReconcileExternalIPDeletion(ctx, log, externalIP)
+			// 3. Assert: Check the result
+			Expect(err).To(HaveOccurred())
+		})
+
+		It("should return nil when the address is not found", func() {
+			// 1. Arrange: Set up mock return values
+			mockEC2API.EXPECT().
+				DescribeAddresses(ctx, gomock.AssignableToTypeOf(&ec2.DescribeAddressesInput{})).
+				DoAndReturn(func(_ context.Context, input *ec2.DescribeAddressesInput, _ ...func(*ec2.Options)) (*ec2.DescribeAddressesOutput, error) {
+					Expect(input.Filters).To(ConsistOf(
+						types.Filter{
+							Name:   aws.String(fmt.Sprintf("tag:%s", TagKeyManaged)),
+							Values: []string{"true"},
+						},
+						types.Filter{
+							Name:   aws.String(fmt.Sprintf("tag:%s", TagKeyExternalIPName)),
+							Values: []string{externalIP.Name},
+						},
+					))
+					return &ec2.DescribeAddressesOutput{
+						Addresses: []types.Address{},
+					}, nil
+				})
+			// 2. Act: Call the function under test
+			err := provider.ReconcileExternalIPDeletion(ctx, log, externalIP)
+			// 3. Assert: Check the result
+			Expect(err).ToNot(HaveOccurred())
+		})
+
+		It("should return an error when an AWS API call (DisassociateAddress) fails", func() {
+			// 1. Arrange: Set up mock return values
+			mockEC2API.EXPECT().
+				DescribeAddresses(ctx, gomock.AssignableToTypeOf(&ec2.DescribeAddressesInput{})).
+				DoAndReturn(func(_ context.Context, input *ec2.DescribeAddressesInput, _ ...func(*ec2.Options)) (*ec2.DescribeAddressesOutput, error) {
+					Expect(input.Filters).To(ConsistOf(
+						types.Filter{
+							Name:   aws.String(fmt.Sprintf("tag:%s", TagKeyManaged)),
+							Values: []string{"true"},
+						},
+						types.Filter{
+							Name:   aws.String(fmt.Sprintf("tag:%s", TagKeyExternalIPName)),
+							Values: []string{externalIP.Name},
+						},
+					))
+					return &ec2.DescribeAddressesOutput{
+						Addresses: []types.Address{
+							{
+								AssociationId: associationID,
+								AllocationId:  allocationID,
+							},
+						},
+					}, nil
+				})
+			mockEC2API.EXPECT().
+				DisassociateAddress(ctx, gomock.AssignableToTypeOf(&ec2.DisassociateAddressInput{})).
+				DoAndReturn(func(_ context.Context, input *ec2.DisassociateAddressInput, _ ...func(*ec2.Options)) (*ec2.DisassociateAddressOutput, error) {
+					Expect(aws.ToString(input.AssociationId)).To(Equal(aws.ToString(associationID)))
+					return &ec2.DisassociateAddressOutput{}, fmt.Errorf("disassociate address error")
+				})
+
+			// 2. Act: Call the function under test
+			err := provider.ReconcileExternalIPDeletion(ctx, log, externalIP)
+			// 3. Assert: Check the result
+			Expect(err).To(HaveOccurred())
+		})
+
+		It("should return an error when an AWS API call (ReleaseAddress) fails", func() {
+			// 1. Arrange: Set up mock return values
+			mockEC2API.EXPECT().
+				DescribeAddresses(ctx, gomock.AssignableToTypeOf(&ec2.DescribeAddressesInput{})).
+				DoAndReturn(func(_ context.Context, input *ec2.DescribeAddressesInput, _ ...func(*ec2.Options)) (*ec2.DescribeAddressesOutput, error) {
+					Expect(input.Filters).To(ConsistOf(
+						types.Filter{
+							Name:   aws.String(fmt.Sprintf("tag:%s", TagKeyManaged)),
+							Values: []string{"true"},
+						},
+						types.Filter{
+							Name:   aws.String(fmt.Sprintf("tag:%s", TagKeyExternalIPName)),
+							Values: []string{externalIP.Name},
+						},
+					))
+					return &ec2.DescribeAddressesOutput{
+						Addresses: []types.Address{
+							{
+								AssociationId: associationID,
+								AllocationId:  allocationID,
+							},
+						},
+					}, nil
+				})
+			mockEC2API.EXPECT().
+				DisassociateAddress(ctx, gomock.AssignableToTypeOf(&ec2.DisassociateAddressInput{})).
+				DoAndReturn(func(_ context.Context, input *ec2.DisassociateAddressInput, _ ...func(*ec2.Options)) (*ec2.DisassociateAddressOutput, error) {
+					Expect(aws.ToString(input.AssociationId)).To(Equal(aws.ToString(associationID)))
+					return &ec2.DisassociateAddressOutput{}, nil
+				})
+			mockEC2API.EXPECT().
+				ReleaseAddress(ctx, gomock.AssignableToTypeOf(&ec2.ReleaseAddressInput{})).
+				DoAndReturn(func(_ context.Context, input *ec2.ReleaseAddressInput, _ ...func(*ec2.Options)) (*ec2.ReleaseAddressOutput, error) {
+					Expect(aws.ToString(input.AllocationId)).To(Equal(aws.ToString(allocationID)))
+					return &ec2.ReleaseAddressOutput{}, fmt.Errorf("release address error")
+				})
+
+			// 2. Act: Call the function under test
+			err := provider.ReconcileExternalIPDeletion(ctx, log, externalIP)
+			// 3. Assert: Check the result
+			Expect(err).To(HaveOccurred())
+		})
+
+		It("should return nil when no aws api call returns an error", func() {
+			// 1. Arrange: Set up mock return values
+			mockEC2API.EXPECT().
+				DescribeAddresses(ctx, gomock.AssignableToTypeOf(&ec2.DescribeAddressesInput{})).
+				DoAndReturn(func(_ context.Context, input *ec2.DescribeAddressesInput, _ ...func(*ec2.Options)) (*ec2.DescribeAddressesOutput, error) {
+					Expect(input.Filters).To(ConsistOf(
+						types.Filter{
+							Name:   aws.String(fmt.Sprintf("tag:%s", TagKeyManaged)),
+							Values: []string{"true"},
+						},
+						types.Filter{
+							Name:   aws.String(fmt.Sprintf("tag:%s", TagKeyExternalIPName)),
+							Values: []string{externalIP.Name},
+						},
+					))
+					return &ec2.DescribeAddressesOutput{
+						Addresses: []types.Address{
+							{
+								AssociationId: associationID,
+								AllocationId:  allocationID,
+							},
+						},
+					}, nil
+				})
+			mockEC2API.EXPECT().
+				DisassociateAddress(ctx, gomock.AssignableToTypeOf(&ec2.DisassociateAddressInput{})).
+				DoAndReturn(func(_ context.Context, input *ec2.DisassociateAddressInput, _ ...func(*ec2.Options)) (*ec2.DisassociateAddressOutput, error) {
+					Expect(aws.ToString(input.AssociationId)).To(Equal(aws.ToString(associationID)))
+					return &ec2.DisassociateAddressOutput{}, nil
+				})
+			mockEC2API.EXPECT().
+				ReleaseAddress(ctx, gomock.AssignableToTypeOf(&ec2.ReleaseAddressInput{})).
+				DoAndReturn(func(_ context.Context, input *ec2.ReleaseAddressInput, _ ...func(*ec2.Options)) (*ec2.ReleaseAddressOutput, error) {
+					Expect(aws.ToString(input.AllocationId)).To(Equal(aws.ToString(allocationID)))
+					return &ec2.ReleaseAddressOutput{}, nil
+				})
+
+			// 2. Act: Call the function under test
+			err := provider.ReconcileExternalIPDeletion(ctx, log, externalIP)
+			// 3. Assert: Check the result
+			Expect(err).ToNot(HaveOccurred())
+		})
+	})
+
+	Context("ReconcileExternalIP", func() {
+		var (
+			externalIP                                            *v1alpha1.ExternalIP
+			testID, instanceID                                    string
+			allocationID, associationID, publicIP, eniID, eni01ID *string
+		)
+
+		BeforeEach(func() {
+			testID = rand.String(5)
+			allocationID = aws.String("eipalloc-" + testID)
+			externalIP = &v1alpha1.ExternalIP{
+				ObjectMeta: kmetav1.ObjectMeta{
+					Name:      "external-ip-" + testID,
+					Namespace: "default",
+					Labels: map[string]string{
+						"node-name": "node-" + testID,
+					},
+					Annotations: map[string]string{
+						"kubestatic.io/managed": "true",
+					},
+					Finalizers: []string{
+						"kubestatic.io/external-ip",
+					},
+				},
+				Spec: v1alpha1.ExternalIPSpec{
+					NodeName: "node-" + testID,
+				},
+			}
+		})
+
+		When("the instance ID is empty", func() {
+			BeforeEach(func() {
+				instanceID = ""
+			})
+
+			It("should return a pending state and an error when an AWS API call (DescribeAddresses) fails", func() {
+				// 1. Arrange: Set up mock return values
+				mockEC2API.EXPECT().
+					DescribeAddresses(ctx, gomock.AssignableToTypeOf(&ec2.DescribeAddressesInput{})).
+					DoAndReturn(func(_ context.Context, input *ec2.DescribeAddressesInput, _ ...func(*ec2.Options)) (*ec2.DescribeAddressesOutput, error) {
+						Expect(input.Filters).To(ConsistOf(
+							types.Filter{
+								Name:   aws.String(fmt.Sprintf("tag:%s", TagKeyManaged)),
+								Values: []string{"true"},
+							},
+							types.Filter{
+								Name:   aws.String(fmt.Sprintf("tag:%s", TagKeyExternalIPName)),
+								Values: []string{externalIP.Name},
+							},
+						))
+						return &ec2.DescribeAddressesOutput{}, fmt.Errorf("describe addresses error")
+					})
+
+				// 2. Act: Call the function under test
+				status, err := provider.ReconcileExternalIP(ctx, log, instanceID, externalIP)
+				// 3. Assert: Check the result
+				Expect(status).To(MatchFields(IgnoreExtras, Fields{
+					"State": Equal(v1alpha1.ExternalIPStatePending),
+					"Conditions": HaveExactElements(MatchConditions([]kmetav1.Condition{
+						{
+							Type:   v1alpha1.ExternalIPConditionReasonIPCreated,
+							Status: kmetav1.ConditionUnknown,
+							Reason: v1alpha1.FirewallRuleConditionReasonProviderError,
+						},
+					}, "LastTransitionTime", "ObservedGeneration", "Message")),
+				}))
+
+				Expect(err).To(HaveOccurred())
+			})
+
+			It("should return a pending state, specify in the condition when the maximum address is reached and an error when an AWS API call (AllocateAddress) fails", func() {
+				// 1. Arrange: Set up mock return values
+				mockEC2API.EXPECT().
+					DescribeAddresses(ctx, gomock.AssignableToTypeOf(&ec2.DescribeAddressesInput{})).
+					DoAndReturn(func(_ context.Context, input *ec2.DescribeAddressesInput, _ ...func(*ec2.Options)) (*ec2.DescribeAddressesOutput, error) {
+						Expect(input.Filters).To(ConsistOf(
+							types.Filter{
+								Name:   aws.String(fmt.Sprintf("tag:%s", TagKeyManaged)),
+								Values: []string{"true"},
+							},
+							types.Filter{
+								Name:   aws.String(fmt.Sprintf("tag:%s", TagKeyExternalIPName)),
+								Values: []string{externalIP.Name},
+							},
+						))
+						return &ec2.DescribeAddressesOutput{}, nil
+					})
+				mockEC2API.EXPECT().
+					AllocateAddress(ctx, gomock.AssignableToTypeOf(&ec2.AllocateAddressInput{})).
+					DoAndReturn(func(_ context.Context, input *ec2.AllocateAddressInput, _ ...func(*ec2.Options)) (*ec2.AllocateAddressOutput, error) {
+						Expect(input.Domain).To(Equal(types.DomainTypeVpc))
+						Expect(input.TagSpecifications).To(HaveLen(1))
+						Expect(input.TagSpecifications[0].ResourceType).To(Equal(types.ResourceTypeElasticIp))
+						Expect(input.TagSpecifications[0].Tags).To(ConsistOf(
+							types.Tag{
+								Key:   aws.String(string(TagKeyManaged)),
+								Value: aws.String("true"),
+							},
+							types.Tag{
+								Key:   aws.String(string(TagKeyExternalIPName)),
+								Value: aws.String(externalIP.Name),
+							},
+							types.Tag{
+								Key:   aws.String(string(TagKeyInstanceID)),
+								Value: aws.String(instanceID),
+							},
+						))
+
+						return &ec2.AllocateAddressOutput{}, &smithy.GenericAPIError{
+							Code:    "AddressLimitExceeded",
+							Message: "Too many addresses allocated",
+							Fault:   smithy.FaultClient,
+						}
+					})
+
+				// 2. Act: Call the function under test
+				status, err := provider.ReconcileExternalIP(ctx, log, instanceID, externalIP)
+				// 3. Assert: Check the result
+				Expect(status).To(MatchFields(IgnoreExtras, Fields{
+					"State": Equal(v1alpha1.ExternalIPStatePending),
+					"Conditions": HaveExactElements(MatchConditions([]kmetav1.Condition{
+						{
+							Type:    v1alpha1.ExternalIPConditionReasonIPCreated,
+							Status:  kmetav1.ConditionFalse,
+							Reason:  v1alpha1.ExternalIPConditionReasonProviderError,
+							Message: "Could not create address: The maximum number of addresses has been reached",
+						},
+					}, "LastTransitionTime", "ObservedGeneration")),
+				}))
+
+				Expect(err).To(HaveOccurred())
+			})
+
+			It("should return a pending state and an error when an AWS API call (AllocateAddress) fails", func() {
+				// 1. Arrange: Set up mock return values
+				mockEC2API.EXPECT().
+					DescribeAddresses(ctx, gomock.AssignableToTypeOf(&ec2.DescribeAddressesInput{})).
+					DoAndReturn(func(_ context.Context, input *ec2.DescribeAddressesInput, _ ...func(*ec2.Options)) (*ec2.DescribeAddressesOutput, error) {
+						Expect(input.Filters).To(ConsistOf(
+							types.Filter{
+								Name:   aws.String(fmt.Sprintf("tag:%s", TagKeyManaged)),
+								Values: []string{"true"},
+							},
+							types.Filter{
+								Name:   aws.String(fmt.Sprintf("tag:%s", TagKeyExternalIPName)),
+								Values: []string{externalIP.Name},
+							},
+						))
+						return &ec2.DescribeAddressesOutput{}, nil
+					})
+				mockEC2API.EXPECT().
+					AllocateAddress(ctx, gomock.AssignableToTypeOf(&ec2.AllocateAddressInput{})).
+					DoAndReturn(func(_ context.Context, input *ec2.AllocateAddressInput, _ ...func(*ec2.Options)) (*ec2.AllocateAddressOutput, error) {
+						Expect(input.Domain).To(Equal(types.DomainTypeVpc))
+						Expect(input.TagSpecifications).To(HaveLen(1))
+						Expect(input.TagSpecifications[0].ResourceType).To(Equal(types.ResourceTypeElasticIp))
+						Expect(input.TagSpecifications[0].Tags).To(ConsistOf(
+							types.Tag{
+								Key:   aws.String(string(TagKeyManaged)),
+								Value: aws.String("true"),
+							},
+							types.Tag{
+								Key:   aws.String(string(TagKeyExternalIPName)),
+								Value: aws.String(externalIP.Name),
+							},
+							types.Tag{
+								Key:   aws.String(string(TagKeyInstanceID)),
+								Value: aws.String(instanceID),
+							},
+						))
+
+						return &ec2.AllocateAddressOutput{}, fmt.Errorf("allocate address error")
+					})
+
+				// 2. Act: Call the function under test
+				status, err := provider.ReconcileExternalIP(ctx, log, instanceID, externalIP)
+				// 3. Assert: Check the result
+				Expect(status).To(MatchFields(IgnoreExtras, Fields{
+					"State": Equal(v1alpha1.ExternalIPStatePending),
+					"Conditions": HaveExactElements(MatchConditions([]kmetav1.Condition{
+						{
+							Type:   v1alpha1.ExternalIPConditionReasonIPCreated,
+							Status: kmetav1.ConditionFalse,
+							Reason: v1alpha1.ExternalIPConditionReasonProviderError,
+						},
+					}, "LastTransitionTime", "ObservedGeneration", "Message")),
+				}))
+
+				Expect(err).To(HaveOccurred())
+			})
+
+			It("should return a pending state and an error when an AWS API call (DescribeAddresses after address creation) fails", func() {
+				// 1. Arrange: Set up mock return values
+				mockEC2API.EXPECT().
+					DescribeAddresses(ctx, gomock.AssignableToTypeOf(&ec2.DescribeAddressesInput{})).
+					DoAndReturn(func(_ context.Context, input *ec2.DescribeAddressesInput, _ ...func(*ec2.Options)) (*ec2.DescribeAddressesOutput, error) {
+						switch len(input.Filters) {
+						case 2:
+							Expect(input.Filters).To(ConsistOf(
+								types.Filter{
+									Name:   aws.String(fmt.Sprintf("tag:%s", TagKeyManaged)),
+									Values: []string{"true"},
+								},
+								types.Filter{
+									Name:   aws.String(fmt.Sprintf("tag:%s", TagKeyExternalIPName)),
+									Values: []string{externalIP.Name},
+								},
+							))
+							return &ec2.DescribeAddressesOutput{}, nil
+						case 3:
+							Expect(input.Filters).To(ConsistOf(
+								types.Filter{
+									Name:   aws.String(fmt.Sprintf("tag:%s", TagKeyManaged)),
+									Values: []string{"true"},
+								},
+								types.Filter{
+									Name:   aws.String(fmt.Sprintf("tag:%s", TagKeyExternalIPName)),
+									Values: []string{externalIP.Name},
+								},
+								types.Filter{
+									Name:   aws.String("allocation-id"),
+									Values: []string{aws.ToString(allocationID)},
+								},
+							))
+							return &ec2.DescribeAddressesOutput{}, fmt.Errorf("describe addresses error")
+						default:
+							return nil, fmt.Errorf("unexpected number of filter: %d", len(input.Filters))
+						}
+					}).Times(2)
+				mockEC2API.EXPECT().
+					AllocateAddress(ctx, gomock.AssignableToTypeOf(&ec2.AllocateAddressInput{})).
+					DoAndReturn(func(_ context.Context, input *ec2.AllocateAddressInput, _ ...func(*ec2.Options)) (*ec2.AllocateAddressOutput, error) {
+						Expect(input.Domain).To(Equal(types.DomainTypeVpc))
+						Expect(input.TagSpecifications).To(HaveLen(1))
+						Expect(input.TagSpecifications[0].ResourceType).To(Equal(types.ResourceTypeElasticIp))
+						Expect(input.TagSpecifications[0].Tags).To(ConsistOf(
+							types.Tag{
+								Key:   aws.String(string(TagKeyManaged)),
+								Value: aws.String("true"),
+							},
+							types.Tag{
+								Key:   aws.String(string(TagKeyExternalIPName)),
+								Value: aws.String(externalIP.Name),
+							},
+							types.Tag{
+								Key:   aws.String(string(TagKeyInstanceID)),
+								Value: aws.String(instanceID),
+							},
+						))
+
+						return &ec2.AllocateAddressOutput{
+							AllocationId: allocationID,
+						}, nil
+					})
+
+				// 2. Act: Call the function under test
+				status, err := provider.ReconcileExternalIP(ctx, log, instanceID, externalIP)
+				// 3. Assert: Check the result
+				Expect(status).To(MatchFields(IgnoreExtras, Fields{
+					"State": Equal(v1alpha1.ExternalIPStatePending),
+					"Conditions": HaveExactElements(MatchConditions([]kmetav1.Condition{
+						{
+							Type:   v1alpha1.ExternalIPConditionReasonIPCreated,
+							Status: kmetav1.ConditionTrue,
+							Reason: v1alpha1.ExternalIPConditionReasonProviderError,
+						},
+					}, "LastTransitionTime", "ObservedGeneration", "Message")),
+				}))
+
+				Expect(err).To(HaveOccurred())
+			})
+
+			When("the address is not associated to any instance", func() {
+				It("should return a reserved state and specify IPCreation and NetworkInterfaceAssociation condition", func() {
+					// 1. Arrange: Set up mock return values
+					mockEC2API.EXPECT().
+						DescribeAddresses(ctx, gomock.AssignableToTypeOf(&ec2.DescribeAddressesInput{})).
+						DoAndReturn(func(_ context.Context, input *ec2.DescribeAddressesInput, _ ...func(*ec2.Options)) (*ec2.DescribeAddressesOutput, error) {
+							switch len(input.Filters) {
+							case 2:
+								Expect(input.Filters).To(ConsistOf(
+									types.Filter{
+										Name:   aws.String(fmt.Sprintf("tag:%s", TagKeyManaged)),
+										Values: []string{"true"},
+									},
+									types.Filter{
+										Name:   aws.String(fmt.Sprintf("tag:%s", TagKeyExternalIPName)),
+										Values: []string{externalIP.Name},
+									},
+								))
+								return &ec2.DescribeAddressesOutput{}, nil
+							case 3:
+								Expect(input.Filters).To(ConsistOf(
+									types.Filter{
+										Name:   aws.String(fmt.Sprintf("tag:%s", TagKeyManaged)),
+										Values: []string{"true"},
+									},
+									types.Filter{
+										Name:   aws.String(fmt.Sprintf("tag:%s", TagKeyExternalIPName)),
+										Values: []string{externalIP.Name},
+									},
+									types.Filter{
+										Name:   aws.String("allocation-id"),
+										Values: []string{aws.ToString(allocationID)},
+									},
+								))
+								return &ec2.DescribeAddressesOutput{
+									Addresses: []types.Address{
+										{
+											AllocationId: allocationID,
+										},
+									},
+								}, nil
+							default:
+								return nil, fmt.Errorf("unexpected number of filter: %d", len(input.Filters))
+							}
+						}).Times(2)
+					mockEC2API.EXPECT().
+						AllocateAddress(ctx, gomock.AssignableToTypeOf(&ec2.AllocateAddressInput{})).
+						DoAndReturn(func(_ context.Context, input *ec2.AllocateAddressInput, _ ...func(*ec2.Options)) (*ec2.AllocateAddressOutput, error) {
+							Expect(input.Domain).To(Equal(types.DomainTypeVpc))
+							Expect(input.TagSpecifications).To(HaveLen(1))
+							Expect(input.TagSpecifications[0].ResourceType).To(Equal(types.ResourceTypeElasticIp))
+							Expect(input.TagSpecifications[0].Tags).To(ConsistOf(
+								types.Tag{
+									Key:   aws.String(string(TagKeyManaged)),
+									Value: aws.String("true"),
+								},
+								types.Tag{
+									Key:   aws.String(string(TagKeyExternalIPName)),
+									Value: aws.String(externalIP.Name),
+								},
+								types.Tag{
+									Key:   aws.String(string(TagKeyInstanceID)),
+									Value: aws.String(instanceID),
+								},
+							))
+
+							return &ec2.AllocateAddressOutput{
+								AllocationId: allocationID,
+							}, nil
+						})
+
+					// 2. Act: Call the function under test
+					status, err := provider.ReconcileExternalIP(ctx, log, instanceID, externalIP)
+					// 3. Assert: Check the result
+					Expect(status).To(MatchFields(IgnoreExtras, Fields{
+						"State": Equal(v1alpha1.ExternalIPStateReserved),
+						"Conditions": ConsistOf(MatchConditions([]kmetav1.Condition{
+							{
+								Type:   v1alpha1.ExternalIPConditionReasonIPCreated,
+								Status: kmetav1.ConditionTrue,
+								Reason: v1alpha1.ExternalIPConditionReasonIPCreated,
+							},
+							{
+								Type:   v1alpha1.ExternalIPConditionTypeNetworkInterfaceAssociated,
+								Status: kmetav1.ConditionFalse,
+								Reason: v1alpha1.ExternalIPConditionReasonProviderError,
+							},
+						}, "LastTransitionTime", "ObservedGeneration", "Message")),
+					}))
+					Expect(err).ToNot(HaveOccurred())
+				})
+			})
+
+			When("the address is associated to an instance", func() {
+				associationID = aws.String("eipassoc-" + testID)
+
+				It("should return a reserved state and specify IPCreation and NetworkInterfaceAssociation condition and an error when an AWS API call (DisassociateAddress) fails", func() {
+					// 1. Arrange: Set up mock return values
+					mockEC2API.EXPECT().
+						DescribeAddresses(ctx, gomock.AssignableToTypeOf(&ec2.DescribeAddressesInput{})).
+						DoAndReturn(func(_ context.Context, input *ec2.DescribeAddressesInput, _ ...func(*ec2.Options)) (*ec2.DescribeAddressesOutput, error) {
+							switch len(input.Filters) {
+							case 2:
+								Expect(input.Filters).To(ConsistOf(
+									types.Filter{
+										Name:   aws.String(fmt.Sprintf("tag:%s", TagKeyManaged)),
+										Values: []string{"true"},
+									},
+									types.Filter{
+										Name:   aws.String(fmt.Sprintf("tag:%s", TagKeyExternalIPName)),
+										Values: []string{externalIP.Name},
+									},
+								))
+								return &ec2.DescribeAddressesOutput{}, nil
+							case 3:
+								Expect(input.Filters).To(ConsistOf(
+									types.Filter{
+										Name:   aws.String(fmt.Sprintf("tag:%s", TagKeyManaged)),
+										Values: []string{"true"},
+									},
+									types.Filter{
+										Name:   aws.String(fmt.Sprintf("tag:%s", TagKeyExternalIPName)),
+										Values: []string{externalIP.Name},
+									},
+									types.Filter{
+										Name:   aws.String("allocation-id"),
+										Values: []string{aws.ToString(allocationID)},
+									},
+								))
+								return &ec2.DescribeAddressesOutput{
+									Addresses: []types.Address{
+										{
+											AllocationId:  allocationID,
+											AssociationId: associationID,
+										},
+									},
+								}, nil
+							default:
+								return nil, fmt.Errorf("unexpected number of filter: %d", len(input.Filters))
+							}
+						}).Times(2)
+					mockEC2API.EXPECT().
+						AllocateAddress(ctx, gomock.AssignableToTypeOf(&ec2.AllocateAddressInput{})).
+						DoAndReturn(func(_ context.Context, input *ec2.AllocateAddressInput, _ ...func(*ec2.Options)) (*ec2.AllocateAddressOutput, error) {
+							Expect(input.Domain).To(Equal(types.DomainTypeVpc))
+							Expect(input.TagSpecifications).To(HaveLen(1))
+							Expect(input.TagSpecifications[0].ResourceType).To(Equal(types.ResourceTypeElasticIp))
+							Expect(input.TagSpecifications[0].Tags).To(ConsistOf(
+								types.Tag{
+									Key:   aws.String(string(TagKeyManaged)),
+									Value: aws.String("true"),
+								},
+								types.Tag{
+									Key:   aws.String(string(TagKeyExternalIPName)),
+									Value: aws.String(externalIP.Name),
+								},
+								types.Tag{
+									Key:   aws.String(string(TagKeyInstanceID)),
+									Value: aws.String(instanceID),
+								},
+							))
+
+							return &ec2.AllocateAddressOutput{
+								AllocationId: allocationID,
+							}, nil
+						})
+					mockEC2API.EXPECT().
+						DisassociateAddress(ctx, gomock.AssignableToTypeOf(&ec2.DisassociateAddressInput{})).
+						DoAndReturn(func(_ context.Context, input *ec2.DisassociateAddressInput, _ ...func(*ec2.Options)) (*ec2.DisassociateAddressOutput, error) {
+							Expect(aws.ToString(input.AssociationId)).To(Equal(aws.ToString(associationID)))
+							return &ec2.DisassociateAddressOutput{}, fmt.Errorf("disassociate address error")
+						})
+
+					// 2. Act: Call the function under test
+					status, err := provider.ReconcileExternalIP(ctx, log, instanceID, externalIP)
+					// 3. Assert: Check the result
+					Expect(status).To(MatchFields(IgnoreExtras, Fields{
+						"State": Equal(v1alpha1.ExternalIPStateReserved),
+						"Conditions": ConsistOf(MatchConditions([]kmetav1.Condition{
+							{
+								Type:   v1alpha1.ExternalIPConditionReasonIPCreated,
+								Status: kmetav1.ConditionTrue,
+								Reason: v1alpha1.ExternalIPConditionReasonIPCreated,
+							},
+							{
+								Type:   v1alpha1.ExternalIPConditionTypeNetworkInterfaceAssociated,
+								Status: kmetav1.ConditionFalse,
+								Reason: v1alpha1.ExternalIPConditionReasonProviderError,
+							},
+						}, "LastTransitionTime", "ObservedGeneration", "Message")),
+					}))
+					Expect(err).To(HaveOccurred())
+				})
+
+				It("should return a reserved state and specify IPCreation and NetworkInterfaceAssociation condition", func() {
+					// 1. Arrange: Set up mock return values
+					mockEC2API.EXPECT().
+						DescribeAddresses(ctx, gomock.AssignableToTypeOf(&ec2.DescribeAddressesInput{})).
+						DoAndReturn(func(_ context.Context, input *ec2.DescribeAddressesInput, _ ...func(*ec2.Options)) (*ec2.DescribeAddressesOutput, error) {
+							switch len(input.Filters) {
+							case 2:
+								Expect(input.Filters).To(ConsistOf(
+									types.Filter{
+										Name:   aws.String(fmt.Sprintf("tag:%s", TagKeyManaged)),
+										Values: []string{"true"},
+									},
+									types.Filter{
+										Name:   aws.String(fmt.Sprintf("tag:%s", TagKeyExternalIPName)),
+										Values: []string{externalIP.Name},
+									},
+								))
+								return &ec2.DescribeAddressesOutput{}, nil
+							case 3:
+								Expect(input.Filters).To(ConsistOf(
+									types.Filter{
+										Name:   aws.String(fmt.Sprintf("tag:%s", TagKeyManaged)),
+										Values: []string{"true"},
+									},
+									types.Filter{
+										Name:   aws.String(fmt.Sprintf("tag:%s", TagKeyExternalIPName)),
+										Values: []string{externalIP.Name},
+									},
+									types.Filter{
+										Name:   aws.String("allocation-id"),
+										Values: []string{aws.ToString(allocationID)},
+									},
+								))
+								return &ec2.DescribeAddressesOutput{
+									Addresses: []types.Address{
+										{
+											AllocationId:  allocationID,
+											AssociationId: associationID,
+										},
+									},
+								}, nil
+							default:
+								return nil, fmt.Errorf("unexpected number of filter: %d", len(input.Filters))
+							}
+						}).Times(2)
+					mockEC2API.EXPECT().
+						AllocateAddress(ctx, gomock.AssignableToTypeOf(&ec2.AllocateAddressInput{})).
+						DoAndReturn(func(_ context.Context, input *ec2.AllocateAddressInput, _ ...func(*ec2.Options)) (*ec2.AllocateAddressOutput, error) {
+							Expect(input.Domain).To(Equal(types.DomainTypeVpc))
+							Expect(input.TagSpecifications).To(HaveLen(1))
+							Expect(input.TagSpecifications[0].ResourceType).To(Equal(types.ResourceTypeElasticIp))
+							Expect(input.TagSpecifications[0].Tags).To(ConsistOf(
+								types.Tag{
+									Key:   aws.String(string(TagKeyManaged)),
+									Value: aws.String("true"),
+								},
+								types.Tag{
+									Key:   aws.String(string(TagKeyExternalIPName)),
+									Value: aws.String(externalIP.Name),
+								},
+								types.Tag{
+									Key:   aws.String(string(TagKeyInstanceID)),
+									Value: aws.String(instanceID),
+								},
+							))
+
+							return &ec2.AllocateAddressOutput{
+								AllocationId: allocationID,
+							}, nil
+						})
+					mockEC2API.EXPECT().
+						DisassociateAddress(ctx, gomock.AssignableToTypeOf(&ec2.DisassociateAddressInput{})).
+						DoAndReturn(func(_ context.Context, input *ec2.DisassociateAddressInput, _ ...func(*ec2.Options)) (*ec2.DisassociateAddressOutput, error) {
+							Expect(aws.ToString(input.AssociationId)).To(Equal(aws.ToString(associationID)))
+							return &ec2.DisassociateAddressOutput{}, nil
+						})
+
+					// 2. Act: Call the function under test
+					status, err := provider.ReconcileExternalIP(ctx, log, instanceID, externalIP)
+					// 3. Assert: Check the result
+					Expect(status).To(MatchFields(IgnoreExtras, Fields{
+						"State":      Equal(v1alpha1.ExternalIPStateReserved),
+						"InstanceID": BeNil(),
+						"Conditions": ConsistOf(MatchConditions([]kmetav1.Condition{
+							{
+								Type:   v1alpha1.ExternalIPConditionReasonIPCreated,
+								Status: kmetav1.ConditionTrue,
+								Reason: v1alpha1.ExternalIPConditionReasonIPCreated,
+							},
+							{
+								Type:   v1alpha1.ExternalIPConditionTypeNetworkInterfaceAssociated,
+								Status: kmetav1.ConditionFalse,
+								Reason: v1alpha1.ExternalIPConditionReasonProviderError,
+							},
+						}, "LastTransitionTime", "ObservedGeneration", "Message")),
+					}))
+					Expect(err).ToNot(HaveOccurred())
+				})
+			})
+		})
+
+		When("the instance ID is not empty", func() {
+			BeforeEach(func() {
+				instanceID = "i-" + testID
+			})
+
+			It("should return a pending state and an error when an AWS API call (DescribeAddresses) fails", func() {
+				// 1. Arrange: Set up mock return values
+				mockEC2API.EXPECT().
+					DescribeAddresses(ctx, gomock.AssignableToTypeOf(&ec2.DescribeAddressesInput{})).
+					DoAndReturn(func(_ context.Context, input *ec2.DescribeAddressesInput, _ ...func(*ec2.Options)) (*ec2.DescribeAddressesOutput, error) {
+						Expect(input.Filters).To(ConsistOf(
+							types.Filter{
+								Name:   aws.String(fmt.Sprintf("tag:%s", TagKeyManaged)),
+								Values: []string{"true"},
+							},
+							types.Filter{
+								Name:   aws.String(fmt.Sprintf("tag:%s", TagKeyExternalIPName)),
+								Values: []string{externalIP.Name},
+							},
+						))
+						return &ec2.DescribeAddressesOutput{}, fmt.Errorf("describe addresses error")
+					})
+
+				// 2. Act: Call the function under test
+				status, err := provider.ReconcileExternalIP(ctx, log, instanceID, externalIP)
+				// 3. Assert: Check the result
+				Expect(status).To(MatchFields(IgnoreExtras, Fields{
+					"State": Equal(v1alpha1.ExternalIPStatePending),
+					"Conditions": HaveExactElements(MatchConditions([]kmetav1.Condition{
+						{
+							Type:   v1alpha1.ExternalIPConditionReasonIPCreated,
+							Status: kmetav1.ConditionUnknown,
+							Reason: v1alpha1.ExternalIPConditionReasonProviderError,
+						},
+					}, "LastTransitionTime", "ObservedGeneration", "Message")),
+				}))
+				Expect(err).To(HaveOccurred())
+			})
+
+			It("should return a reserved state and an error when an AWS API call (DescribeInstances) fails", func() {
+				// 1. Arrange: Set up mock return values
+				mockEC2API.EXPECT().
+					DescribeAddresses(ctx, gomock.AssignableToTypeOf(&ec2.DescribeAddressesInput{})).
+					DoAndReturn(func(_ context.Context, input *ec2.DescribeAddressesInput, _ ...func(*ec2.Options)) (*ec2.DescribeAddressesOutput, error) {
+						Expect(input.Filters).To(ConsistOf(
+							types.Filter{
+								Name:   aws.String(fmt.Sprintf("tag:%s", TagKeyManaged)),
+								Values: []string{"true"},
+							},
+							types.Filter{
+								Name:   aws.String(fmt.Sprintf("tag:%s", TagKeyExternalIPName)),
+								Values: []string{externalIP.Name},
+							},
+						))
+						return &ec2.DescribeAddressesOutput{
+							Addresses: []types.Address{
+								{
+									AllocationId:  allocationID,
+									AssociationId: associationID,
+								},
+							},
+						}, nil
+					})
+				mockEC2API.EXPECT().
+					DescribeInstances(ctx, gomock.AssignableToTypeOf(&ec2.DescribeInstancesInput{})).
+					DoAndReturn(func(_ context.Context, input *ec2.DescribeInstancesInput, _ ...func(*ec2.Options)) (*ec2.DescribeInstancesOutput, error) {
+						Expect(input.InstanceIds).To(ConsistOf(instanceID))
+						return &ec2.DescribeInstancesOutput{}, fmt.Errorf("describe instances error")
+					})
+
+				// 2. Act: Call the function under test
+				status, err := provider.ReconcileExternalIP(ctx, log, instanceID, externalIP)
+				// 3. Assert: Check the result
+				Expect(status).To(MatchFields(IgnoreExtras, Fields{
+					"State": Equal(v1alpha1.ExternalIPStateReserved),
+					"Conditions": HaveExactElements(MatchConditions([]kmetav1.Condition{
+						{
+							Type:   v1alpha1.ExternalIPConditionReasonIPCreated,
+							Status: kmetav1.ConditionTrue,
+							Reason: v1alpha1.ExternalIPConditionReasonIPCreated,
+						},
+					}, "LastTransitionTime", "ObservedGeneration", "Message")),
+				}))
+				Expect(err).To(HaveOccurred())
+			})
+
+			It("should return a reserved state and an error when no instance is found with API call (DescribeInstances)", func() {
+				// 1. Arrange: Set up mock return values
+				mockEC2API.EXPECT().
+					DescribeAddresses(ctx, gomock.AssignableToTypeOf(&ec2.DescribeAddressesInput{})).
+					DoAndReturn(func(_ context.Context, input *ec2.DescribeAddressesInput, _ ...func(*ec2.Options)) (*ec2.DescribeAddressesOutput, error) {
+						Expect(input.Filters).To(ConsistOf(
+							types.Filter{
+								Name:   aws.String(fmt.Sprintf("tag:%s", TagKeyManaged)),
+								Values: []string{"true"},
+							},
+							types.Filter{
+								Name:   aws.String(fmt.Sprintf("tag:%s", TagKeyExternalIPName)),
+								Values: []string{externalIP.Name},
+							},
+						))
+						return &ec2.DescribeAddressesOutput{
+							Addresses: []types.Address{
+								{
+									AllocationId:  allocationID,
+									AssociationId: associationID,
+								},
+							},
+						}, nil
+					})
+				mockEC2API.EXPECT().
+					DescribeInstances(ctx, gomock.AssignableToTypeOf(&ec2.DescribeInstancesInput{})).
+					DoAndReturn(func(_ context.Context, input *ec2.DescribeInstancesInput, _ ...func(*ec2.Options)) (*ec2.DescribeInstancesOutput, error) {
+						Expect(input.InstanceIds).To(ConsistOf(instanceID))
+						return &ec2.DescribeInstancesOutput{
+							Reservations: []types.Reservation{},
+						}, nil
+					})
+
+				// 2. Act: Call the function under test
+				status, err := provider.ReconcileExternalIP(ctx, log, instanceID, externalIP)
+				// 3. Assert: Check the result
+				Expect(status).To(MatchFields(IgnoreExtras, Fields{
+					"State": Equal(v1alpha1.ExternalIPStateReserved),
+					"Conditions": HaveExactElements(MatchConditions([]kmetav1.Condition{
+						{
+							Type:   v1alpha1.ExternalIPConditionReasonIPCreated,
+							Status: kmetav1.ConditionTrue,
+							Reason: v1alpha1.ExternalIPConditionReasonIPCreated,
+						},
+					}, "LastTransitionTime", "ObservedGeneration", "Message")),
+				}))
+				Expect(err).To(HaveOccurred())
+			})
+
+			It("should return a reserved state and an error when the instance has no ENI with public IP", func() {
+				// 1. Arrange: Set up mock return values
+				mockEC2API.EXPECT().
+					DescribeAddresses(ctx, gomock.AssignableToTypeOf(&ec2.DescribeAddressesInput{})).
+					DoAndReturn(func(_ context.Context, input *ec2.DescribeAddressesInput, _ ...func(*ec2.Options)) (*ec2.DescribeAddressesOutput, error) {
+						Expect(input.Filters).To(ConsistOf(
+							types.Filter{
+								Name:   aws.String(fmt.Sprintf("tag:%s", TagKeyManaged)),
+								Values: []string{"true"},
+							},
+							types.Filter{
+								Name:   aws.String(fmt.Sprintf("tag:%s", TagKeyExternalIPName)),
+								Values: []string{externalIP.Name},
+							},
+						))
+						return &ec2.DescribeAddressesOutput{
+							Addresses: []types.Address{
+								{
+									AllocationId:  allocationID,
+									AssociationId: associationID,
+								},
+							},
+						}, nil
+					})
+				mockEC2API.EXPECT().
+					DescribeInstances(ctx, gomock.AssignableToTypeOf(&ec2.DescribeInstancesInput{})).
+					DoAndReturn(func(_ context.Context, input *ec2.DescribeInstancesInput, _ ...func(*ec2.Options)) (*ec2.DescribeInstancesOutput, error) {
+						Expect(input.InstanceIds).To(ConsistOf(instanceID))
+						return &ec2.DescribeInstancesOutput{
+							Reservations: []types.Reservation{
+								{
+									Instances: []types.Instance{
+										{
+											InstanceId: aws.String(instanceID),
+											NetworkInterfaces: []types.InstanceNetworkInterface{
+												{
+													Association: &types.InstanceNetworkInterfaceAssociation{
+														IpOwnerId: aws.String("aws"),
+													},
+												},
+											},
+										},
+									},
+								},
+							},
+						}, nil
+					})
+
+				// 2. Act: Call the function under test
+				status, err := provider.ReconcileExternalIP(ctx, log, instanceID, externalIP)
+				// 3. Assert: Check the result
+				Expect(status).To(MatchFields(IgnoreExtras, Fields{
+					"State": Equal(v1alpha1.ExternalIPStateReserved),
+					"Conditions": HaveExactElements(MatchConditions([]kmetav1.Condition{
+						{
+							Type:   v1alpha1.ExternalIPConditionReasonIPCreated,
+							Status: kmetav1.ConditionTrue,
+							Reason: v1alpha1.ExternalIPConditionReasonIPCreated,
+						},
+						{
+							Type:   v1alpha1.ExternalIPConditionTypeNetworkInterfaceAssociated,
+							Status: kmetav1.ConditionUnknown,
+							Reason: v1alpha1.ExternalIPConditionReasonProviderError,
+						},
+					}, "LastTransitionTime", "ObservedGeneration", "Message")),
+				}))
+				Expect(err).To(HaveOccurred())
+			})
+
+			It("should return a reserved state and an error when the instance has no ENI with public IP", func() {
+				// 1. Arrange: Set up mock return values
+				mockEC2API.EXPECT().
+					DescribeAddresses(ctx, gomock.AssignableToTypeOf(&ec2.DescribeAddressesInput{})).
+					DoAndReturn(func(_ context.Context, input *ec2.DescribeAddressesInput, _ ...func(*ec2.Options)) (*ec2.DescribeAddressesOutput, error) {
+						Expect(input.Filters).To(ConsistOf(
+							types.Filter{
+								Name:   aws.String(fmt.Sprintf("tag:%s", TagKeyManaged)),
+								Values: []string{"true"},
+							},
+							types.Filter{
+								Name:   aws.String(fmt.Sprintf("tag:%s", TagKeyExternalIPName)),
+								Values: []string{externalIP.Name},
+							},
+						))
+						return &ec2.DescribeAddressesOutput{
+							Addresses: []types.Address{
+								{
+									AllocationId:  allocationID,
+									AssociationId: associationID,
+								},
+							},
+						}, nil
+					})
+				mockEC2API.EXPECT().
+					DescribeInstances(ctx, gomock.AssignableToTypeOf(&ec2.DescribeInstancesInput{})).
+					DoAndReturn(func(_ context.Context, input *ec2.DescribeInstancesInput, _ ...func(*ec2.Options)) (*ec2.DescribeInstancesOutput, error) {
+						Expect(input.InstanceIds).To(ConsistOf(instanceID))
+						return &ec2.DescribeInstancesOutput{
+							Reservations: []types.Reservation{
+								{
+									Instances: []types.Instance{
+										{
+											InstanceId: aws.String(instanceID),
+											NetworkInterfaces: []types.InstanceNetworkInterface{
+												{
+													Association: &types.InstanceNetworkInterfaceAssociation{
+														IpOwnerId: aws.String("aws"),
+													},
+												},
+											},
+										},
+									},
+								},
+							},
+						}, nil
+					})
+
+				// 2. Act: Call the function under test
+				status, err := provider.ReconcileExternalIP(ctx, log, instanceID, externalIP)
+				// 3. Assert: Check the result
+				Expect(status).To(MatchFields(IgnoreExtras, Fields{
+					"State": Equal(v1alpha1.ExternalIPStateReserved),
+					"Conditions": HaveExactElements(MatchConditions([]kmetav1.Condition{
+						{
+							Type:   v1alpha1.ExternalIPConditionReasonIPCreated,
+							Status: kmetav1.ConditionTrue,
+							Reason: v1alpha1.ExternalIPConditionReasonIPCreated,
+						},
+						{
+							Type:   v1alpha1.ExternalIPConditionTypeNetworkInterfaceAssociated,
+							Status: kmetav1.ConditionUnknown,
+							Reason: v1alpha1.ExternalIPConditionReasonProviderError,
+						},
+					}, "LastTransitionTime", "ObservedGeneration", "Message")),
+				}))
+				Expect(err).To(HaveOccurred())
+			})
+
+			When("the address has a network interface associated", func() {
+				publicIP = aws.String("ip-" + testID)
+				eniID = aws.String("eni-" + testID)
+				eni01ID = aws.String("eni-01-" + testID)
+				It("should return an associated state if it's associated with the current instance", func() {
+					// 1. Arrange: Set up mock return values
+					mockEC2API.EXPECT().
+						DescribeAddresses(ctx, gomock.AssignableToTypeOf(&ec2.DescribeAddressesInput{})).
+						DoAndReturn(func(_ context.Context, input *ec2.DescribeAddressesInput, _ ...func(*ec2.Options)) (*ec2.DescribeAddressesOutput, error) {
+							Expect(input.Filters).To(ConsistOf(
+								types.Filter{
+									Name:   aws.String(fmt.Sprintf("tag:%s", TagKeyManaged)),
+									Values: []string{"true"},
+								},
+								types.Filter{
+									Name:   aws.String(fmt.Sprintf("tag:%s", TagKeyExternalIPName)),
+									Values: []string{externalIP.Name},
+								},
+							))
+							return &ec2.DescribeAddressesOutput{
+								Addresses: []types.Address{
+									{
+										AllocationId:       allocationID,
+										AssociationId:      associationID,
+										NetworkInterfaceId: eniID,
+									},
+								},
+							}, nil
+						})
+					mockEC2API.EXPECT().
+						DescribeInstances(ctx, gomock.AssignableToTypeOf(&ec2.DescribeInstancesInput{})).
+						DoAndReturn(func(_ context.Context, input *ec2.DescribeInstancesInput, _ ...func(*ec2.Options)) (*ec2.DescribeInstancesOutput, error) {
+							Expect(input.InstanceIds).To(ConsistOf(instanceID))
+							return &ec2.DescribeInstancesOutput{
+								Reservations: []types.Reservation{
+									{
+										Instances: []types.Instance{
+											{
+												InstanceId: aws.String(instanceID),
+												NetworkInterfaces: []types.InstanceNetworkInterface{
+													{
+														Association: &types.InstanceNetworkInterfaceAssociation{
+															IpOwnerId: aws.String("aws"),
+															PublicIp:  publicIP,
+														},
+														NetworkInterfaceId: eniID,
+													},
+												},
+											},
+										},
+									},
+								},
+							}, nil
+						})
+
+					// 2. Act: Call the function under test
+					status, err := provider.ReconcileExternalIP(ctx, log, instanceID, externalIP)
+					// 3. Assert: Check the result
+					Expect(status).To(MatchFields(IgnoreExtras, Fields{
+						"State": Equal(v1alpha1.ExternalIPStateAssociated),
+						"Conditions": HaveExactElements(MatchConditions([]kmetav1.Condition{
+							{
+								Type:   v1alpha1.ExternalIPConditionReasonIPCreated,
+								Status: kmetav1.ConditionTrue,
+								Reason: v1alpha1.ExternalIPConditionReasonIPCreated,
+							},
+							{
+								Type:   v1alpha1.ExternalIPConditionTypeNetworkInterfaceAssociated,
+								Status: kmetav1.ConditionTrue,
+								Reason: v1alpha1.ExternalIPConditionReasonNetworkInterfaceAssociated,
+							},
+						}, "LastTransitionTime", "ObservedGeneration", "Message")),
+					}))
+					Expect(err).ToNot(HaveOccurred())
+				})
+
+				It("should return a reserved state and an error if it's associated with a different instance and the AWS API call (DisassociateAddress) fails", func() {
+					// 1. Arrange: Set up mock return values
+					mockEC2API.EXPECT().
+						DescribeAddresses(ctx, gomock.AssignableToTypeOf(&ec2.DescribeAddressesInput{})).
+						DoAndReturn(func(_ context.Context, input *ec2.DescribeAddressesInput, _ ...func(*ec2.Options)) (*ec2.DescribeAddressesOutput, error) {
+							Expect(input.Filters).To(ConsistOf(
+								types.Filter{
+									Name:   aws.String(fmt.Sprintf("tag:%s", TagKeyManaged)),
+									Values: []string{"true"},
+								},
+								types.Filter{
+									Name:   aws.String(fmt.Sprintf("tag:%s", TagKeyExternalIPName)),
+									Values: []string{externalIP.Name},
+								},
+							))
+							return &ec2.DescribeAddressesOutput{
+								Addresses: []types.Address{
+									{
+										AllocationId:       allocationID,
+										AssociationId:      associationID,
+										NetworkInterfaceId: eniID,
+									},
+								},
+							}, nil
+						})
+					mockEC2API.EXPECT().
+						DescribeInstances(ctx, gomock.AssignableToTypeOf(&ec2.DescribeInstancesInput{})).
+						DoAndReturn(func(_ context.Context, input *ec2.DescribeInstancesInput, _ ...func(*ec2.Options)) (*ec2.DescribeInstancesOutput, error) {
+							Expect(input.InstanceIds).To(ConsistOf(instanceID))
+							return &ec2.DescribeInstancesOutput{
+								Reservations: []types.Reservation{
+									{
+										Instances: []types.Instance{
+											{
+												InstanceId: aws.String(instanceID),
+												NetworkInterfaces: []types.InstanceNetworkInterface{
+													{
+														Association: &types.InstanceNetworkInterfaceAssociation{
+															IpOwnerId: aws.String("aws"),
+															PublicIp:  publicIP,
+														},
+														NetworkInterfaceId: eni01ID,
+													},
+												},
+											},
+										},
+									},
+								},
+							}, nil
+						})
+					mockEC2API.EXPECT().
+						DisassociateAddress(ctx, gomock.AssignableToTypeOf(&ec2.DisassociateAddressInput{})).
+						DoAndReturn(func(_ context.Context, input *ec2.DisassociateAddressInput, _ ...func(*ec2.Options)) (*ec2.DisassociateAddressOutput, error) {
+							Expect(aws.ToString(input.AssociationId)).To(Equal(aws.ToString(associationID)))
+							return &ec2.DisassociateAddressOutput{}, fmt.Errorf("disassociate address error")
+						})
+
+					// 2. Act: Call the function under test
+					status, err := provider.ReconcileExternalIP(ctx, log, instanceID, externalIP)
+					// 3. Assert: Check the result
+					Expect(status).To(MatchFields(IgnoreExtras, Fields{
+						"State": Equal(v1alpha1.ExternalIPStateReserved),
+						"Conditions": HaveExactElements(MatchConditions([]kmetav1.Condition{
+							{
+								Type:   v1alpha1.ExternalIPConditionReasonIPCreated,
+								Status: kmetav1.ConditionTrue,
+								Reason: v1alpha1.ExternalIPConditionReasonIPCreated,
+							},
+							{
+								Type:   v1alpha1.ExternalIPConditionTypeNetworkInterfaceAssociated,
+								Status: kmetav1.ConditionFalse,
+								Reason: v1alpha1.ExternalIPConditionReasonProviderError,
+							},
+						}, "LastTransitionTime", "ObservedGeneration", "Message")),
+					}))
+					Expect(err).To(HaveOccurred())
+				})
+
+				It("should return an associate state when no AWS API call fails", func() {
+					// 1. Arrange: Set up mock return values
+					mockEC2API.EXPECT().
+						DescribeAddresses(ctx, gomock.AssignableToTypeOf(&ec2.DescribeAddressesInput{})).
+						DoAndReturn(func(_ context.Context, input *ec2.DescribeAddressesInput, _ ...func(*ec2.Options)) (*ec2.DescribeAddressesOutput, error) {
+							Expect(input.Filters).To(ConsistOf(
+								types.Filter{
+									Name:   aws.String(fmt.Sprintf("tag:%s", TagKeyManaged)),
+									Values: []string{"true"},
+								},
+								types.Filter{
+									Name:   aws.String(fmt.Sprintf("tag:%s", TagKeyExternalIPName)),
+									Values: []string{externalIP.Name},
+								},
+							))
+							return &ec2.DescribeAddressesOutput{
+								Addresses: []types.Address{
+									{
+										AllocationId:       allocationID,
+										AssociationId:      associationID,
+										NetworkInterfaceId: eniID,
+									},
+								},
+							}, nil
+						})
+					mockEC2API.EXPECT().
+						DescribeInstances(ctx, gomock.AssignableToTypeOf(&ec2.DescribeInstancesInput{})).
+						DoAndReturn(func(_ context.Context, input *ec2.DescribeInstancesInput, _ ...func(*ec2.Options)) (*ec2.DescribeInstancesOutput, error) {
+							Expect(input.InstanceIds).To(ConsistOf(instanceID))
+							return &ec2.DescribeInstancesOutput{
+								Reservations: []types.Reservation{
+									{
+										Instances: []types.Instance{
+											{
+												InstanceId: aws.String(instanceID),
+												NetworkInterfaces: []types.InstanceNetworkInterface{
+													{
+														Association: &types.InstanceNetworkInterfaceAssociation{
+															IpOwnerId: aws.String("aws"),
+															PublicIp:  publicIP,
+														},
+														NetworkInterfaceId: eni01ID,
+													},
+												},
+											},
+										},
+									},
+								},
+							}, nil
+						})
+					mockEC2API.EXPECT().
+						DisassociateAddress(ctx, gomock.AssignableToTypeOf(&ec2.DisassociateAddressInput{})).
+						DoAndReturn(func(_ context.Context, input *ec2.DisassociateAddressInput, _ ...func(*ec2.Options)) (*ec2.DisassociateAddressOutput, error) {
+							Expect(aws.ToString(input.AssociationId)).To(Equal(aws.ToString(associationID)))
+							return &ec2.DisassociateAddressOutput{}, nil
+						})
+					mockEC2API.EXPECT().
+						AssociateAddress(ctx, gomock.AssignableToTypeOf(&ec2.AssociateAddressInput{})).
+						DoAndReturn(func(_ context.Context, input *ec2.AssociateAddressInput, _ ...func(*ec2.Options)) (*ec2.AssociateAddressOutput, error) {
+							Expect(aws.ToString(input.AllocationId)).To(Equal(aws.ToString(allocationID)))
+							Expect(aws.ToString(input.NetworkInterfaceId)).To(Equal(aws.ToString(eni01ID)))
+							return &ec2.AssociateAddressOutput{}, nil
+						})
+
+					// 2. Act: Call the function under test
+					status, err := provider.ReconcileExternalIP(ctx, log, instanceID, externalIP)
+					// 3. Assert: Check the result
+					Expect(status).To(MatchFields(IgnoreExtras, Fields{
+						"State":      Equal(v1alpha1.ExternalIPStateAssociated),
+						"InstanceID": PointTo(Equal(instanceID)),
+						"Conditions": HaveExactElements(MatchConditions([]kmetav1.Condition{
+							{
+								Type:   v1alpha1.ExternalIPConditionReasonIPCreated,
+								Status: kmetav1.ConditionTrue,
+								Reason: v1alpha1.ExternalIPConditionReasonIPCreated,
+							},
+							{
+								Type:   v1alpha1.ExternalIPConditionTypeNetworkInterfaceAssociated,
+								Status: kmetav1.ConditionTrue,
+								Reason: v1alpha1.ExternalIPConditionReasonNetworkInterfaceAssociated,
+							},
+						}, "LastTransitionTime", "ObservedGeneration", "Message")),
+					}))
+					Expect(err).ToNot(HaveOccurred())
+				})
+			})
+
+			It("should return a reserved state and an error when the AWS API call (AssociateAddress) fails", func() {
+				// 1. Arrange: Set up mock return values
+				mockEC2API.EXPECT().
+					DescribeAddresses(ctx, gomock.AssignableToTypeOf(&ec2.DescribeAddressesInput{})).
+					DoAndReturn(func(_ context.Context, input *ec2.DescribeAddressesInput, _ ...func(*ec2.Options)) (*ec2.DescribeAddressesOutput, error) {
+						Expect(input.Filters).To(ConsistOf(
+							types.Filter{
+								Name:   aws.String(fmt.Sprintf("tag:%s", TagKeyManaged)),
+								Values: []string{"true"},
+							},
+							types.Filter{
+								Name:   aws.String(fmt.Sprintf("tag:%s", TagKeyExternalIPName)),
+								Values: []string{externalIP.Name},
+							},
+						))
+						return &ec2.DescribeAddressesOutput{
+							Addresses: []types.Address{
+								{
+									AllocationId:  allocationID,
+									AssociationId: associationID,
+								},
+							},
+						}, nil
+					})
+				mockEC2API.EXPECT().
+					DescribeInstances(ctx, gomock.AssignableToTypeOf(&ec2.DescribeInstancesInput{})).
+					DoAndReturn(func(_ context.Context, input *ec2.DescribeInstancesInput, _ ...func(*ec2.Options)) (*ec2.DescribeInstancesOutput, error) {
+						Expect(input.InstanceIds).To(ConsistOf(instanceID))
+						return &ec2.DescribeInstancesOutput{
+							Reservations: []types.Reservation{
+								{
+									Instances: []types.Instance{
+										{
+											InstanceId: aws.String(instanceID),
+											NetworkInterfaces: []types.InstanceNetworkInterface{
+												{
+													Association: &types.InstanceNetworkInterfaceAssociation{
+														IpOwnerId: aws.String("aws"),
+														PublicIp:  publicIP,
+													},
+													NetworkInterfaceId: eniID,
+												},
+											},
+										},
+									},
+								},
+							},
+						}, nil
+					})
+				mockEC2API.EXPECT().
+					AssociateAddress(ctx, gomock.AssignableToTypeOf(&ec2.AssociateAddressInput{})).
+					DoAndReturn(func(_ context.Context, input *ec2.AssociateAddressInput, _ ...func(*ec2.Options)) (*ec2.AssociateAddressOutput, error) {
+						Expect(aws.ToString(input.AllocationId)).To(Equal(aws.ToString(allocationID)))
+						Expect(aws.ToString(input.NetworkInterfaceId)).To(Equal(aws.ToString(eniID)))
+						return &ec2.AssociateAddressOutput{}, fmt.Errorf("associate address error")
+					})
+
+				// 2. Act: Call the function under test
+				status, err := provider.ReconcileExternalIP(ctx, log, instanceID, externalIP)
+				// 3. Assert: Check the result
+				Expect(status).To(MatchFields(IgnoreExtras, Fields{
+					"State": Equal(v1alpha1.ExternalIPStateReserved),
+					"Conditions": HaveExactElements(MatchConditions([]kmetav1.Condition{
+						{
+							Type:   v1alpha1.ExternalIPConditionReasonIPCreated,
+							Status: kmetav1.ConditionTrue,
+							Reason: v1alpha1.ExternalIPConditionReasonIPCreated,
+						},
+						{
+							Type:   v1alpha1.ExternalIPConditionTypeNetworkInterfaceAssociated,
+							Status: kmetav1.ConditionFalse,
+							Reason: v1alpha1.ExternalIPConditionReasonProviderError,
+						},
+					}, "LastTransitionTime", "ObservedGeneration", "Message")),
+				}))
+				Expect(err).To(HaveOccurred())
+			})
+
+			It("should return an associate state when no AWS API call fails", func() {
+				// 1. Arrange: Set up mock return values
+				mockEC2API.EXPECT().
+					DescribeAddresses(ctx, gomock.AssignableToTypeOf(&ec2.DescribeAddressesInput{})).
+					DoAndReturn(func(_ context.Context, input *ec2.DescribeAddressesInput, _ ...func(*ec2.Options)) (*ec2.DescribeAddressesOutput, error) {
+						Expect(input.Filters).To(ConsistOf(
+							types.Filter{
+								Name:   aws.String(fmt.Sprintf("tag:%s", TagKeyManaged)),
+								Values: []string{"true"},
+							},
+							types.Filter{
+								Name:   aws.String(fmt.Sprintf("tag:%s", TagKeyExternalIPName)),
+								Values: []string{externalIP.Name},
+							},
+						))
+						return &ec2.DescribeAddressesOutput{
+							Addresses: []types.Address{
+								{
+									AllocationId:  allocationID,
+									AssociationId: associationID,
+								},
+							},
+						}, nil
+					})
+				mockEC2API.EXPECT().
+					DescribeInstances(ctx, gomock.AssignableToTypeOf(&ec2.DescribeInstancesInput{})).
+					DoAndReturn(func(_ context.Context, input *ec2.DescribeInstancesInput, _ ...func(*ec2.Options)) (*ec2.DescribeInstancesOutput, error) {
+						Expect(input.InstanceIds).To(ConsistOf(instanceID))
+						return &ec2.DescribeInstancesOutput{
+							Reservations: []types.Reservation{
+								{
+									Instances: []types.Instance{
+										{
+											InstanceId: aws.String(instanceID),
+											NetworkInterfaces: []types.InstanceNetworkInterface{
+												{
+													Association: &types.InstanceNetworkInterfaceAssociation{
+														IpOwnerId: aws.String("aws"),
+														PublicIp:  publicIP,
+													},
+													NetworkInterfaceId: eniID,
+												},
+											},
+										},
+									},
+								},
+							},
+						}, nil
+					})
+				mockEC2API.EXPECT().
+					AssociateAddress(ctx, gomock.AssignableToTypeOf(&ec2.AssociateAddressInput{})).
+					DoAndReturn(func(_ context.Context, input *ec2.AssociateAddressInput, _ ...func(*ec2.Options)) (*ec2.AssociateAddressOutput, error) {
+						Expect(aws.ToString(input.AllocationId)).To(Equal(aws.ToString(allocationID)))
+						Expect(aws.ToString(input.NetworkInterfaceId)).To(Equal(aws.ToString(eniID)))
+						return &ec2.AssociateAddressOutput{}, nil
+					})
+
+				// 2. Act: Call the function under test
+				status, err := provider.ReconcileExternalIP(ctx, log, instanceID, externalIP)
+				// 3. Assert: Check the result
+				Expect(status).To(MatchFields(IgnoreExtras, Fields{
+					"State":      Equal(v1alpha1.ExternalIPStateAssociated),
+					"InstanceID": PointTo(Equal(instanceID)),
+					"Conditions": HaveExactElements(MatchConditions([]kmetav1.Condition{
+						{
+							Type:   v1alpha1.ExternalIPConditionReasonIPCreated,
+							Status: kmetav1.ConditionTrue,
+							Reason: v1alpha1.ExternalIPConditionReasonIPCreated,
+						},
+						{
+							Type:   v1alpha1.ExternalIPConditionTypeNetworkInterfaceAssociated,
+							Status: kmetav1.ConditionTrue,
+							Reason: v1alpha1.ExternalIPConditionReasonNetworkInterfaceAssociated,
+						},
+					}, "LastTransitionTime", "ObservedGeneration", "Message")),
+				}))
+				Expect(err).ToNot(HaveOccurred())
+			})
+		})
+	})
+
+	Context("ReconcileFirewallRule", func() {
+		var (
+			firewallRule, firewallRule01                                            *v1alpha1.FirewallRule
+			firewallrules                                                           []v1alpha1.FirewallRule
+			testID, instanceID, nodeName, vpcID, securityGroupID, securityGroup01ID string
+			publicIP, eniID, eni01ID, eni02ID                                       *string
+		)
+
+		BeforeEach(func() {
+			testID = rand.String(5)
+			publicIP = aws.String("ip-" + testID)
+			eniID = aws.String("eni-" + testID)
+			eni01ID = aws.String("eni-01-" + testID)
+			eni02ID = aws.String("eni-02-" + testID)
+			instanceID = "i-" + testID
+			vpcID = os.Getenv("VPC_ID")
+			securityGroupID = "sg-" + testID
+			securityGroup01ID = "sg-01-" + testID
+			nodeName = "node-" + testID
+			firewallRule = &v1alpha1.FirewallRule{
+				ObjectMeta: kmetav1.ObjectMeta{
+					Name:      "firewallrule-" + testID,
+					Namespace: "default",
+				},
+				Spec: v1alpha1.FirewallRuleSpec{
+					NodeName:              &nodeName,
+					Description:           "QxO FirewallRule for Input: 45814-48569",
+					Direction:             v1alpha1.DirectionIngress,
+					DisableReconciliation: false,
+					FromPort:              5969,
+					IPRanges: []*v1alpha1.IPRange{
+						{
+							CIDR:        "0.0.0.0/0",
+							Description: "",
+						},
+					},
+					Protocol: "TCP",
+					ToPort:   aws.Int64(5969),
+				},
+			}
+			firewallRule01 = &v1alpha1.FirewallRule{
+				ObjectMeta: kmetav1.ObjectMeta{
+					Name:      "firewallrule-01-" + testID,
+					Namespace: "default",
+				},
+				Spec: v1alpha1.FirewallRuleSpec{
+					NodeName:              &nodeName,
+					Description:           "QxO FirewallRule for Input: 45814-48569",
+					Direction:             v1alpha1.DirectionIngress,
+					DisableReconciliation: false,
+					FromPort:              5970,
+					IPRanges: []*v1alpha1.IPRange{
+						{
+							CIDR:        "0.0.0.0/0",
+							Description: "",
+						},
+					},
+					Protocol: "TCP",
+					ToPort:   aws.Int64(5970),
+				},
+			}
+			firewallrules = []v1alpha1.FirewallRule{*firewallRule, *firewallRule01}
+		})
+
+		It("should return a pending state and an error when an AWS API call (DescribeInstances) fails", func() {
+			// 1. Arrange: Set up mock return values
+			mockEC2API.EXPECT().
+				DescribeInstances(ctx, gomock.AssignableToTypeOf(&ec2.DescribeInstancesInput{})).
+				DoAndReturn(func(_ context.Context, input *ec2.DescribeInstancesInput, _ ...func(*ec2.Options)) (*ec2.DescribeInstancesOutput, error) {
+					Expect(input.InstanceIds).To(ConsistOf(instanceID))
+					return &ec2.DescribeInstancesOutput{}, fmt.Errorf("describe instance error")
+				})
+
+			// 2. Act: Call the function under test
+			status, err := provider.ReconcileFirewallRule(ctx, log, nodeName, instanceID, firewallRule, firewallrules)
+			// 3. Assert: Check the result
+			Expect(status).To(MatchFields(IgnoreExtras, Fields{
+				"State":      Equal(v1alpha1.FirewallRuleStatePending),
+				"Conditions": BeNil(),
+			}))
+			Expect(err).To(HaveOccurred())
+		})
+
+		It("should return a pending state and an error when the instance is not found", func() {
+			// 1. Arrange: Set up mock return values
+			mockEC2API.EXPECT().
+				DescribeInstances(ctx, gomock.AssignableToTypeOf(&ec2.DescribeInstancesInput{})).
+				DoAndReturn(func(_ context.Context, input *ec2.DescribeInstancesInput, _ ...func(*ec2.Options)) (*ec2.DescribeInstancesOutput, error) {
+					Expect(input.InstanceIds).To(ConsistOf(instanceID))
+					return &ec2.DescribeInstancesOutput{
+						Reservations: []types.Reservation{},
+					}, nil
+				})
+
+			// 2. Act: Call the function under test
+			status, err := provider.ReconcileFirewallRule(ctx, log, nodeName, instanceID, firewallRule, firewallrules)
+			// 3. Assert: Check the result
+			Expect(status).To(MatchFields(IgnoreExtras, Fields{
+				"State":      Equal(v1alpha1.FirewallRuleStatePending),
+				"Conditions": BeNil(),
+			}))
+			Expect(err).To(HaveOccurred())
+		})
+
+		It("should return a pending state and an error when an AWS API call (DescribeSecurityGroups) fails", func() {
+			// 1. Arrange: Set up mock return values
+			mockEC2API.EXPECT().
+				DescribeInstances(ctx, gomock.AssignableToTypeOf(&ec2.DescribeInstancesInput{})).
+				DoAndReturn(func(_ context.Context, input *ec2.DescribeInstancesInput, _ ...func(*ec2.Options)) (*ec2.DescribeInstancesOutput, error) {
+					Expect(input.InstanceIds).To(ConsistOf(instanceID))
+					return &ec2.DescribeInstancesOutput{
+						Reservations: []types.Reservation{
+							{
+								Instances: []types.Instance{
+									{
+										InstanceId: aws.String(instanceID),
+										VpcId:      aws.String(vpcID),
+										NetworkInterfaces: []types.InstanceNetworkInterface{
+											{
+												Association: &types.InstanceNetworkInterfaceAssociation{
+													IpOwnerId: aws.String("aws"),
+													PublicIp:  publicIP,
+												},
+												NetworkInterfaceId: eniID,
+											},
+										},
+									},
+								},
+							},
+						},
+					}, nil
+				})
+			mockEC2API.EXPECT().
+				DescribeSecurityGroups(ctx, gomock.AssignableToTypeOf(&ec2.DescribeSecurityGroupsInput{})).
+				DoAndReturn(func(_ context.Context, input *ec2.DescribeSecurityGroupsInput, _ ...func(*ec2.Options)) (*ec2.DescribeSecurityGroupsOutput, error) {
+					Expect(input.Filters).To(ConsistOf(
+						types.Filter{
+							Name:   aws.String(fmt.Sprintf("tag:%s", TagKeyManaged)),
+							Values: []string{"true"},
+						},
+						types.Filter{
+							Name:   aws.String("vpc-id"),
+							Values: []string{vpcID},
+						},
+						types.Filter{
+							Name:   aws.String(fmt.Sprintf("tag:%s", TagKeyNodeName)),
+							Values: []string{nodeName},
+						},
+					))
+					return &ec2.DescribeSecurityGroupsOutput{}, fmt.Errorf("describe addresses error")
+				})
+
+			// 2. Act: Call the function under test
+			status, err := provider.ReconcileFirewallRule(ctx, log, nodeName, instanceID, firewallRule, firewallrules)
+			// 3. Assert: Check the result
+			Expect(status).To(MatchFields(IgnoreExtras, Fields{
+				"State": Equal(v1alpha1.FirewallRuleStatePending),
+				"Conditions": HaveExactElements(MatchConditions([]kmetav1.Condition{
+					{
+						Type:   v1alpha1.FirewallRuleConditionTypeSecurityGroupCreated,
+						Status: kmetav1.ConditionUnknown,
+						Reason: v1alpha1.FirewallRuleConditionReasonProviderError,
+					},
+				}, "LastTransitionTime", "ObservedGeneration", "Message")),
+			}))
+			Expect(err).To(HaveOccurred())
+		})
+
+		When("the security group is not found", func() {
+			It("should return a pending state if deletions timestamp is not nil (do nothing, deletion is pending)", func() {
+				firewallRule.DeletionTimestamp = &kmetav1.Time{Time: time.Now()}
+				// 1. Arrange: Set up mock return values
+				mockEC2API.EXPECT().
+					DescribeInstances(ctx, gomock.AssignableToTypeOf(&ec2.DescribeInstancesInput{})).
+					DoAndReturn(func(_ context.Context, input *ec2.DescribeInstancesInput, _ ...func(*ec2.Options)) (*ec2.DescribeInstancesOutput, error) {
+						Expect(input.InstanceIds).To(ConsistOf(instanceID))
+						return &ec2.DescribeInstancesOutput{
+							Reservations: []types.Reservation{
+								{
+									Instances: []types.Instance{
+										{
+											InstanceId: aws.String(instanceID),
+											VpcId:      aws.String(vpcID),
+											NetworkInterfaces: []types.InstanceNetworkInterface{
+												{
+													Association: &types.InstanceNetworkInterfaceAssociation{
+														IpOwnerId: aws.String("aws"),
+														PublicIp:  publicIP,
+													},
+													NetworkInterfaceId: eniID,
+												},
+											},
+										},
+									},
+								},
+							},
+						}, nil
+					})
+				mockEC2API.EXPECT().
+					DescribeSecurityGroups(ctx, gomock.AssignableToTypeOf(&ec2.DescribeSecurityGroupsInput{})).
+					DoAndReturn(func(_ context.Context, input *ec2.DescribeSecurityGroupsInput, _ ...func(*ec2.Options)) (*ec2.DescribeSecurityGroupsOutput, error) {
+						Expect(input.Filters).To(ConsistOf(
+							types.Filter{
+								Name:   aws.String(fmt.Sprintf("tag:%s", TagKeyManaged)),
+								Values: []string{"true"},
+							},
+							types.Filter{
+								Name:   aws.String("vpc-id"),
+								Values: []string{vpcID},
+							},
+							types.Filter{
+								Name:   aws.String(fmt.Sprintf("tag:%s", TagKeyNodeName)),
+								Values: []string{nodeName},
+							},
+						))
+						return &ec2.DescribeSecurityGroupsOutput{}, nil
+					})
+
+				// 2. Act: Call the function under test
+				status, err := provider.ReconcileFirewallRule(ctx, log, nodeName, instanceID, firewallRule, firewallrules)
+				// 3. Assert: Check the result
+				Expect(status).To(MatchFields(IgnoreExtras, Fields{
+					"State":      Equal(v1alpha1.FirewallRuleStatePending),
+					"Conditions": BeNil(),
+				}))
+				Expect(err).ToNot(HaveOccurred())
+			})
+
+			It("should return a pending state and an error when an AWS API call (CreateSecurityGroup) fails", func() {
+				// 1. Arrange: Set up mock return values
+				mockEC2API.EXPECT().
+					DescribeInstances(ctx, gomock.AssignableToTypeOf(&ec2.DescribeInstancesInput{})).
+					DoAndReturn(func(_ context.Context, input *ec2.DescribeInstancesInput, _ ...func(*ec2.Options)) (*ec2.DescribeInstancesOutput, error) {
+						Expect(input.InstanceIds).To(ConsistOf(instanceID))
+						return &ec2.DescribeInstancesOutput{
+							Reservations: []types.Reservation{
+								{
+									Instances: []types.Instance{
+										{
+											InstanceId: aws.String(instanceID),
+											VpcId:      aws.String(vpcID),
+											NetworkInterfaces: []types.InstanceNetworkInterface{
+												{
+													Association: &types.InstanceNetworkInterfaceAssociation{
+														IpOwnerId: aws.String("aws"),
+														PublicIp:  publicIP,
+													},
+													NetworkInterfaceId: eniID,
+												},
+											},
+										},
+									},
+								},
+							},
+						}, nil
+					})
+				mockEC2API.EXPECT().
+					DescribeSecurityGroups(ctx, gomock.AssignableToTypeOf(&ec2.DescribeSecurityGroupsInput{})).
+					DoAndReturn(func(_ context.Context, input *ec2.DescribeSecurityGroupsInput, _ ...func(*ec2.Options)) (*ec2.DescribeSecurityGroupsOutput, error) {
+						Expect(input.Filters).To(ConsistOf(
+							types.Filter{
+								Name:   aws.String(fmt.Sprintf("tag:%s", TagKeyManaged)),
+								Values: []string{"true"},
+							},
+							types.Filter{
+								Name:   aws.String("vpc-id"),
+								Values: []string{vpcID},
+							},
+							types.Filter{
+								Name:   aws.String(fmt.Sprintf("tag:%s", TagKeyNodeName)),
+								Values: []string{nodeName},
+							},
+						))
+						return &ec2.DescribeSecurityGroupsOutput{}, nil
+					})
+				mockEC2API.EXPECT().
+					CreateSecurityGroup(ctx, gomock.AssignableToTypeOf(&ec2.CreateSecurityGroupInput{})).
+					DoAndReturn(func(_ context.Context, input *ec2.CreateSecurityGroupInput, _ ...func(*ec2.Options)) (*ec2.CreateSecurityGroupOutput, error) {
+						Expect(aws.ToString(input.VpcId)).To(Equal(vpcID))
+						Expect(input.TagSpecifications[0].ResourceType).To(Equal(types.ResourceTypeSecurityGroup))
+						Expect(input.TagSpecifications[0].Tags).To(ConsistOf(
+							types.Tag{
+								Key:   aws.String(string(TagKeyManaged)),
+								Value: aws.String("true"),
+							},
+							types.Tag{
+								Key:   aws.String(string(TagKeyNodeName)),
+								Value: aws.String(nodeName),
+							},
+							types.Tag{
+								Key:   aws.String(string(TagKeyInstanceID)),
+								Value: aws.String(instanceID),
+							},
+						))
+						return &ec2.CreateSecurityGroupOutput{}, fmt.Errorf("create security group error")
+					})
+
+				// 2. Act: Call the function under test
+				status, err := provider.ReconcileFirewallRule(ctx, log, nodeName, instanceID, firewallRule, firewallrules)
+				// 3. Assert: Check the result
+				Expect(status).To(MatchFields(IgnoreExtras, Fields{
+					"State": Equal(v1alpha1.FirewallRuleStatePending),
+					"Conditions": HaveExactElements(MatchConditions([]kmetav1.Condition{
+						{
+							Type:   v1alpha1.FirewallRuleConditionTypeSecurityGroupCreated,
+							Status: kmetav1.ConditionFalse,
+							Reason: v1alpha1.FirewallRuleConditionReasonProviderError,
+						},
+					}, "LastTransitionTime", "ObservedGeneration", "Message")),
+				}))
+				Expect(err).To(HaveOccurred())
+			})
+
+			It("should return a pending state and an error when an AWS API call (DescribeSecurityGroups after security group creation) fails", func() {
+				// 1. Arrange: Set up mock return values
+				mockEC2API.EXPECT().
+					DescribeInstances(ctx, gomock.AssignableToTypeOf(&ec2.DescribeInstancesInput{})).
+					DoAndReturn(func(_ context.Context, input *ec2.DescribeInstancesInput, _ ...func(*ec2.Options)) (*ec2.DescribeInstancesOutput, error) {
+						Expect(input.InstanceIds).To(ConsistOf(instanceID))
+						return &ec2.DescribeInstancesOutput{
+							Reservations: []types.Reservation{
+								{
+									Instances: []types.Instance{
+										{
+											InstanceId: aws.String(instanceID),
+											VpcId:      aws.String(vpcID),
+											NetworkInterfaces: []types.InstanceNetworkInterface{
+												{
+													Association: &types.InstanceNetworkInterfaceAssociation{
+														IpOwnerId: aws.String("aws"),
+														PublicIp:  publicIP,
+													},
+													NetworkInterfaceId: eniID,
+												},
+											},
+										},
+									},
+								},
+							},
+						}, nil
+					})
+				mockEC2API.EXPECT().
+					DescribeSecurityGroups(ctx, gomock.AssignableToTypeOf(&ec2.DescribeSecurityGroupsInput{})).
+					DoAndReturn(func(_ context.Context, input *ec2.DescribeSecurityGroupsInput, _ ...func(*ec2.Options)) (*ec2.DescribeSecurityGroupsOutput, error) {
+						switch len(input.Filters) {
+						case 3:
+							Expect(input.Filters).To(ConsistOf(
+								types.Filter{
+									Name:   aws.String(fmt.Sprintf("tag:%s", TagKeyManaged)),
+									Values: []string{"true"},
+								},
+								types.Filter{
+									Name:   aws.String("vpc-id"),
+									Values: []string{vpcID},
+								},
+								types.Filter{
+									Name:   aws.String(fmt.Sprintf("tag:%s", TagKeyNodeName)),
+									Values: []string{nodeName},
+								},
+							))
+							return &ec2.DescribeSecurityGroupsOutput{}, nil
+						case 4:
+							Expect(input.Filters).To(ConsistOf(
+								types.Filter{
+									Name:   aws.String(fmt.Sprintf("tag:%s", TagKeyManaged)),
+									Values: []string{"true"},
+								},
+								types.Filter{
+									Name:   aws.String("vpc-id"),
+									Values: []string{vpcID},
+								},
+								types.Filter{
+									Name:   aws.String(fmt.Sprintf("tag:%s", TagKeyNodeName)),
+									Values: []string{nodeName},
+								},
+								types.Filter{
+									Name:   aws.String("group-id"),
+									Values: []string{securityGroupID},
+								},
+							))
+							return &ec2.DescribeSecurityGroupsOutput{}, fmt.Errorf("describe security groups error")
+						default:
+							return nil, fmt.Errorf("unexpected securitygroups filters length: %d", len(input.Filters))
+						}
+					}).Times(2)
+				mockEC2API.EXPECT().
+					CreateSecurityGroup(ctx, gomock.AssignableToTypeOf(&ec2.CreateSecurityGroupInput{})).
+					DoAndReturn(func(_ context.Context, input *ec2.CreateSecurityGroupInput, _ ...func(*ec2.Options)) (*ec2.CreateSecurityGroupOutput, error) {
+						Expect(aws.ToString(input.VpcId)).To(Equal(vpcID))
+						Expect(input.TagSpecifications[0].ResourceType).To(Equal(types.ResourceTypeSecurityGroup))
+						Expect(input.TagSpecifications[0].Tags).To(ConsistOf(
+							types.Tag{
+								Key:   aws.String(string(TagKeyManaged)),
+								Value: aws.String("true"),
+							},
+							types.Tag{
+								Key:   aws.String(string(TagKeyNodeName)),
+								Value: aws.String(nodeName),
+							},
+							types.Tag{
+								Key:   aws.String(string(TagKeyInstanceID)),
+								Value: aws.String(instanceID),
+							},
+						))
+						return &ec2.CreateSecurityGroupOutput{
+							GroupId: aws.String(securityGroupID),
+						}, nil
+					})
+
+				// 2. Act: Call the function under test
+				status, err := provider.ReconcileFirewallRule(ctx, log, nodeName, instanceID, firewallRule, firewallrules)
+				// 3. Assert: Check the result
+				Expect(status).To(MatchFields(IgnoreExtras, Fields{
+					"State": Equal(v1alpha1.FirewallRuleStatePending),
+					"Conditions": HaveExactElements(MatchConditions([]kmetav1.Condition{
+						{
+							Type:   v1alpha1.FirewallRuleConditionTypeSecurityGroupCreated,
+							Status: kmetav1.ConditionTrue,
+							Reason: v1alpha1.FirewallRuleConditionReasonSecurityGroupCreated,
+						},
+						{
+							Type:   v1alpha1.FirewallRuleConditionTypeNetworkInterfaceAssociated,
+							Status: kmetav1.ConditionUnknown,
+							Reason: v1alpha1.FirewallRuleConditionReasonProviderError,
+						},
+					}, "LastTransitionTime", "ObservedGeneration", "Message")),
+				}))
+				Expect(err).To(HaveOccurred())
+			})
+		})
+
+		It("should return a pending state and an error when the instance has no public IP", func() {
+			// 1. Arrange: Set up mock return values
+			mockEC2API.EXPECT().
+				DescribeInstances(ctx, gomock.AssignableToTypeOf(&ec2.DescribeInstancesInput{})).
+				DoAndReturn(func(_ context.Context, input *ec2.DescribeInstancesInput, _ ...func(*ec2.Options)) (*ec2.DescribeInstancesOutput, error) {
+					Expect(input.InstanceIds).To(ConsistOf(instanceID))
+					return &ec2.DescribeInstancesOutput{
+						Reservations: []types.Reservation{
+							{
+								Instances: []types.Instance{
+									{
+										InstanceId: aws.String(instanceID),
+										VpcId:      aws.String(vpcID),
+										NetworkInterfaces: []types.InstanceNetworkInterface{
+											{
+												Association: &types.InstanceNetworkInterfaceAssociation{
+													IpOwnerId: aws.String("aws"),
+												},
+												NetworkInterfaceId: eniID,
+											},
+										},
+									},
+								},
+							},
+						},
+					}, nil
+				})
+			mockEC2API.EXPECT().
+				DescribeSecurityGroups(ctx, gomock.AssignableToTypeOf(&ec2.DescribeSecurityGroupsInput{})).
+				DoAndReturn(func(_ context.Context, input *ec2.DescribeSecurityGroupsInput, _ ...func(*ec2.Options)) (*ec2.DescribeSecurityGroupsOutput, error) {
+					Expect(input.Filters).To(ConsistOf(
+						types.Filter{
+							Name:   aws.String(fmt.Sprintf("tag:%s", TagKeyManaged)),
+							Values: []string{"true"},
+						},
+						types.Filter{
+							Name:   aws.String("vpc-id"),
+							Values: []string{vpcID},
+						},
+						types.Filter{
+							Name:   aws.String(fmt.Sprintf("tag:%s", TagKeyNodeName)),
+							Values: []string{nodeName},
+						},
+					))
+					return &ec2.DescribeSecurityGroupsOutput{
+						SecurityGroups: []types.SecurityGroup{
+							{
+								GroupId: aws.String(securityGroupID),
+							},
+						},
+					}, nil
+				})
+
+			// 2. Act: Call the function under test
+			status, err := provider.ReconcileFirewallRule(ctx, log, nodeName, instanceID, firewallRule, firewallrules)
+			// 3. Assert: Check the result
+			Expect(status).To(MatchFields(IgnoreExtras, Fields{
+				"State": Equal(v1alpha1.FirewallRuleStatePending),
+				"Conditions": HaveExactElements(MatchConditions([]kmetav1.Condition{
+					{
+						Type:   v1alpha1.FirewallRuleConditionTypeSecurityGroupCreated,
+						Status: kmetav1.ConditionTrue,
+						Reason: v1alpha1.FirewallRuleConditionReasonSecurityGroupCreated,
+					},
+					{
+						Type:   v1alpha1.FirewallRuleConditionTypeNetworkInterfaceAssociated,
+						Status: kmetav1.ConditionUnknown,
+						Reason: v1alpha1.FirewallRuleConditionReasonProviderError,
+					},
+				}, "LastTransitionTime", "ObservedGeneration", "Message")),
+			}))
+			Expect(err).To(HaveOccurred())
+		})
+
+		It("should return a pending state and an error when an AWS API call (DescribeNetworkInterfaces) fails", func() {
+			// 1. Arrange: Set up mock return values
+			mockEC2API.EXPECT().
+				DescribeInstances(ctx, gomock.AssignableToTypeOf(&ec2.DescribeInstancesInput{})).
+				DoAndReturn(func(_ context.Context, input *ec2.DescribeInstancesInput, _ ...func(*ec2.Options)) (*ec2.DescribeInstancesOutput, error) {
+					Expect(input.InstanceIds).To(ConsistOf(instanceID))
+					return &ec2.DescribeInstancesOutput{
+						Reservations: []types.Reservation{
+							{
+								Instances: []types.Instance{
+									{
+										InstanceId: aws.String(instanceID),
+										VpcId:      aws.String(vpcID),
+										NetworkInterfaces: []types.InstanceNetworkInterface{
+											{
+												Association: &types.InstanceNetworkInterfaceAssociation{
+													IpOwnerId: aws.String("aws"),
+													PublicIp:  publicIP,
+												},
+												NetworkInterfaceId: eniID,
+											},
+										},
+									},
+								},
+							},
+						},
+					}, nil
+				})
+			mockEC2API.EXPECT().
+				DescribeSecurityGroups(ctx, gomock.AssignableToTypeOf(&ec2.DescribeSecurityGroupsInput{})).
+				DoAndReturn(func(_ context.Context, input *ec2.DescribeSecurityGroupsInput, _ ...func(*ec2.Options)) (*ec2.DescribeSecurityGroupsOutput, error) {
+					Expect(input.Filters).To(ConsistOf(
+						types.Filter{
+							Name:   aws.String(fmt.Sprintf("tag:%s", TagKeyManaged)),
+							Values: []string{"true"},
+						},
+						types.Filter{
+							Name:   aws.String("vpc-id"),
+							Values: []string{vpcID},
+						},
+						types.Filter{
+							Name:   aws.String(fmt.Sprintf("tag:%s", TagKeyNodeName)),
+							Values: []string{nodeName},
+						},
+					))
+					return &ec2.DescribeSecurityGroupsOutput{
+						SecurityGroups: []types.SecurityGroup{
+							{
+								GroupId: aws.String(securityGroupID),
+							},
+						},
+					}, nil
+				})
+			mockEC2API.EXPECT().
+				DescribeNetworkInterfaces(ctx, gomock.AssignableToTypeOf(&ec2.DescribeNetworkInterfacesInput{})).
+				DoAndReturn(func(_ context.Context, input *ec2.DescribeNetworkInterfacesInput, _ ...func(*ec2.Options)) (*ec2.DescribeNetworkInterfacesOutput, error) {
+					Expect(input.Filters).To(ConsistOf(
+						types.Filter{
+							Name:   aws.String("group-id"),
+							Values: []string{securityGroupID},
+						},
+					))
+					return &ec2.DescribeNetworkInterfacesOutput{}, fmt.Errorf("describe network interfaces error")
+				})
+
+			// 2. Act: Call the function under test
+			status, err := provider.ReconcileFirewallRule(ctx, log, nodeName, instanceID, firewallRule, firewallrules)
+			// 3. Assert: Check the result
+			Expect(status).To(MatchFields(IgnoreExtras, Fields{
+				"State": Equal(v1alpha1.FirewallRuleStatePending),
+				"Conditions": HaveExactElements(MatchConditions([]kmetav1.Condition{
+					{
+						Type:   v1alpha1.FirewallRuleConditionTypeSecurityGroupCreated,
+						Status: kmetav1.ConditionTrue,
+						Reason: v1alpha1.FirewallRuleConditionReasonSecurityGroupCreated,
+					},
+					{
+						Type:   v1alpha1.FirewallRuleConditionTypeNetworkInterfaceAssociated,
+						Status: kmetav1.ConditionUnknown,
+						Reason: v1alpha1.FirewallRuleConditionReasonProviderError,
+					},
+				}, "LastTransitionTime", "ObservedGeneration", "Message")),
+			}))
+			Expect(err).To(HaveOccurred())
+		})
+
+		It("should return a pending state and an error when an AWS API call (DescribeNetworkInterfaces) fails", func() {
+			// 1. Arrange: Set up mock return values
+			mockEC2API.EXPECT().
+				DescribeInstances(ctx, gomock.AssignableToTypeOf(&ec2.DescribeInstancesInput{})).
+				DoAndReturn(func(_ context.Context, input *ec2.DescribeInstancesInput, _ ...func(*ec2.Options)) (*ec2.DescribeInstancesOutput, error) {
+					Expect(input.InstanceIds).To(ConsistOf(instanceID))
+					return &ec2.DescribeInstancesOutput{
+						Reservations: []types.Reservation{
+							{
+								Instances: []types.Instance{
+									{
+										InstanceId: aws.String(instanceID),
+										VpcId:      aws.String(vpcID),
+										NetworkInterfaces: []types.InstanceNetworkInterface{
+											{
+												Association: &types.InstanceNetworkInterfaceAssociation{
+													IpOwnerId: aws.String("aws"),
+													PublicIp:  publicIP,
+												},
+												NetworkInterfaceId: eniID,
+											},
+										},
+									},
+								},
+							},
+						},
+					}, nil
+				})
+			mockEC2API.EXPECT().
+				DescribeSecurityGroups(ctx, gomock.AssignableToTypeOf(&ec2.DescribeSecurityGroupsInput{})).
+				DoAndReturn(func(_ context.Context, input *ec2.DescribeSecurityGroupsInput, _ ...func(*ec2.Options)) (*ec2.DescribeSecurityGroupsOutput, error) {
+					Expect(input.Filters).To(ConsistOf(
+						types.Filter{
+							Name:   aws.String(fmt.Sprintf("tag:%s", TagKeyManaged)),
+							Values: []string{"true"},
+						},
+						types.Filter{
+							Name:   aws.String("vpc-id"),
+							Values: []string{vpcID},
+						},
+						types.Filter{
+							Name:   aws.String(fmt.Sprintf("tag:%s", TagKeyNodeName)),
+							Values: []string{nodeName},
+						},
+					))
+					return &ec2.DescribeSecurityGroupsOutput{
+						SecurityGroups: []types.SecurityGroup{
+							{
+								GroupId: aws.String(securityGroupID),
+							},
+						},
+					}, nil
+				})
+			mockEC2API.EXPECT().
+				DescribeNetworkInterfaces(ctx, gomock.AssignableToTypeOf(&ec2.DescribeNetworkInterfacesInput{})).
+				DoAndReturn(func(_ context.Context, input *ec2.DescribeNetworkInterfacesInput, _ ...func(*ec2.Options)) (*ec2.DescribeNetworkInterfacesOutput, error) {
+					Expect(input.Filters).To(ConsistOf(
+						types.Filter{
+							Name:   aws.String("group-id"),
+							Values: []string{securityGroupID},
+						},
+					))
+					return &ec2.DescribeNetworkInterfacesOutput{}, fmt.Errorf("describe network interfaces error")
+				})
+
+			// 2. Act: Call the function under test
+			status, err := provider.ReconcileFirewallRule(ctx, log, nodeName, instanceID, firewallRule, firewallrules)
+			// 3. Assert: Check the result
+			Expect(status).To(MatchFields(IgnoreExtras, Fields{
+				"State": Equal(v1alpha1.FirewallRuleStatePending),
+				"Conditions": HaveExactElements(MatchConditions([]kmetav1.Condition{
+					{
+						Type:   v1alpha1.FirewallRuleConditionTypeSecurityGroupCreated,
+						Status: kmetav1.ConditionTrue,
+						Reason: v1alpha1.FirewallRuleConditionReasonSecurityGroupCreated,
+					},
+					{
+						Type:   v1alpha1.FirewallRuleConditionTypeNetworkInterfaceAssociated,
+						Status: kmetav1.ConditionUnknown,
+						Reason: v1alpha1.FirewallRuleConditionReasonProviderError,
+					},
+				}, "LastTransitionTime", "ObservedGeneration", "Message")),
+			}))
+			Expect(err).To(HaveOccurred())
+		})
+
+		When("the instance's networkInterfaces is not empty and an ENI is already associated with the security group", func() {
+			It("should return a pending state and an error when an AWS API call (ModifyNetworkInterfaceAttribute) fails", func() {
+				// 1. Arrange: Set up mock return values
+				mockEC2API.EXPECT().
+					DescribeInstances(ctx, gomock.AssignableToTypeOf(&ec2.DescribeInstancesInput{})).
+					DoAndReturn(func(_ context.Context, input *ec2.DescribeInstancesInput, _ ...func(*ec2.Options)) (*ec2.DescribeInstancesOutput, error) {
+						Expect(input.InstanceIds).To(ConsistOf(instanceID))
+						return &ec2.DescribeInstancesOutput{
+							Reservations: []types.Reservation{
+								{
+									Instances: []types.Instance{
+										{
+											InstanceId: aws.String(instanceID),
+											VpcId:      aws.String(vpcID),
+											NetworkInterfaces: []types.InstanceNetworkInterface{
+												{
+													Association: &types.InstanceNetworkInterfaceAssociation{
+														IpOwnerId: aws.String("aws"),
+														PublicIp:  publicIP,
+													},
+													NetworkInterfaceId: eniID,
+												},
+											},
+										},
+									},
+								},
+							},
+						}, nil
+					})
+				mockEC2API.EXPECT().
+					DescribeSecurityGroups(ctx, gomock.AssignableToTypeOf(&ec2.DescribeSecurityGroupsInput{})).
+					DoAndReturn(func(_ context.Context, input *ec2.DescribeSecurityGroupsInput, _ ...func(*ec2.Options)) (*ec2.DescribeSecurityGroupsOutput, error) {
+						Expect(input.Filters).To(ConsistOf(
+							types.Filter{
+								Name:   aws.String(fmt.Sprintf("tag:%s", TagKeyManaged)),
+								Values: []string{"true"},
+							},
+							types.Filter{
+								Name:   aws.String("vpc-id"),
+								Values: []string{vpcID},
+							},
+							types.Filter{
+								Name:   aws.String(fmt.Sprintf("tag:%s", TagKeyNodeName)),
+								Values: []string{nodeName},
+							},
+						))
+						return &ec2.DescribeSecurityGroupsOutput{
+							SecurityGroups: []types.SecurityGroup{
+								{
+									GroupId: aws.String(securityGroupID),
+								},
+							},
+						}, nil
+					})
+				mockEC2API.EXPECT().
+					DescribeNetworkInterfaces(ctx, gomock.AssignableToTypeOf(&ec2.DescribeNetworkInterfacesInput{})).
+					DoAndReturn(func(_ context.Context, input *ec2.DescribeNetworkInterfacesInput, _ ...func(*ec2.Options)) (*ec2.DescribeNetworkInterfacesOutput, error) {
+						Expect(input.Filters).To(ConsistOf(
+							types.Filter{
+								Name:   aws.String("group-id"),
+								Values: []string{securityGroupID},
+							},
+						))
+						return &ec2.DescribeNetworkInterfacesOutput{
+							NetworkInterfaces: []types.NetworkInterface{
+								{
+									NetworkInterfaceId: eniID,
+									Groups: []types.GroupIdentifier{
+										{
+											GroupId: aws.String(securityGroupID),
+										},
+									},
+								},
+								{
+									NetworkInterfaceId: eni01ID,
+									Groups: []types.GroupIdentifier{
+										{
+											GroupId: aws.String(securityGroupID),
+										},
+										{
+											GroupId: aws.String(securityGroup01ID),
+										},
+									},
+								},
+								{
+									NetworkInterfaceId: eni02ID,
+									Groups: []types.GroupIdentifier{
+										{
+											GroupId: aws.String(securityGroupID),
+										},
+										{
+											GroupId: aws.String(securityGroup01ID),
+										},
+									},
+								},
+							},
+						}, nil
+					})
+				mockEC2API.EXPECT().
+					ModifyNetworkInterfaceAttribute(ctx, gomock.AssignableToTypeOf(&ec2.ModifyNetworkInterfaceAttributeInput{})).
+					DoAndReturn(func(_ context.Context, input *ec2.ModifyNetworkInterfaceAttributeInput, _ ...func(*ec2.Options)) (*ec2.ModifyNetworkInterfaceAttributeOutput, error) {
+						switch aws.ToString(input.NetworkInterfaceId) {
+						case aws.ToString(eni01ID):
+							Expect(aws.ToString(input.NetworkInterfaceId)).To(Equal(aws.ToString(eni01ID)))
+							Expect(input.Groups).To(ConsistOf(securityGroup01ID))
+							return &ec2.ModifyNetworkInterfaceAttributeOutput{}, nil
+						case aws.ToString(eni02ID):
+							Expect(aws.ToString(input.NetworkInterfaceId)).To(Equal(aws.ToString(eni02ID)))
+							Expect(input.Groups).To(ConsistOf(securityGroup01ID))
+							return &ec2.ModifyNetworkInterfaceAttributeOutput{}, fmt.Errorf("modify network interface attribute error")
+						default:
+							return nil, fmt.Errorf("unexpected network interface ID: %s", aws.ToString(input.NetworkInterfaceId))
+						}
+					}).Times(2)
+
+				// 2. Act: Call the function under test
+				status, err := provider.ReconcileFirewallRule(ctx, log, nodeName, instanceID, firewallRule, firewallrules)
+				// 3. Assert: Check the result
+				Expect(status).To(MatchFields(IgnoreExtras, Fields{
+					"State": Equal(v1alpha1.FirewallRuleStatePending),
+					"Conditions": HaveExactElements(MatchConditions([]kmetav1.Condition{
+						{
+							Type:   v1alpha1.FirewallRuleConditionTypeSecurityGroupCreated,
+							Status: kmetav1.ConditionTrue,
+							Reason: v1alpha1.FirewallRuleConditionReasonSecurityGroupCreated,
+						},
+						{
+							Type:   v1alpha1.FirewallRuleConditionTypeNetworkInterfaceAssociated,
+							Status: kmetav1.ConditionFalse,
+							Reason: v1alpha1.FirewallRuleConditionReasonProviderError,
+						},
+					}, "LastTransitionTime", "ObservedGeneration", "Message")),
+				}))
+				Expect(err).To(HaveOccurred())
+			})
+		})
+
+		When("the security group is not associated with the instance's network interfaces", func() {
+			It("should return a pending state and an error when an AWS API call (ModifyNetworkInterfaceAttribute) fails", func() {
+				// 1. Arrange: Set up mock return values
+				mockEC2API.EXPECT().
+					DescribeInstances(ctx, gomock.AssignableToTypeOf(&ec2.DescribeInstancesInput{})).
+					DoAndReturn(func(_ context.Context, input *ec2.DescribeInstancesInput, _ ...func(*ec2.Options)) (*ec2.DescribeInstancesOutput, error) {
+						Expect(input.InstanceIds).To(ConsistOf(instanceID))
+						return &ec2.DescribeInstancesOutput{
+							Reservations: []types.Reservation{
+								{
+									Instances: []types.Instance{
+										{
+											InstanceId: aws.String(instanceID),
+											VpcId:      aws.String(vpcID),
+											NetworkInterfaces: []types.InstanceNetworkInterface{
+												{
+													Association: &types.InstanceNetworkInterfaceAssociation{
+														IpOwnerId: aws.String("aws"),
+														PublicIp:  publicIP,
+													},
+													NetworkInterfaceId: eniID,
+													Groups: []types.GroupIdentifier{
+														{
+															GroupId: aws.String(securityGroupID),
+														},
+														{
+															GroupId: aws.String(securityGroup01ID),
+														},
+													},
+												},
+											},
+										},
+									},
+								},
+							},
+						}, nil
+					})
+				mockEC2API.EXPECT().
+					DescribeSecurityGroups(ctx, gomock.AssignableToTypeOf(&ec2.DescribeSecurityGroupsInput{})).
+					DoAndReturn(func(_ context.Context, input *ec2.DescribeSecurityGroupsInput, _ ...func(*ec2.Options)) (*ec2.DescribeSecurityGroupsOutput, error) {
+						Expect(input.Filters).To(ConsistOf(
+							types.Filter{
+								Name:   aws.String(fmt.Sprintf("tag:%s", TagKeyManaged)),
+								Values: []string{"true"},
+							},
+							types.Filter{
+								Name:   aws.String("vpc-id"),
+								Values: []string{vpcID},
+							},
+							types.Filter{
+								Name:   aws.String(fmt.Sprintf("tag:%s", TagKeyNodeName)),
+								Values: []string{nodeName},
+							},
+						))
+						return &ec2.DescribeSecurityGroupsOutput{
+							SecurityGroups: []types.SecurityGroup{
+								{
+									GroupId: aws.String(securityGroupID),
+								},
+							},
+						}, nil
+					})
+				mockEC2API.EXPECT().
+					DescribeNetworkInterfaces(ctx, gomock.AssignableToTypeOf(&ec2.DescribeNetworkInterfacesInput{})).
+					DoAndReturn(func(_ context.Context, input *ec2.DescribeNetworkInterfacesInput, _ ...func(*ec2.Options)) (*ec2.DescribeNetworkInterfacesOutput, error) {
+						Expect(input.Filters).To(ConsistOf(
+							types.Filter{
+								Name:   aws.String("group-id"),
+								Values: []string{securityGroupID},
+							},
+						))
+						return &ec2.DescribeNetworkInterfacesOutput{}, nil
+					})
+				mockEC2API.EXPECT().
+					ModifyNetworkInterfaceAttribute(ctx, gomock.AssignableToTypeOf(&ec2.ModifyNetworkInterfaceAttributeInput{})).
+					DoAndReturn(func(_ context.Context, input *ec2.ModifyNetworkInterfaceAttributeInput, _ ...func(*ec2.Options)) (*ec2.ModifyNetworkInterfaceAttributeOutput, error) {
+						Expect(aws.ToString(input.NetworkInterfaceId)).To(Equal(aws.ToString(eniID)))
+						Expect(input.Groups).To(ConsistOf(securityGroupID, securityGroup01ID))
+						return &ec2.ModifyNetworkInterfaceAttributeOutput{}, fmt.Errorf("modify network interface attribute error")
+					})
+
+				// 2. Act: Call the function under test
+				status, err := provider.ReconcileFirewallRule(ctx, log, nodeName, instanceID, firewallRule, firewallrules)
+				// 3. Assert: Check the result
+				Expect(status).To(MatchFields(IgnoreExtras, Fields{
+					"State": Equal(v1alpha1.FirewallRuleStatePending),
+					"Conditions": HaveExactElements(MatchConditions([]kmetav1.Condition{
+						{
+							Type:   v1alpha1.FirewallRuleConditionTypeSecurityGroupCreated,
+							Status: kmetav1.ConditionTrue,
+							Reason: v1alpha1.FirewallRuleConditionReasonSecurityGroupCreated,
+						},
+						{
+							Type:   v1alpha1.FirewallRuleConditionTypeNetworkInterfaceAssociated,
+							Status: kmetav1.ConditionFalse,
+							Reason: v1alpha1.FirewallRuleConditionReasonProviderError,
+						},
+					}, "LastTransitionTime", "ObservedGeneration", "Message")),
+				}))
+				Expect(err).To(HaveOccurred())
+			})
+
+			It("should return a pending state and an error when an AWS API call (revokeSecurityGroupIngress) fails", func() {
+				// 1. Arrange: Set up mock return values
+				mockEC2API.EXPECT().
+					DescribeInstances(ctx, gomock.AssignableToTypeOf(&ec2.DescribeInstancesInput{})).
+					DoAndReturn(func(_ context.Context, input *ec2.DescribeInstancesInput, _ ...func(*ec2.Options)) (*ec2.DescribeInstancesOutput, error) {
+						Expect(input.InstanceIds).To(ConsistOf(instanceID))
+						return &ec2.DescribeInstancesOutput{
+							Reservations: []types.Reservation{
+								{
+									Instances: []types.Instance{
+										{
+											InstanceId: aws.String(instanceID),
+											VpcId:      aws.String(vpcID),
+											NetworkInterfaces: []types.InstanceNetworkInterface{
+												{
+													Association: &types.InstanceNetworkInterfaceAssociation{
+														IpOwnerId: aws.String("aws"),
+														PublicIp:  publicIP,
+													},
+													NetworkInterfaceId: eniID,
+													Groups: []types.GroupIdentifier{
+														{
+															GroupId: aws.String(securityGroupID),
+														},
+														{
+															GroupId: aws.String(securityGroup01ID),
+														},
+													},
+												},
+											},
+										},
+									},
+								},
+							},
+						}, nil
+					})
+				mockEC2API.EXPECT().
+					DescribeSecurityGroups(ctx, gomock.AssignableToTypeOf(&ec2.DescribeSecurityGroupsInput{})).
+					DoAndReturn(func(_ context.Context, input *ec2.DescribeSecurityGroupsInput, _ ...func(*ec2.Options)) (*ec2.DescribeSecurityGroupsOutput, error) {
+						Expect(input.Filters).To(ConsistOf(
+							types.Filter{
+								Name:   aws.String(fmt.Sprintf("tag:%s", TagKeyManaged)),
+								Values: []string{"true"},
+							},
+							types.Filter{
+								Name:   aws.String("vpc-id"),
+								Values: []string{vpcID},
+							},
+							types.Filter{
+								Name:   aws.String(fmt.Sprintf("tag:%s", TagKeyNodeName)),
+								Values: []string{nodeName},
+							},
+						))
+						return &ec2.DescribeSecurityGroupsOutput{
+							SecurityGroups: []types.SecurityGroup{
+								{
+									GroupId: aws.String(securityGroupID),
+									IpPermissions: []types.IpPermission{
+										{
+											IpProtocol: aws.String("TCP"),
+											FromPort:   aws.Int32(5936),
+											ToPort:     aws.Int32(5936),
+										},
+									},
+								},
+							},
+						}, nil
+					})
+				mockEC2API.EXPECT().
+					DescribeNetworkInterfaces(ctx, gomock.AssignableToTypeOf(&ec2.DescribeNetworkInterfacesInput{})).
+					DoAndReturn(func(_ context.Context, input *ec2.DescribeNetworkInterfacesInput, _ ...func(*ec2.Options)) (*ec2.DescribeNetworkInterfacesOutput, error) {
+						Expect(input.Filters).To(ConsistOf(
+							types.Filter{
+								Name:   aws.String("group-id"),
+								Values: []string{securityGroupID},
+							},
+						))
+						return &ec2.DescribeNetworkInterfacesOutput{}, nil
+					})
+				mockEC2API.EXPECT().
+					ModifyNetworkInterfaceAttribute(ctx, gomock.AssignableToTypeOf(&ec2.ModifyNetworkInterfaceAttributeInput{})).
+					DoAndReturn(func(_ context.Context, input *ec2.ModifyNetworkInterfaceAttributeInput, _ ...func(*ec2.Options)) (*ec2.ModifyNetworkInterfaceAttributeOutput, error) {
+						Expect(aws.ToString(input.NetworkInterfaceId)).To(Equal(aws.ToString(eniID)))
+						Expect(input.Groups).To(ConsistOf(securityGroupID, securityGroup01ID))
+						return &ec2.ModifyNetworkInterfaceAttributeOutput{}, nil
+					})
+				mockEC2API.EXPECT().
+					RevokeSecurityGroupIngress(ctx, gomock.AssignableToTypeOf(&ec2.RevokeSecurityGroupIngressInput{})).
+					DoAndReturn(func(_ context.Context, input *ec2.RevokeSecurityGroupIngressInput, _ ...func(*ec2.Options)) (*ec2.RevokeSecurityGroupIngressOutput, error) {
+						Expect(aws.ToString(input.GroupId)).To(Equal(aws.ToString(&securityGroupID)))
+						Expect(input.IpPermissions).To(ConsistOf(
+							types.IpPermission{
+								IpProtocol: aws.String("TCP"),
+								FromPort:   aws.Int32(5936),
+								ToPort:     aws.Int32(5936),
+								IpRanges:   []types.IpRange{},
+							},
+						))
+						return &ec2.RevokeSecurityGroupIngressOutput{}, fmt.Errorf("revoke security group ingress error")
+					})
+
+				// 2. Act: Call the function under test
+				status, err := provider.ReconcileFirewallRule(ctx, log, nodeName, instanceID, firewallRule, firewallrules)
+				// 3. Assert: Check the result
+				Expect(status).To(MatchFields(IgnoreExtras, Fields{
+					"State": Equal(v1alpha1.FirewallRuleStatePending),
+					"Conditions": HaveExactElements(MatchConditions([]kmetav1.Condition{
+						{
+							Type:   v1alpha1.FirewallRuleConditionTypeSecurityGroupCreated,
+							Status: kmetav1.ConditionTrue,
+							Reason: v1alpha1.FirewallRuleConditionReasonSecurityGroupCreated,
+						},
+						{
+							Type:   v1alpha1.FirewallRuleConditionTypeNetworkInterfaceAssociated,
+							Status: kmetav1.ConditionTrue,
+							Reason: v1alpha1.FirewallRuleConditionReasonNetworkInterfaceAssociated,
+						},
+					}, "LastTransitionTime", "ObservedGeneration", "Message")),
+				}))
+				Expect(err).To(HaveOccurred())
+			})
+
+			It("should return a pending state and an error when an AWS API call (revokeSecurityGroupEgress) fails", func() {
+				// 1. Arrange: Set up mock return values
+				mockEC2API.EXPECT().
+					DescribeInstances(ctx, gomock.AssignableToTypeOf(&ec2.DescribeInstancesInput{})).
+					DoAndReturn(func(_ context.Context, input *ec2.DescribeInstancesInput, _ ...func(*ec2.Options)) (*ec2.DescribeInstancesOutput, error) {
+						Expect(input.InstanceIds).To(ConsistOf(instanceID))
+						return &ec2.DescribeInstancesOutput{
+							Reservations: []types.Reservation{
+								{
+									Instances: []types.Instance{
+										{
+											InstanceId: aws.String(instanceID),
+											VpcId:      aws.String(vpcID),
+											NetworkInterfaces: []types.InstanceNetworkInterface{
+												{
+													Association: &types.InstanceNetworkInterfaceAssociation{
+														IpOwnerId: aws.String("aws"),
+														PublicIp:  publicIP,
+													},
+													NetworkInterfaceId: eniID,
+													Groups: []types.GroupIdentifier{
+														{
+															GroupId: aws.String(securityGroupID),
+														},
+														{
+															GroupId: aws.String(securityGroup01ID),
+														},
+													},
+												},
+											},
+										},
+									},
+								},
+							},
+						}, nil
+					})
+				mockEC2API.EXPECT().
+					DescribeSecurityGroups(ctx, gomock.AssignableToTypeOf(&ec2.DescribeSecurityGroupsInput{})).
+					DoAndReturn(func(_ context.Context, input *ec2.DescribeSecurityGroupsInput, _ ...func(*ec2.Options)) (*ec2.DescribeSecurityGroupsOutput, error) {
+						Expect(input.Filters).To(ConsistOf(
+							types.Filter{
+								Name:   aws.String(fmt.Sprintf("tag:%s", TagKeyManaged)),
+								Values: []string{"true"},
+							},
+							types.Filter{
+								Name:   aws.String("vpc-id"),
+								Values: []string{vpcID},
+							},
+							types.Filter{
+								Name:   aws.String(fmt.Sprintf("tag:%s", TagKeyNodeName)),
+								Values: []string{nodeName},
+							},
+						))
+						return &ec2.DescribeSecurityGroupsOutput{
+							SecurityGroups: []types.SecurityGroup{
+								{
+									GroupId: aws.String(securityGroupID),
+									IpPermissions: []types.IpPermission{
+										{
+											IpProtocol: aws.String("TCP"),
+											FromPort:   aws.Int32(5936),
+											ToPort:     aws.Int32(5936),
+										},
+									},
+									IpPermissionsEgress: []types.IpPermission{
+										{
+											IpProtocol: aws.String("TCP"),
+											FromPort:   aws.Int32(5937),
+											ToPort:     aws.Int32(5937),
+										},
+									},
+								},
+							},
+						}, nil
+					})
+				mockEC2API.EXPECT().
+					DescribeNetworkInterfaces(ctx, gomock.AssignableToTypeOf(&ec2.DescribeNetworkInterfacesInput{})).
+					DoAndReturn(func(_ context.Context, input *ec2.DescribeNetworkInterfacesInput, _ ...func(*ec2.Options)) (*ec2.DescribeNetworkInterfacesOutput, error) {
+						Expect(input.Filters).To(ConsistOf(
+							types.Filter{
+								Name:   aws.String("group-id"),
+								Values: []string{securityGroupID},
+							},
+						))
+						return &ec2.DescribeNetworkInterfacesOutput{}, nil
+					})
+				mockEC2API.EXPECT().
+					ModifyNetworkInterfaceAttribute(ctx, gomock.AssignableToTypeOf(&ec2.ModifyNetworkInterfaceAttributeInput{})).
+					DoAndReturn(func(_ context.Context, input *ec2.ModifyNetworkInterfaceAttributeInput, _ ...func(*ec2.Options)) (*ec2.ModifyNetworkInterfaceAttributeOutput, error) {
+						Expect(aws.ToString(input.NetworkInterfaceId)).To(Equal(aws.ToString(eniID)))
+						Expect(input.Groups).To(ConsistOf(securityGroupID, securityGroup01ID))
+						return &ec2.ModifyNetworkInterfaceAttributeOutput{}, nil
+					})
+				mockEC2API.EXPECT().
+					RevokeSecurityGroupIngress(ctx, gomock.AssignableToTypeOf(&ec2.RevokeSecurityGroupIngressInput{})).
+					DoAndReturn(func(_ context.Context, input *ec2.RevokeSecurityGroupIngressInput, _ ...func(*ec2.Options)) (*ec2.RevokeSecurityGroupIngressOutput, error) {
+						Expect(aws.ToString(input.GroupId)).To(Equal(aws.ToString(&securityGroupID)))
+						Expect(input.IpPermissions).To(ConsistOf(
+							types.IpPermission{
+								IpProtocol: aws.String("TCP"),
+								FromPort:   aws.Int32(5936),
+								ToPort:     aws.Int32(5936),
+								IpRanges:   []types.IpRange{},
+							},
+						))
+						return &ec2.RevokeSecurityGroupIngressOutput{}, nil
+					})
+				mockEC2API.EXPECT().
+					RevokeSecurityGroupEgress(ctx, gomock.AssignableToTypeOf(&ec2.RevokeSecurityGroupEgressInput{})).
+					DoAndReturn(func(_ context.Context, input *ec2.RevokeSecurityGroupEgressInput, _ ...func(*ec2.Options)) (*ec2.RevokeSecurityGroupEgressOutput, error) {
+						Expect(aws.ToString(input.GroupId)).To(Equal(aws.ToString(&securityGroupID)))
+						Expect(input.IpPermissions).To(ConsistOf(
+							types.IpPermission{
+								IpProtocol: aws.String("TCP"),
+								FromPort:   aws.Int32(5937),
+								ToPort:     aws.Int32(5937),
+								IpRanges:   []types.IpRange{},
+							},
+						))
+						return &ec2.RevokeSecurityGroupEgressOutput{}, fmt.Errorf("revoke security group egress error")
+					})
+
+				// 2. Act: Call the function under test
+				status, err := provider.ReconcileFirewallRule(ctx, log, nodeName, instanceID, firewallRule, firewallrules)
+				// 3. Assert: Check the result
+				Expect(status).To(MatchFields(IgnoreExtras, Fields{
+					"State": Equal(v1alpha1.FirewallRuleStatePending),
+					"Conditions": HaveExactElements(MatchConditions([]kmetav1.Condition{
+						{
+							Type:   v1alpha1.FirewallRuleConditionTypeSecurityGroupCreated,
+							Status: kmetav1.ConditionTrue,
+							Reason: v1alpha1.FirewallRuleConditionReasonSecurityGroupCreated,
+						},
+						{
+							Type:   v1alpha1.FirewallRuleConditionTypeNetworkInterfaceAssociated,
+							Status: kmetav1.ConditionTrue,
+							Reason: v1alpha1.FirewallRuleConditionReasonNetworkInterfaceAssociated,
+						},
+					}, "LastTransitionTime", "ObservedGeneration", "Message")),
+				}))
+				Expect(err).To(HaveOccurred())
+			})
+		})
+
+		When("the firewallrule has a deletion timestamp", func() {
+			BeforeEach(func() {
+				firewallRule.DeletionTimestamp = &kmetav1.Time{Time: time.Now()}
+			})
+
+			When("the firewallrule is an ingress rule and the last rule", func() {
+				It("should return an error when ReconcileFirewallRulesDeletion fails", func() {
+					// 1. Arrange: Set up mock return values
+					mockEC2API.EXPECT().
+						DescribeInstances(ctx, gomock.AssignableToTypeOf(&ec2.DescribeInstancesInput{})).
+						DoAndReturn(func(_ context.Context, input *ec2.DescribeInstancesInput, _ ...func(*ec2.Options)) (*ec2.DescribeInstancesOutput, error) {
+							Expect(input.InstanceIds).To(ConsistOf(instanceID))
+							return &ec2.DescribeInstancesOutput{
+								Reservations: []types.Reservation{
+									{
+										Instances: []types.Instance{
+											{
+												InstanceId: aws.String(instanceID),
+												VpcId:      aws.String(vpcID),
+												NetworkInterfaces: []types.InstanceNetworkInterface{
+													{
+														Association: &types.InstanceNetworkInterfaceAssociation{
+															IpOwnerId: aws.String("aws"),
+															PublicIp:  publicIP,
+														},
+														NetworkInterfaceId: eniID,
+														Groups: []types.GroupIdentifier{
+															{
+																GroupId: aws.String(securityGroupID),
+															},
+														},
+													},
+												},
+											},
+										},
+									},
+								},
+							}, nil
+						})
+					mockEC2API.EXPECT().
+						DescribeSecurityGroups(ctx, gomock.AssignableToTypeOf(&ec2.DescribeSecurityGroupsInput{})).
+						DoAndReturn(func(_ context.Context, input *ec2.DescribeSecurityGroupsInput, _ ...func(*ec2.Options)) (*ec2.DescribeSecurityGroupsOutput, error) {
+							switch len(input.Filters) {
+							case 3:
+								Expect(input.Filters).To(ConsistOf(
+									types.Filter{
+										Name:   aws.String(fmt.Sprintf("tag:%s", TagKeyManaged)),
+										Values: []string{"true"},
+									},
+									types.Filter{
+										Name:   aws.String("vpc-id"),
+										Values: []string{vpcID},
+									},
+									types.Filter{
+										Name:   aws.String(fmt.Sprintf("tag:%s", TagKeyNodeName)),
+										Values: []string{nodeName},
+									},
+								))
+								return &ec2.DescribeSecurityGroupsOutput{
+									SecurityGroups: []types.SecurityGroup{
+										{
+											GroupId: aws.String(securityGroupID),
+											IpPermissions: []types.IpPermission{
+												{
+													IpProtocol: aws.String("TCP"),
+													FromPort:   aws.Int32(5969),
+													ToPort:     aws.Int32(5969),
+													IpRanges: []types.IpRange{
+														{
+															CidrIp:      aws.String("0.0.0.0/0"),
+															Description: aws.String(""),
+														},
+													},
+												},
+											},
+										},
+									},
+								}, nil
+							case 2:
+								Expect(input.Filters).To(ConsistOf(
+									types.Filter{
+										Name:   aws.String(fmt.Sprintf("tag:%s", TagKeyManaged)),
+										Values: []string{"true"},
+									},
+									types.Filter{
+										Name:   aws.String(fmt.Sprintf("tag:%s", TagKeyNodeName)),
+										Values: []string{nodeName},
+									},
+								))
+								return &ec2.DescribeSecurityGroupsOutput{}, fmt.Errorf("describe security groups error")
+							default:
+								return nil, fmt.Errorf("unexpected number of filters: %d", len(input.Filters))
+
+							}
+						}).Times(2)
+					mockEC2API.EXPECT().
+						DescribeNetworkInterfaces(ctx, gomock.AssignableToTypeOf(&ec2.DescribeNetworkInterfacesInput{})).
+						DoAndReturn(func(_ context.Context, input *ec2.DescribeNetworkInterfacesInput, _ ...func(*ec2.Options)) (*ec2.DescribeNetworkInterfacesOutput, error) {
+							Expect(input.Filters).To(ConsistOf(
+								types.Filter{
+									Name:   aws.String("group-id"),
+									Values: []string{securityGroupID},
+								},
+							))
+							return &ec2.DescribeNetworkInterfacesOutput{
+								NetworkInterfaces: []types.NetworkInterface{
+									{
+										NetworkInterfaceId: eniID,
+										Groups: []types.GroupIdentifier{
+											{
+												GroupId: aws.String(securityGroupID),
+											},
+										},
+									},
+								},
+							}, nil
+						})
+
+					// 2. Act: Call the function under test
+					status, err := provider.ReconcileFirewallRule(ctx, log, nodeName, instanceID, firewallRule, firewallrules)
+					// 3. Assert: Check the result
+					Expect(status).To(MatchFields(IgnoreExtras, Fields{
+						"State": Equal(v1alpha1.FirewallRuleStatePending),
+						"Conditions": HaveExactElements(MatchConditions([]kmetav1.Condition{
+							{
+								Type:   v1alpha1.FirewallRuleConditionTypeSecurityGroupCreated,
+								Status: kmetav1.ConditionTrue,
+								Reason: v1alpha1.FirewallRuleConditionReasonSecurityGroupCreated,
+							},
+							{
+								Type:   v1alpha1.FirewallRuleConditionTypeNetworkInterfaceAssociated,
+								Status: kmetav1.ConditionTrue,
+								Reason: v1alpha1.FirewallRuleConditionReasonNetworkInterfaceAssociated,
+							},
+						}, "LastTransitionTime", "ObservedGeneration", "Message")),
+					}))
+					Expect(err).To(HaveOccurred())
+				})
+			})
+
+			When("the firewallrule is an ingress rule and not the last rule (has at least another ingress rule)", func() {
+				It("should return an error when an AWS API call (RevokeSecurityGroupIngress) fails", func() {
+					// 1. Arrange: Set up mock return values
+					mockEC2API.EXPECT().
+						DescribeInstances(ctx, gomock.AssignableToTypeOf(&ec2.DescribeInstancesInput{})).
+						DoAndReturn(func(_ context.Context, input *ec2.DescribeInstancesInput, _ ...func(*ec2.Options)) (*ec2.DescribeInstancesOutput, error) {
+							Expect(input.InstanceIds).To(ConsistOf(instanceID))
+							return &ec2.DescribeInstancesOutput{
+								Reservations: []types.Reservation{
+									{
+										Instances: []types.Instance{
+											{
+												InstanceId: aws.String(instanceID),
+												VpcId:      aws.String(vpcID),
+												NetworkInterfaces: []types.InstanceNetworkInterface{
+													{
+														Association: &types.InstanceNetworkInterfaceAssociation{
+															IpOwnerId: aws.String("aws"),
+															PublicIp:  publicIP,
+														},
+														NetworkInterfaceId: eniID,
+														Groups: []types.GroupIdentifier{
+															{
+																GroupId: aws.String(securityGroupID),
+															},
+														},
+													},
+												},
+											},
+										},
+									},
+								},
+							}, nil
+						})
+					mockEC2API.EXPECT().
+						DescribeSecurityGroups(ctx, gomock.AssignableToTypeOf(&ec2.DescribeSecurityGroupsInput{})).
+						DoAndReturn(func(_ context.Context, input *ec2.DescribeSecurityGroupsInput, _ ...func(*ec2.Options)) (*ec2.DescribeSecurityGroupsOutput, error) {
+							Expect(input.Filters).To(ConsistOf(
+								types.Filter{
+									Name:   aws.String(fmt.Sprintf("tag:%s", TagKeyManaged)),
+									Values: []string{"true"},
+								},
+								types.Filter{
+									Name:   aws.String("vpc-id"),
+									Values: []string{vpcID},
+								},
+								types.Filter{
+									Name:   aws.String(fmt.Sprintf("tag:%s", TagKeyNodeName)),
+									Values: []string{nodeName},
+								},
+							))
+							return &ec2.DescribeSecurityGroupsOutput{
+								SecurityGroups: []types.SecurityGroup{
+									{
+										GroupId: aws.String(securityGroupID),
+										IpPermissions: []types.IpPermission{
+											{
+												IpProtocol: aws.String("TCP"),
+												FromPort:   aws.Int32(5969),
+												ToPort:     aws.Int32(5969),
+												IpRanges: []types.IpRange{
+													{
+														CidrIp: aws.String("0.0.0.0/0"),
+													},
+												},
+											},
+											{
+												IpProtocol: aws.String("TCP"),
+												FromPort:   aws.Int32(5970),
+												ToPort:     aws.Int32(5970),
+												IpRanges: []types.IpRange{
+													{
+														CidrIp: aws.String("0.0.0.0/0"),
+													},
+												},
+											},
+										},
+									},
+								},
+							}, nil
+						})
+					mockEC2API.EXPECT().
+						DescribeNetworkInterfaces(ctx, gomock.AssignableToTypeOf(&ec2.DescribeNetworkInterfacesInput{})).
+						DoAndReturn(func(_ context.Context, input *ec2.DescribeNetworkInterfacesInput, _ ...func(*ec2.Options)) (*ec2.DescribeNetworkInterfacesOutput, error) {
+							Expect(input.Filters).To(ConsistOf(
+								types.Filter{
+									Name:   aws.String("group-id"),
+									Values: []string{securityGroupID},
+								},
+							))
+							return &ec2.DescribeNetworkInterfacesOutput{
+								NetworkInterfaces: []types.NetworkInterface{
+									{
+										NetworkInterfaceId: eniID,
+										Groups: []types.GroupIdentifier{
+											{
+												GroupId: aws.String(securityGroupID),
+											},
+										},
+									},
+								},
+							}, nil
+						})
+					mockEC2API.EXPECT().
+						RevokeSecurityGroupIngress(ctx, gomock.AssignableToTypeOf(&ec2.RevokeSecurityGroupIngressInput{})).
+						DoAndReturn(func(_ context.Context, input *ec2.RevokeSecurityGroupIngressInput, _ ...func(*ec2.Options)) (*ec2.RevokeSecurityGroupIngressOutput, error) {
+							Expect(aws.ToString(input.GroupId)).To(Equal(aws.ToString(&securityGroupID)))
+							Expect(input.IpPermissions).To(ConsistOf(
+								types.IpPermission{
+									IpProtocol: aws.String("TCP"),
+									FromPort:   aws.Int32(5969),
+									ToPort:     aws.Int32(5969),
+									IpRanges: []types.IpRange{
+										{
+											CidrIp: aws.String("0.0.0.0/0"),
+										},
+									},
+								},
+							))
+							return &ec2.RevokeSecurityGroupIngressOutput{}, fmt.Errorf("revoke security group ingress error")
+						})
+
+					// 2. Act: Call the function under test
+					status, err := provider.ReconcileFirewallRule(ctx, log, nodeName, instanceID, firewallRule, firewallrules)
+					// 3. Assert: Check the result
+					Expect(status).To(MatchFields(IgnoreExtras, Fields{
+						"State": Equal(v1alpha1.FirewallRuleStatePending),
+						"Conditions": HaveExactElements(MatchConditions([]kmetav1.Condition{
+							{
+								Type:   v1alpha1.FirewallRuleConditionTypeSecurityGroupCreated,
+								Status: kmetav1.ConditionTrue,
+								Reason: v1alpha1.FirewallRuleConditionReasonSecurityGroupCreated,
+							},
+							{
+								Type:   v1alpha1.FirewallRuleConditionTypeNetworkInterfaceAssociated,
+								Status: kmetav1.ConditionTrue,
+								Reason: v1alpha1.FirewallRuleConditionReasonNetworkInterfaceAssociated,
+							},
+						}, "LastTransitionTime", "ObservedGeneration", "Message")),
+					}))
+					Expect(err).To(HaveOccurred())
+				})
+			})
+
+			When("the firewallrule is an ingress rule and not the last rule (has at least another egress rule)", func() {
+				BeforeEach(func() {
+					firewallRule01.Spec.Direction = v1alpha1.DirectionEgress
+					firewallrules = []v1alpha1.FirewallRule{*firewallRule, *firewallRule01}
+				})
+				It("should return an error when an AWS API call (RevokeSecurityGroupIngress) fails", func() {
+					// 1. Arrange: Set up mock return values
+					mockEC2API.EXPECT().
+						DescribeInstances(ctx, gomock.AssignableToTypeOf(&ec2.DescribeInstancesInput{})).
+						DoAndReturn(func(_ context.Context, input *ec2.DescribeInstancesInput, _ ...func(*ec2.Options)) (*ec2.DescribeInstancesOutput, error) {
+							Expect(input.InstanceIds).To(ConsistOf(instanceID))
+							return &ec2.DescribeInstancesOutput{
+								Reservations: []types.Reservation{
+									{
+										Instances: []types.Instance{
+											{
+												InstanceId: aws.String(instanceID),
+												VpcId:      aws.String(vpcID),
+												NetworkInterfaces: []types.InstanceNetworkInterface{
+													{
+														Association: &types.InstanceNetworkInterfaceAssociation{
+															IpOwnerId: aws.String("aws"),
+															PublicIp:  publicIP,
+														},
+														NetworkInterfaceId: eniID,
+														Groups: []types.GroupIdentifier{
+															{
+																GroupId: aws.String(securityGroupID),
+															},
+														},
+													},
+												},
+											},
+										},
+									},
+								},
+							}, nil
+						})
+					mockEC2API.EXPECT().
+						DescribeSecurityGroups(ctx, gomock.AssignableToTypeOf(&ec2.DescribeSecurityGroupsInput{})).
+						DoAndReturn(func(_ context.Context, input *ec2.DescribeSecurityGroupsInput, _ ...func(*ec2.Options)) (*ec2.DescribeSecurityGroupsOutput, error) {
+							Expect(input.Filters).To(ConsistOf(
+								types.Filter{
+									Name:   aws.String(fmt.Sprintf("tag:%s", TagKeyManaged)),
+									Values: []string{"true"},
+								},
+								types.Filter{
+									Name:   aws.String("vpc-id"),
+									Values: []string{vpcID},
+								},
+								types.Filter{
+									Name:   aws.String(fmt.Sprintf("tag:%s", TagKeyNodeName)),
+									Values: []string{nodeName},
+								},
+							))
+							return &ec2.DescribeSecurityGroupsOutput{
+								SecurityGroups: []types.SecurityGroup{
+									{
+										GroupId: aws.String(securityGroupID),
+										IpPermissions: []types.IpPermission{
+											{
+												IpProtocol: aws.String("TCP"),
+												FromPort:   aws.Int32(5969),
+												ToPort:     aws.Int32(5969),
+												IpRanges: []types.IpRange{
+													{
+														CidrIp: aws.String("0.0.0.0/0"),
+													},
+												},
+											},
+										},
+										IpPermissionsEgress: []types.IpPermission{
+											{
+												IpProtocol: aws.String("TCP"),
+												FromPort:   aws.Int32(5970),
+												ToPort:     aws.Int32(5970),
+												IpRanges: []types.IpRange{
+													{
+														CidrIp: aws.String("0.0.0.0/0"),
+													},
+												},
+											},
+										},
+									},
+								},
+							}, nil
+						})
+					mockEC2API.EXPECT().
+						DescribeNetworkInterfaces(ctx, gomock.AssignableToTypeOf(&ec2.DescribeNetworkInterfacesInput{})).
+						DoAndReturn(func(_ context.Context, input *ec2.DescribeNetworkInterfacesInput, _ ...func(*ec2.Options)) (*ec2.DescribeNetworkInterfacesOutput, error) {
+							Expect(input.Filters).To(ConsistOf(
+								types.Filter{
+									Name:   aws.String("group-id"),
+									Values: []string{securityGroupID},
+								},
+							))
+							return &ec2.DescribeNetworkInterfacesOutput{
+								NetworkInterfaces: []types.NetworkInterface{
+									{
+										NetworkInterfaceId: eniID,
+										Groups: []types.GroupIdentifier{
+											{
+												GroupId: aws.String(securityGroupID),
+											},
+										},
+									},
+								},
+							}, nil
+						})
+					mockEC2API.EXPECT().
+						RevokeSecurityGroupIngress(ctx, gomock.AssignableToTypeOf(&ec2.RevokeSecurityGroupIngressInput{})).
+						DoAndReturn(func(_ context.Context, input *ec2.RevokeSecurityGroupIngressInput, _ ...func(*ec2.Options)) (*ec2.RevokeSecurityGroupIngressOutput, error) {
+							Expect(aws.ToString(input.GroupId)).To(Equal(aws.ToString(&securityGroupID)))
+							Expect(input.IpPermissions).To(ConsistOf(
+								types.IpPermission{
+									IpProtocol: aws.String("TCP"),
+									FromPort:   aws.Int32(5969),
+									ToPort:     aws.Int32(5969),
+									IpRanges: []types.IpRange{
+										{
+											CidrIp: aws.String("0.0.0.0/0"),
+										},
+									},
+								},
+							))
+							return &ec2.RevokeSecurityGroupIngressOutput{}, fmt.Errorf("revoke security group ingress error")
+						})
+
+					// 2. Act: Call the function under test
+					status, err := provider.ReconcileFirewallRule(ctx, log, nodeName, instanceID, firewallRule, firewallrules)
+					// 3. Assert: Check the result
+					Expect(status).To(MatchFields(IgnoreExtras, Fields{
+						"State": Equal(v1alpha1.FirewallRuleStatePending),
+						"Conditions": HaveExactElements(MatchConditions([]kmetav1.Condition{
+							{
+								Type:   v1alpha1.FirewallRuleConditionTypeSecurityGroupCreated,
+								Status: kmetav1.ConditionTrue,
+								Reason: v1alpha1.FirewallRuleConditionReasonSecurityGroupCreated,
+							},
+							{
+								Type:   v1alpha1.FirewallRuleConditionTypeNetworkInterfaceAssociated,
+								Status: kmetav1.ConditionTrue,
+								Reason: v1alpha1.FirewallRuleConditionReasonNetworkInterfaceAssociated,
+							},
+						}, "LastTransitionTime", "ObservedGeneration", "Message")),
+					}))
+					Expect(err).To(HaveOccurred())
+				})
+			})
+
+			When("the firewallrule is an egress rule and the last rule", func() {
+				BeforeEach(func() {
+					firewallRule.Spec.Direction = v1alpha1.DirectionEgress
+					firewallrules = []v1alpha1.FirewallRule{*firewallRule, *firewallRule01}
+				})
+				It("should return an error when ReconcileFirewallRulesDeletion fails", func() {
+					// 1. Arrange: Set up mock return values
+					mockEC2API.EXPECT().
+						DescribeInstances(ctx, gomock.AssignableToTypeOf(&ec2.DescribeInstancesInput{})).
+						DoAndReturn(func(_ context.Context, input *ec2.DescribeInstancesInput, _ ...func(*ec2.Options)) (*ec2.DescribeInstancesOutput, error) {
+							Expect(input.InstanceIds).To(ConsistOf(instanceID))
+							return &ec2.DescribeInstancesOutput{
+								Reservations: []types.Reservation{
+									{
+										Instances: []types.Instance{
+											{
+												InstanceId: aws.String(instanceID),
+												VpcId:      aws.String(vpcID),
+												NetworkInterfaces: []types.InstanceNetworkInterface{
+													{
+														Association: &types.InstanceNetworkInterfaceAssociation{
+															IpOwnerId: aws.String("aws"),
+															PublicIp:  publicIP,
+														},
+														NetworkInterfaceId: eniID,
+														Groups: []types.GroupIdentifier{
+															{
+																GroupId: aws.String(securityGroupID),
+															},
+														},
+													},
+												},
+											},
+										},
+									},
+								},
+							}, nil
+						})
+					mockEC2API.EXPECT().
+						DescribeSecurityGroups(ctx, gomock.AssignableToTypeOf(&ec2.DescribeSecurityGroupsInput{})).
+						DoAndReturn(func(_ context.Context, input *ec2.DescribeSecurityGroupsInput, _ ...func(*ec2.Options)) (*ec2.DescribeSecurityGroupsOutput, error) {
+							switch len(input.Filters) {
+							case 3:
+								Expect(input.Filters).To(ConsistOf(
+									types.Filter{
+										Name:   aws.String(fmt.Sprintf("tag:%s", TagKeyManaged)),
+										Values: []string{"true"},
+									},
+									types.Filter{
+										Name:   aws.String("vpc-id"),
+										Values: []string{vpcID},
+									},
+									types.Filter{
+										Name:   aws.String(fmt.Sprintf("tag:%s", TagKeyNodeName)),
+										Values: []string{nodeName},
+									},
+								))
+								return &ec2.DescribeSecurityGroupsOutput{
+									SecurityGroups: []types.SecurityGroup{
+										{
+											GroupId: aws.String(securityGroupID),
+											IpPermissionsEgress: []types.IpPermission{
+												{
+													IpProtocol: aws.String("TCP"),
+													FromPort:   aws.Int32(5969),
+													ToPort:     aws.Int32(5969),
+													IpRanges: []types.IpRange{
+														{
+															CidrIp:      aws.String("0.0.0.0/0"),
+															Description: aws.String(""),
+														},
+													},
+												},
+											},
+										},
+									},
+								}, nil
+							case 2:
+								Expect(input.Filters).To(ConsistOf(
+									types.Filter{
+										Name:   aws.String(fmt.Sprintf("tag:%s", TagKeyManaged)),
+										Values: []string{"true"},
+									},
+									types.Filter{
+										Name:   aws.String(fmt.Sprintf("tag:%s", TagKeyNodeName)),
+										Values: []string{nodeName},
+									},
+								))
+								return &ec2.DescribeSecurityGroupsOutput{}, fmt.Errorf("describe security groups error")
+							default:
+								return nil, fmt.Errorf("unexpected number of filters: %d", len(input.Filters))
+
+							}
+						}).Times(2)
+					mockEC2API.EXPECT().
+						DescribeNetworkInterfaces(ctx, gomock.AssignableToTypeOf(&ec2.DescribeNetworkInterfacesInput{})).
+						DoAndReturn(func(_ context.Context, input *ec2.DescribeNetworkInterfacesInput, _ ...func(*ec2.Options)) (*ec2.DescribeNetworkInterfacesOutput, error) {
+							Expect(input.Filters).To(ConsistOf(
+								types.Filter{
+									Name:   aws.String("group-id"),
+									Values: []string{securityGroupID},
+								},
+							))
+							return &ec2.DescribeNetworkInterfacesOutput{
+								NetworkInterfaces: []types.NetworkInterface{
+									{
+										NetworkInterfaceId: eniID,
+										Groups: []types.GroupIdentifier{
+											{
+												GroupId: aws.String(securityGroupID),
+											},
+										},
+									},
+								},
+							}, nil
+						})
+
+					// 2. Act: Call the function under test
+					status, err := provider.ReconcileFirewallRule(ctx, log, nodeName, instanceID, firewallRule, firewallrules)
+					// 3. Assert: Check the result
+					Expect(status).To(MatchFields(IgnoreExtras, Fields{
+						"State": Equal(v1alpha1.FirewallRuleStatePending),
+						"Conditions": HaveExactElements(MatchConditions([]kmetav1.Condition{
+							{
+								Type:   v1alpha1.FirewallRuleConditionTypeSecurityGroupCreated,
+								Status: kmetav1.ConditionTrue,
+								Reason: v1alpha1.FirewallRuleConditionReasonSecurityGroupCreated,
+							},
+							{
+								Type:   v1alpha1.FirewallRuleConditionTypeNetworkInterfaceAssociated,
+								Status: kmetav1.ConditionTrue,
+								Reason: v1alpha1.FirewallRuleConditionReasonNetworkInterfaceAssociated,
+							},
+						}, "LastTransitionTime", "ObservedGeneration", "Message")),
+					}))
+					Expect(err).To(HaveOccurred())
+				})
+			})
+
+			When("the firewallrule is an egress rule and not the last rule (has at least another egress rule)", func() {
+				BeforeEach(func() {
+					firewallRule.Spec.Direction = v1alpha1.DirectionEgress
+					firewallRule01.Spec.Direction = v1alpha1.DirectionEgress
+					firewallrules = []v1alpha1.FirewallRule{*firewallRule, *firewallRule01}
+				})
+				It("should return an error when an AWS API call (RevokeSecurityGroupEgress) fails", func() {
+					// 1. Arrange: Set up mock return values
+					mockEC2API.EXPECT().
+						DescribeInstances(ctx, gomock.AssignableToTypeOf(&ec2.DescribeInstancesInput{})).
+						DoAndReturn(func(_ context.Context, input *ec2.DescribeInstancesInput, _ ...func(*ec2.Options)) (*ec2.DescribeInstancesOutput, error) {
+							Expect(input.InstanceIds).To(ConsistOf(instanceID))
+							return &ec2.DescribeInstancesOutput{
+								Reservations: []types.Reservation{
+									{
+										Instances: []types.Instance{
+											{
+												InstanceId: aws.String(instanceID),
+												VpcId:      aws.String(vpcID),
+												NetworkInterfaces: []types.InstanceNetworkInterface{
+													{
+														Association: &types.InstanceNetworkInterfaceAssociation{
+															IpOwnerId: aws.String("aws"),
+															PublicIp:  publicIP,
+														},
+														NetworkInterfaceId: eniID,
+														Groups: []types.GroupIdentifier{
+															{
+																GroupId: aws.String(securityGroupID),
+															},
+														},
+													},
+												},
+											},
+										},
+									},
+								},
+							}, nil
+						})
+					mockEC2API.EXPECT().
+						DescribeSecurityGroups(ctx, gomock.AssignableToTypeOf(&ec2.DescribeSecurityGroupsInput{})).
+						DoAndReturn(func(_ context.Context, input *ec2.DescribeSecurityGroupsInput, _ ...func(*ec2.Options)) (*ec2.DescribeSecurityGroupsOutput, error) {
+							Expect(input.Filters).To(ConsistOf(
+								types.Filter{
+									Name:   aws.String(fmt.Sprintf("tag:%s", TagKeyManaged)),
+									Values: []string{"true"},
+								},
+								types.Filter{
+									Name:   aws.String("vpc-id"),
+									Values: []string{vpcID},
+								},
+								types.Filter{
+									Name:   aws.String(fmt.Sprintf("tag:%s", TagKeyNodeName)),
+									Values: []string{nodeName},
+								},
+							))
+							return &ec2.DescribeSecurityGroupsOutput{
+								SecurityGroups: []types.SecurityGroup{
+									{
+										GroupId: aws.String(securityGroupID),
+										IpPermissionsEgress: []types.IpPermission{
+											{
+												IpProtocol: aws.String("TCP"),
+												FromPort:   aws.Int32(5969),
+												ToPort:     aws.Int32(5969),
+												IpRanges: []types.IpRange{
+													{
+														CidrIp: aws.String("0.0.0.0/0"),
+													},
+												},
+											},
+											{
+												IpProtocol: aws.String("TCP"),
+												FromPort:   aws.Int32(5970),
+												ToPort:     aws.Int32(5970),
+												IpRanges: []types.IpRange{
+													{
+														CidrIp: aws.String("0.0.0.0/0"),
+													},
+												},
+											},
+										},
+									},
+								},
+							}, nil
+						})
+					mockEC2API.EXPECT().
+						DescribeNetworkInterfaces(ctx, gomock.AssignableToTypeOf(&ec2.DescribeNetworkInterfacesInput{})).
+						DoAndReturn(func(_ context.Context, input *ec2.DescribeNetworkInterfacesInput, _ ...func(*ec2.Options)) (*ec2.DescribeNetworkInterfacesOutput, error) {
+							Expect(input.Filters).To(ConsistOf(
+								types.Filter{
+									Name:   aws.String("group-id"),
+									Values: []string{securityGroupID},
+								},
+							))
+							return &ec2.DescribeNetworkInterfacesOutput{
+								NetworkInterfaces: []types.NetworkInterface{
+									{
+										NetworkInterfaceId: eniID,
+										Groups: []types.GroupIdentifier{
+											{
+												GroupId: aws.String(securityGroupID),
+											},
+										},
+									},
+								},
+							}, nil
+						})
+					mockEC2API.EXPECT().
+						RevokeSecurityGroupEgress(ctx, gomock.AssignableToTypeOf(&ec2.RevokeSecurityGroupEgressInput{})).
+						DoAndReturn(func(_ context.Context, input *ec2.RevokeSecurityGroupEgressInput, _ ...func(*ec2.Options)) (*ec2.RevokeSecurityGroupEgressOutput, error) {
+							Expect(aws.ToString(input.GroupId)).To(Equal(aws.ToString(&securityGroupID)))
+							Expect(input.IpPermissions).To(ConsistOf(
+								types.IpPermission{
+									IpProtocol: aws.String("TCP"),
+									FromPort:   aws.Int32(5969),
+									ToPort:     aws.Int32(5969),
+									IpRanges: []types.IpRange{
+										{
+											CidrIp: aws.String("0.0.0.0/0"),
+										},
+									},
+								},
+							))
+							return &ec2.RevokeSecurityGroupEgressOutput{}, fmt.Errorf("revoke security group egress error")
+						})
+
+					// 2. Act: Call the function under test
+					status, err := provider.ReconcileFirewallRule(ctx, log, nodeName, instanceID, firewallRule, firewallrules)
+					// 3. Assert: Check the result
+					Expect(status).To(MatchFields(IgnoreExtras, Fields{
+						"State": Equal(v1alpha1.FirewallRuleStatePending),
+						"Conditions": HaveExactElements(MatchConditions([]kmetav1.Condition{
+							{
+								Type:   v1alpha1.FirewallRuleConditionTypeSecurityGroupCreated,
+								Status: kmetav1.ConditionTrue,
+								Reason: v1alpha1.FirewallRuleConditionReasonSecurityGroupCreated,
+							},
+							{
+								Type:   v1alpha1.FirewallRuleConditionTypeNetworkInterfaceAssociated,
+								Status: kmetav1.ConditionTrue,
+								Reason: v1alpha1.FirewallRuleConditionReasonNetworkInterfaceAssociated,
+							},
+						}, "LastTransitionTime", "ObservedGeneration", "Message")),
+					}))
+					Expect(err).To(HaveOccurred())
+				})
+			})
+
+			When("the firewallrule is an egress rule and not the last rule (has at least another ingress rule)", func() {
+				BeforeEach(func() {
+					firewallRule.Spec.Direction = v1alpha1.DirectionEgress
+					firewallrules = []v1alpha1.FirewallRule{*firewallRule, *firewallRule01}
+				})
+				It("should return an error when an AWS API call (RevokeSecurityGroupEgress) fails", func() {
+					// 1. Arrange: Set up mock return values
+					mockEC2API.EXPECT().
+						DescribeInstances(ctx, gomock.AssignableToTypeOf(&ec2.DescribeInstancesInput{})).
+						DoAndReturn(func(_ context.Context, input *ec2.DescribeInstancesInput, _ ...func(*ec2.Options)) (*ec2.DescribeInstancesOutput, error) {
+							Expect(input.InstanceIds).To(ConsistOf(instanceID))
+							return &ec2.DescribeInstancesOutput{
+								Reservations: []types.Reservation{
+									{
+										Instances: []types.Instance{
+											{
+												InstanceId: aws.String(instanceID),
+												VpcId:      aws.String(vpcID),
+												NetworkInterfaces: []types.InstanceNetworkInterface{
+													{
+														Association: &types.InstanceNetworkInterfaceAssociation{
+															IpOwnerId: aws.String("aws"),
+															PublicIp:  publicIP,
+														},
+														NetworkInterfaceId: eniID,
+														Groups: []types.GroupIdentifier{
+															{
+																GroupId: aws.String(securityGroupID),
+															},
+														},
+													},
+												},
+											},
+										},
+									},
+								},
+							}, nil
+						})
+					mockEC2API.EXPECT().
+						DescribeSecurityGroups(ctx, gomock.AssignableToTypeOf(&ec2.DescribeSecurityGroupsInput{})).
+						DoAndReturn(func(_ context.Context, input *ec2.DescribeSecurityGroupsInput, _ ...func(*ec2.Options)) (*ec2.DescribeSecurityGroupsOutput, error) {
+							Expect(input.Filters).To(ConsistOf(
+								types.Filter{
+									Name:   aws.String(fmt.Sprintf("tag:%s", TagKeyManaged)),
+									Values: []string{"true"},
+								},
+								types.Filter{
+									Name:   aws.String("vpc-id"),
+									Values: []string{vpcID},
+								},
+								types.Filter{
+									Name:   aws.String(fmt.Sprintf("tag:%s", TagKeyNodeName)),
+									Values: []string{nodeName},
+								},
+							))
+							return &ec2.DescribeSecurityGroupsOutput{
+								SecurityGroups: []types.SecurityGroup{
+									{
+										GroupId: aws.String(securityGroupID),
+										IpPermissionsEgress: []types.IpPermission{
+											{
+												IpProtocol: aws.String("TCP"),
+												FromPort:   aws.Int32(5969),
+												ToPort:     aws.Int32(5969),
+												IpRanges: []types.IpRange{
+													{
+														CidrIp: aws.String("0.0.0.0/0"),
+													},
+												},
+											},
+										},
+										IpPermissions: []types.IpPermission{
+											{
+												IpProtocol: aws.String("TCP"),
+												FromPort:   aws.Int32(5970),
+												ToPort:     aws.Int32(5970),
+												IpRanges: []types.IpRange{
+													{
+														CidrIp: aws.String("0.0.0.0/0"),
+													},
+												},
+											},
+										},
+									},
+								},
+							}, nil
+						})
+					mockEC2API.EXPECT().
+						DescribeNetworkInterfaces(ctx, gomock.AssignableToTypeOf(&ec2.DescribeNetworkInterfacesInput{})).
+						DoAndReturn(func(_ context.Context, input *ec2.DescribeNetworkInterfacesInput, _ ...func(*ec2.Options)) (*ec2.DescribeNetworkInterfacesOutput, error) {
+							Expect(input.Filters).To(ConsistOf(
+								types.Filter{
+									Name:   aws.String("group-id"),
+									Values: []string{securityGroupID},
+								},
+							))
+							return &ec2.DescribeNetworkInterfacesOutput{
+								NetworkInterfaces: []types.NetworkInterface{
+									{
+										NetworkInterfaceId: eniID,
+										Groups: []types.GroupIdentifier{
+											{
+												GroupId: aws.String(securityGroupID),
+											},
+										},
+									},
+								},
+							}, nil
+						})
+					mockEC2API.EXPECT().
+						RevokeSecurityGroupEgress(ctx, gomock.AssignableToTypeOf(&ec2.RevokeSecurityGroupEgressInput{})).
+						DoAndReturn(func(_ context.Context, input *ec2.RevokeSecurityGroupEgressInput, _ ...func(*ec2.Options)) (*ec2.RevokeSecurityGroupEgressOutput, error) {
+							Expect(aws.ToString(input.GroupId)).To(Equal(aws.ToString(&securityGroupID)))
+							Expect(input.IpPermissions).To(ConsistOf(
+								types.IpPermission{
+									IpProtocol: aws.String("TCP"),
+									FromPort:   aws.Int32(5969),
+									ToPort:     aws.Int32(5969),
+									IpRanges: []types.IpRange{
+										{
+											CidrIp: aws.String("0.0.0.0/0"),
+										},
+									},
+								},
+							))
+							return &ec2.RevokeSecurityGroupEgressOutput{}, fmt.Errorf("revoke security group Egress error")
+						})
+
+					// 2. Act: Call the function under test
+					status, err := provider.ReconcileFirewallRule(ctx, log, nodeName, instanceID, firewallRule, firewallrules)
+					// 3. Assert: Check the result
+					Expect(status).To(MatchFields(IgnoreExtras, Fields{
+						"State": Equal(v1alpha1.FirewallRuleStatePending),
+						"Conditions": HaveExactElements(MatchConditions([]kmetav1.Condition{
+							{
+								Type:   v1alpha1.FirewallRuleConditionTypeSecurityGroupCreated,
+								Status: kmetav1.ConditionTrue,
+								Reason: v1alpha1.FirewallRuleConditionReasonSecurityGroupCreated,
+							},
+							{
+								Type:   v1alpha1.FirewallRuleConditionTypeNetworkInterfaceAssociated,
+								Status: kmetav1.ConditionTrue,
+								Reason: v1alpha1.FirewallRuleConditionReasonNetworkInterfaceAssociated,
+							},
+						}, "LastTransitionTime", "ObservedGeneration", "Message")),
+					}))
+					Expect(err).To(HaveOccurred())
+				})
+			})
+
+			It("should return a status and nil when it succeeds", func() {
+				mockEC2API.EXPECT().
+					DescribeInstances(ctx, gomock.AssignableToTypeOf(&ec2.DescribeInstancesInput{})).
+					DoAndReturn(func(_ context.Context, input *ec2.DescribeInstancesInput, _ ...func(*ec2.Options)) (*ec2.DescribeInstancesOutput, error) {
+						Expect(input.InstanceIds).To(ConsistOf(instanceID))
+						return &ec2.DescribeInstancesOutput{
+							Reservations: []types.Reservation{
+								{
+									Instances: []types.Instance{
+										{
+											InstanceId: aws.String(instanceID),
+											VpcId:      aws.String(vpcID),
+											NetworkInterfaces: []types.InstanceNetworkInterface{
+												{
+													Association: &types.InstanceNetworkInterfaceAssociation{
+														IpOwnerId: aws.String("aws"),
+														PublicIp:  publicIP,
+													},
+													NetworkInterfaceId: eniID,
+													Groups: []types.GroupIdentifier{
+														{
+															GroupId: aws.String(securityGroupID),
+														},
+													},
+												},
+											},
+										},
+									},
+								},
+							},
+						}, nil
+					})
+				mockEC2API.EXPECT().
+					DescribeSecurityGroups(ctx, gomock.AssignableToTypeOf(&ec2.DescribeSecurityGroupsInput{})).
+					DoAndReturn(func(_ context.Context, input *ec2.DescribeSecurityGroupsInput, _ ...func(*ec2.Options)) (*ec2.DescribeSecurityGroupsOutput, error) {
+						Expect(input.Filters).To(ConsistOf(
+							types.Filter{
+								Name:   aws.String(fmt.Sprintf("tag:%s", TagKeyManaged)),
+								Values: []string{"true"},
+							},
+							types.Filter{
+								Name:   aws.String("vpc-id"),
+								Values: []string{vpcID},
+							},
+							types.Filter{
+								Name:   aws.String(fmt.Sprintf("tag:%s", TagKeyNodeName)),
+								Values: []string{nodeName},
+							},
+						))
+						return &ec2.DescribeSecurityGroupsOutput{
+							SecurityGroups: []types.SecurityGroup{
+								{
+									GroupId: aws.String(securityGroupID),
+									IpPermissions: []types.IpPermission{
+										{
+											IpProtocol: aws.String("TCP"),
+											FromPort:   aws.Int32(5969),
+											ToPort:     aws.Int32(5969),
+											IpRanges: []types.IpRange{
+												{
+													CidrIp: aws.String("0.0.0.0/0"),
+												},
+											},
+										},
+										{
+											IpProtocol: aws.String("TCP"),
+											FromPort:   aws.Int32(5970),
+											ToPort:     aws.Int32(5970),
+											IpRanges: []types.IpRange{
+												{
+													CidrIp: aws.String("0.0.0.0/0"),
+												},
+											},
+										},
+									},
+								},
+							},
+						}, nil
+					})
+				mockEC2API.EXPECT().
+					DescribeNetworkInterfaces(ctx, gomock.AssignableToTypeOf(&ec2.DescribeNetworkInterfacesInput{})).
+					DoAndReturn(func(_ context.Context, input *ec2.DescribeNetworkInterfacesInput, _ ...func(*ec2.Options)) (*ec2.DescribeNetworkInterfacesOutput, error) {
+						Expect(input.Filters).To(ConsistOf(
+							types.Filter{
+								Name:   aws.String("group-id"),
+								Values: []string{securityGroupID},
+							},
+						))
+						return &ec2.DescribeNetworkInterfacesOutput{
+							NetworkInterfaces: []types.NetworkInterface{
+								{
+									NetworkInterfaceId: eniID,
+									Groups: []types.GroupIdentifier{
+										{
+											GroupId: aws.String(securityGroupID),
+										},
+									},
+								},
+							},
+						}, nil
+					})
+				mockEC2API.EXPECT().
+					RevokeSecurityGroupIngress(ctx, gomock.AssignableToTypeOf(&ec2.RevokeSecurityGroupIngressInput{})).
+					DoAndReturn(func(_ context.Context, input *ec2.RevokeSecurityGroupIngressInput, _ ...func(*ec2.Options)) (*ec2.RevokeSecurityGroupIngressOutput, error) {
+						Expect(aws.ToString(input.GroupId)).To(Equal(aws.ToString(&securityGroupID)))
+						Expect(input.IpPermissions).To(ConsistOf(
+							types.IpPermission{
+								IpProtocol: aws.String("TCP"),
+								FromPort:   aws.Int32(5969),
+								ToPort:     aws.Int32(5969),
+								IpRanges: []types.IpRange{
+									{
+										CidrIp: aws.String("0.0.0.0/0"),
+									},
+								},
+							},
+						))
+						return &ec2.RevokeSecurityGroupIngressOutput{}, nil
+					})
+
+				// 2. Act: Call the function under test
+				status, err := provider.ReconcileFirewallRule(ctx, log, nodeName, instanceID, firewallRule, firewallrules)
+				// 3. Assert: Check the result
+				Expect(status).To(MatchFields(IgnoreExtras, Fields{
+					"State": Equal(v1alpha1.FirewallRuleStatePending),
+					"Conditions": HaveExactElements(MatchConditions([]kmetav1.Condition{
+						{
+							Type:   v1alpha1.FirewallRuleConditionTypeSecurityGroupCreated,
+							Status: kmetav1.ConditionTrue,
+							Reason: v1alpha1.FirewallRuleConditionReasonSecurityGroupCreated,
+						},
+						{
+							Type:   v1alpha1.FirewallRuleConditionTypeNetworkInterfaceAssociated,
+							Status: kmetav1.ConditionTrue,
+							Reason: v1alpha1.FirewallRuleConditionReasonNetworkInterfaceAssociated,
+						},
+					}, "LastTransitionTime", "ObservedGeneration", "Message")),
+				}))
+				Expect(err).ToNot(HaveOccurred())
+			})
+		})
+
+		When("the firewallrule is an ingress rule", func() {
+			It("should return a pending state, specify in the condition when the maximum rule is reached and an error when an AWS API call  (AuthorizeSecurityGroupIngress) fails", func() {
+				// 1. Arrange: Set up mock return values
+				mockEC2API.EXPECT().
+					DescribeInstances(ctx, gomock.AssignableToTypeOf(&ec2.DescribeInstancesInput{})).
+					DoAndReturn(func(_ context.Context, input *ec2.DescribeInstancesInput, _ ...func(*ec2.Options)) (*ec2.DescribeInstancesOutput, error) {
+						Expect(input.InstanceIds).To(ConsistOf(instanceID))
+						return &ec2.DescribeInstancesOutput{
+							Reservations: []types.Reservation{
+								{
+									Instances: []types.Instance{
+										{
+											InstanceId: aws.String(instanceID),
+											VpcId:      aws.String(vpcID),
+											NetworkInterfaces: []types.InstanceNetworkInterface{
+												{
+													Association: &types.InstanceNetworkInterfaceAssociation{
+														IpOwnerId: aws.String("aws"),
+														PublicIp:  publicIP,
+													},
+													NetworkInterfaceId: eniID,
+													Groups: []types.GroupIdentifier{
+														{
+															GroupId: aws.String(securityGroupID),
+														},
+													},
+												},
+											},
+										},
+									},
+								},
+							},
+						}, nil
+					})
+				mockEC2API.EXPECT().
+					DescribeSecurityGroups(ctx, gomock.AssignableToTypeOf(&ec2.DescribeSecurityGroupsInput{})).
+					DoAndReturn(func(_ context.Context, input *ec2.DescribeSecurityGroupsInput, _ ...func(*ec2.Options)) (*ec2.DescribeSecurityGroupsOutput, error) {
+						Expect(input.Filters).To(ConsistOf(
+							types.Filter{
+								Name:   aws.String(fmt.Sprintf("tag:%s", TagKeyManaged)),
+								Values: []string{"true"},
+							},
+							types.Filter{
+								Name:   aws.String("vpc-id"),
+								Values: []string{vpcID},
+							},
+							types.Filter{
+								Name:   aws.String(fmt.Sprintf("tag:%s", TagKeyNodeName)),
+								Values: []string{nodeName},
+							},
+						))
+						return &ec2.DescribeSecurityGroupsOutput{
+							SecurityGroups: []types.SecurityGroup{
+								{
+									GroupId: aws.String(securityGroupID),
+									IpPermissions: []types.IpPermission{
+										{
+											IpProtocol: aws.String("TCP"),
+											FromPort:   aws.Int32(5970),
+											ToPort:     aws.Int32(5970),
+											IpRanges: []types.IpRange{
+												{
+													CidrIp:      aws.String("0.0.0.0/0"),
+													Description: aws.String(""),
+												},
+											},
+										},
+									},
+								},
+							},
+						}, nil
+					})
+				mockEC2API.EXPECT().
+					DescribeNetworkInterfaces(ctx, gomock.AssignableToTypeOf(&ec2.DescribeNetworkInterfacesInput{})).
+					DoAndReturn(func(_ context.Context, input *ec2.DescribeNetworkInterfacesInput, _ ...func(*ec2.Options)) (*ec2.DescribeNetworkInterfacesOutput, error) {
+						Expect(input.Filters).To(ConsistOf(
+							types.Filter{
+								Name:   aws.String("group-id"),
+								Values: []string{securityGroupID},
+							},
+						))
+						return &ec2.DescribeNetworkInterfacesOutput{
+							NetworkInterfaces: []types.NetworkInterface{
+								{
+									NetworkInterfaceId: eniID,
+									Groups: []types.GroupIdentifier{
+										{
+											GroupId: aws.String(securityGroupID),
+										},
+									},
+								},
+							},
+						}, nil
+					})
+				mockEC2API.EXPECT().
+					AuthorizeSecurityGroupIngress(ctx, gomock.AssignableToTypeOf(&ec2.AuthorizeSecurityGroupIngressInput{})).
+					DoAndReturn(func(_ context.Context, input *ec2.AuthorizeSecurityGroupIngressInput, _ ...func(*ec2.Options)) (*ec2.AuthorizeSecurityGroupIngressOutput, error) {
+						Expect(aws.ToString(input.GroupId)).To(Equal(securityGroupID))
+						Expect(input.IpPermissions).To(ConsistOf(
+							types.IpPermission{
+								IpProtocol: aws.String("TCP"),
+								FromPort:   aws.Int32(5969),
+								ToPort:     aws.Int32(5969),
+								IpRanges: []types.IpRange{
+									{
+										CidrIp: aws.String("0.0.0.0/0"),
+									},
+								},
+							},
+						))
+						return &ec2.AuthorizeSecurityGroupIngressOutput{}, &smithy.GenericAPIError{
+							Code:    "RulesPerSecurityGroupLimitExceeded",
+							Message: "Too many rules added to the security group",
+							Fault:   smithy.FaultClient,
+						}
+					})
+
+				// 2. Act: Call the function under test
+				status, err := provider.ReconcileFirewallRule(ctx, log, nodeName, instanceID, firewallRule, firewallrules)
+				// 3. Assert: Check the result
+				Expect(status).To(MatchFields(IgnoreExtras, Fields{
+					"State": Equal(v1alpha1.FirewallRuleStatePending),
+					"Conditions": HaveExactElements(MatchConditions([]kmetav1.Condition{
+						{
+							Type:   v1alpha1.FirewallRuleConditionTypeSecurityGroupCreated,
+							Status: kmetav1.ConditionTrue,
+							Reason: v1alpha1.FirewallRuleConditionReasonSecurityGroupCreated,
+						},
+						{
+							Type:   v1alpha1.FirewallRuleConditionTypeNetworkInterfaceAssociated,
+							Status: kmetav1.ConditionTrue,
+							Reason: v1alpha1.FirewallRuleConditionReasonNetworkInterfaceAssociated,
+						},
+						{
+							Type:   v1alpha1.FirewallRuleConditionTypeSecurityGroupRuleAuthorized,
+							Status: kmetav1.ConditionFalse,
+							Reason: v1alpha1.FirewallRuleConditionReasonProviderError,
+						},
+					}, "LastTransitionTime", "ObservedGeneration", "Message")),
+				}))
+				Expect(err).To(HaveOccurred())
+			})
+
+			It("should return a pending state and an error when an AWS API call (AuthorizeSecurityGroupIngress) fails", func() {
+				// 1. Arrange: Set up mock return values
+				mockEC2API.EXPECT().
+					DescribeInstances(ctx, gomock.AssignableToTypeOf(&ec2.DescribeInstancesInput{})).
+					DoAndReturn(func(_ context.Context, input *ec2.DescribeInstancesInput, _ ...func(*ec2.Options)) (*ec2.DescribeInstancesOutput, error) {
+						Expect(input.InstanceIds).To(ConsistOf(instanceID))
+						return &ec2.DescribeInstancesOutput{
+							Reservations: []types.Reservation{
+								{
+									Instances: []types.Instance{
+										{
+											InstanceId: aws.String(instanceID),
+											VpcId:      aws.String(vpcID),
+											NetworkInterfaces: []types.InstanceNetworkInterface{
+												{
+													Association: &types.InstanceNetworkInterfaceAssociation{
+														IpOwnerId: aws.String("aws"),
+														PublicIp:  publicIP,
+													},
+													NetworkInterfaceId: eniID,
+													Groups: []types.GroupIdentifier{
+														{
+															GroupId: aws.String(securityGroupID),
+														},
+													},
+												},
+											},
+										},
+									},
+								},
+							},
+						}, nil
+					})
+				mockEC2API.EXPECT().
+					DescribeSecurityGroups(ctx, gomock.AssignableToTypeOf(&ec2.DescribeSecurityGroupsInput{})).
+					DoAndReturn(func(_ context.Context, input *ec2.DescribeSecurityGroupsInput, _ ...func(*ec2.Options)) (*ec2.DescribeSecurityGroupsOutput, error) {
+						Expect(input.Filters).To(ConsistOf(
+							types.Filter{
+								Name:   aws.String(fmt.Sprintf("tag:%s", TagKeyManaged)),
+								Values: []string{"true"},
+							},
+							types.Filter{
+								Name:   aws.String("vpc-id"),
+								Values: []string{vpcID},
+							},
+							types.Filter{
+								Name:   aws.String(fmt.Sprintf("tag:%s", TagKeyNodeName)),
+								Values: []string{nodeName},
+							},
+						))
+						return &ec2.DescribeSecurityGroupsOutput{
+							SecurityGroups: []types.SecurityGroup{
+								{
+									GroupId: aws.String(securityGroupID),
+									IpPermissions: []types.IpPermission{
+										{
+											IpProtocol: aws.String("TCP"),
+											FromPort:   aws.Int32(5970),
+											ToPort:     aws.Int32(5970),
+											IpRanges: []types.IpRange{
+												{
+													CidrIp:      aws.String("0.0.0.0/0"),
+													Description: aws.String(""),
+												},
+											},
+										},
+									},
+								},
+							},
+						}, nil
+					})
+				mockEC2API.EXPECT().
+					DescribeNetworkInterfaces(ctx, gomock.AssignableToTypeOf(&ec2.DescribeNetworkInterfacesInput{})).
+					DoAndReturn(func(_ context.Context, input *ec2.DescribeNetworkInterfacesInput, _ ...func(*ec2.Options)) (*ec2.DescribeNetworkInterfacesOutput, error) {
+						Expect(input.Filters).To(ConsistOf(
+							types.Filter{
+								Name:   aws.String("group-id"),
+								Values: []string{securityGroupID},
+							},
+						))
+						return &ec2.DescribeNetworkInterfacesOutput{
+							NetworkInterfaces: []types.NetworkInterface{
+								{
+									NetworkInterfaceId: eniID,
+									Groups: []types.GroupIdentifier{
+										{
+											GroupId: aws.String(securityGroupID),
+										},
+									},
+								},
+							},
+						}, nil
+					})
+				mockEC2API.EXPECT().
+					AuthorizeSecurityGroupIngress(ctx, gomock.AssignableToTypeOf(&ec2.AuthorizeSecurityGroupIngressInput{})).
+					DoAndReturn(func(_ context.Context, input *ec2.AuthorizeSecurityGroupIngressInput, _ ...func(*ec2.Options)) (*ec2.AuthorizeSecurityGroupIngressOutput, error) {
+						Expect(aws.ToString(input.GroupId)).To(Equal(securityGroupID))
+						Expect(input.IpPermissions).To(ConsistOf(
+							types.IpPermission{
+								IpProtocol: aws.String("TCP"),
+								FromPort:   aws.Int32(5969),
+								ToPort:     aws.Int32(5969),
+								IpRanges: []types.IpRange{
+									{
+										CidrIp: aws.String("0.0.0.0/0"),
+									},
+								},
+							},
+						))
+						return &ec2.AuthorizeSecurityGroupIngressOutput{}, fmt.Errorf("authorize security group ingress error")
+					})
+
+				// 2. Act: Call the function under test
+				status, err := provider.ReconcileFirewallRule(ctx, log, nodeName, instanceID, firewallRule, firewallrules)
+				// 3. Assert: Check the result
+				Expect(status).To(MatchFields(IgnoreExtras, Fields{
+					"State": Equal(v1alpha1.FirewallRuleStatePending),
+					"Conditions": HaveExactElements(MatchConditions([]kmetav1.Condition{
+						{
+							Type:   v1alpha1.FirewallRuleConditionTypeSecurityGroupCreated,
+							Status: kmetav1.ConditionTrue,
+							Reason: v1alpha1.FirewallRuleConditionReasonSecurityGroupCreated,
+						},
+						{
+							Type:   v1alpha1.FirewallRuleConditionTypeNetworkInterfaceAssociated,
+							Status: kmetav1.ConditionTrue,
+							Reason: v1alpha1.FirewallRuleConditionReasonNetworkInterfaceAssociated,
+						},
+						{
+							Type:   v1alpha1.FirewallRuleConditionTypeSecurityGroupRuleAuthorized,
+							Status: kmetav1.ConditionFalse,
+							Reason: v1alpha1.FirewallRuleConditionReasonProviderError,
+						},
+					}, "LastTransitionTime", "ObservedGeneration", "Message")),
+				}))
+				Expect(err).To(HaveOccurred())
+			})
+		})
+
+		When("the firewallrule is an egress rule", func() {
+			BeforeEach(func() {
+				firewallRule.Spec.Direction = v1alpha1.DirectionEgress
+				firewallrules = []v1alpha1.FirewallRule{*firewallRule, *firewallRule01}
+			})
+			It("should return a pending state, specify in the condition when the maximum rule is reached and an error when an AWS API call  (AuthorizeSecurityGroupIngress) fails", func() {
+				// 1. Arrange: Set up mock return values
+				mockEC2API.EXPECT().
+					DescribeInstances(ctx, gomock.AssignableToTypeOf(&ec2.DescribeInstancesInput{})).
+					DoAndReturn(func(_ context.Context, input *ec2.DescribeInstancesInput, _ ...func(*ec2.Options)) (*ec2.DescribeInstancesOutput, error) {
+						Expect(input.InstanceIds).To(ConsistOf(instanceID))
+						return &ec2.DescribeInstancesOutput{
+							Reservations: []types.Reservation{
+								{
+									Instances: []types.Instance{
+										{
+											InstanceId: aws.String(instanceID),
+											VpcId:      aws.String(vpcID),
+											NetworkInterfaces: []types.InstanceNetworkInterface{
+												{
+													Association: &types.InstanceNetworkInterfaceAssociation{
+														IpOwnerId: aws.String("aws"),
+														PublicIp:  publicIP,
+													},
+													NetworkInterfaceId: eniID,
+													Groups: []types.GroupIdentifier{
+														{
+															GroupId: aws.String(securityGroupID),
+														},
+													},
+												},
+											},
+										},
+									},
+								},
+							},
+						}, nil
+					})
+				mockEC2API.EXPECT().
+					DescribeSecurityGroups(ctx, gomock.AssignableToTypeOf(&ec2.DescribeSecurityGroupsInput{})).
+					DoAndReturn(func(_ context.Context, input *ec2.DescribeSecurityGroupsInput, _ ...func(*ec2.Options)) (*ec2.DescribeSecurityGroupsOutput, error) {
+						Expect(input.Filters).To(ConsistOf(
+							types.Filter{
+								Name:   aws.String(fmt.Sprintf("tag:%s", TagKeyManaged)),
+								Values: []string{"true"},
+							},
+							types.Filter{
+								Name:   aws.String("vpc-id"),
+								Values: []string{vpcID},
+							},
+							types.Filter{
+								Name:   aws.String(fmt.Sprintf("tag:%s", TagKeyNodeName)),
+								Values: []string{nodeName},
+							},
+						))
+						return &ec2.DescribeSecurityGroupsOutput{
+							SecurityGroups: []types.SecurityGroup{
+								{
+									GroupId: aws.String(securityGroupID),
+									IpPermissions: []types.IpPermission{
+										{
+											IpProtocol: aws.String("TCP"),
+											FromPort:   aws.Int32(5970),
+											ToPort:     aws.Int32(5970),
+											IpRanges: []types.IpRange{
+												{
+													CidrIp:      aws.String("0.0.0.0/0"),
+													Description: aws.String(""),
+												},
+											},
+										},
+									},
+								},
+							},
+						}, nil
+					})
+				mockEC2API.EXPECT().
+					DescribeNetworkInterfaces(ctx, gomock.AssignableToTypeOf(&ec2.DescribeNetworkInterfacesInput{})).
+					DoAndReturn(func(_ context.Context, input *ec2.DescribeNetworkInterfacesInput, _ ...func(*ec2.Options)) (*ec2.DescribeNetworkInterfacesOutput, error) {
+						Expect(input.Filters).To(ConsistOf(
+							types.Filter{
+								Name:   aws.String("group-id"),
+								Values: []string{securityGroupID},
+							},
+						))
+						return &ec2.DescribeNetworkInterfacesOutput{
+							NetworkInterfaces: []types.NetworkInterface{
+								{
+									NetworkInterfaceId: eniID,
+									Groups: []types.GroupIdentifier{
+										{
+											GroupId: aws.String(securityGroupID),
+										},
+									},
+								},
+							},
+						}, nil
+					})
+				mockEC2API.EXPECT().
+					AuthorizeSecurityGroupEgress(ctx, gomock.AssignableToTypeOf(&ec2.AuthorizeSecurityGroupEgressInput{})).
+					DoAndReturn(func(_ context.Context, input *ec2.AuthorizeSecurityGroupEgressInput, _ ...func(*ec2.Options)) (*ec2.AuthorizeSecurityGroupEgressOutput, error) {
+						Expect(aws.ToString(input.GroupId)).To(Equal(securityGroupID))
+						Expect(input.IpPermissions).To(ConsistOf(
+							types.IpPermission{
+								IpProtocol: aws.String("TCP"),
+								FromPort:   aws.Int32(5969),
+								ToPort:     aws.Int32(5969),
+								IpRanges: []types.IpRange{
+									{
+										CidrIp: aws.String("0.0.0.0/0"),
+									},
+								},
+							},
+						))
+						return &ec2.AuthorizeSecurityGroupEgressOutput{}, &smithy.GenericAPIError{
+							Code:    "RulesPerSecurityGroupLimitExceeded",
+							Message: "Too many rules added to the security group",
+							Fault:   smithy.FaultClient,
+						}
+					})
+
+				// 2. Act: Call the function under test
+				status, err := provider.ReconcileFirewallRule(ctx, log, nodeName, instanceID, firewallRule, firewallrules)
+				// 3. Assert: Check the result
+				Expect(status).To(MatchFields(IgnoreExtras, Fields{
+					"State": Equal(v1alpha1.FirewallRuleStatePending),
+					"Conditions": HaveExactElements(MatchConditions([]kmetav1.Condition{
+						{
+							Type:   v1alpha1.FirewallRuleConditionTypeSecurityGroupCreated,
+							Status: kmetav1.ConditionTrue,
+							Reason: v1alpha1.FirewallRuleConditionReasonSecurityGroupCreated,
+						},
+						{
+							Type:   v1alpha1.FirewallRuleConditionTypeNetworkInterfaceAssociated,
+							Status: kmetav1.ConditionTrue,
+							Reason: v1alpha1.FirewallRuleConditionReasonNetworkInterfaceAssociated,
+						},
+						{
+							Type:   v1alpha1.FirewallRuleConditionTypeSecurityGroupRuleAuthorized,
+							Status: kmetav1.ConditionFalse,
+							Reason: v1alpha1.FirewallRuleConditionReasonProviderError,
+						},
+					}, "LastTransitionTime", "ObservedGeneration", "Message")),
+				}))
+				Expect(err).To(HaveOccurred())
+			})
+
+			It("should return a pending state and an error when an AWS API call (AuthorizeSecurityGroupEgress) fails", func() {
+				// 1. Arrange: Set up mock return values
+				mockEC2API.EXPECT().
+					DescribeInstances(ctx, gomock.AssignableToTypeOf(&ec2.DescribeInstancesInput{})).
+					DoAndReturn(func(_ context.Context, input *ec2.DescribeInstancesInput, _ ...func(*ec2.Options)) (*ec2.DescribeInstancesOutput, error) {
+						Expect(input.InstanceIds).To(ConsistOf(instanceID))
+						return &ec2.DescribeInstancesOutput{
+							Reservations: []types.Reservation{
+								{
+									Instances: []types.Instance{
+										{
+											InstanceId: aws.String(instanceID),
+											VpcId:      aws.String(vpcID),
+											NetworkInterfaces: []types.InstanceNetworkInterface{
+												{
+													Association: &types.InstanceNetworkInterfaceAssociation{
+														IpOwnerId: aws.String("aws"),
+														PublicIp:  publicIP,
+													},
+													NetworkInterfaceId: eniID,
+													Groups: []types.GroupIdentifier{
+														{
+															GroupId: aws.String(securityGroupID),
+														},
+													},
+												},
+											},
+										},
+									},
+								},
+							},
+						}, nil
+					})
+				mockEC2API.EXPECT().
+					DescribeSecurityGroups(ctx, gomock.AssignableToTypeOf(&ec2.DescribeSecurityGroupsInput{})).
+					DoAndReturn(func(_ context.Context, input *ec2.DescribeSecurityGroupsInput, _ ...func(*ec2.Options)) (*ec2.DescribeSecurityGroupsOutput, error) {
+						Expect(input.Filters).To(ConsistOf(
+							types.Filter{
+								Name:   aws.String(fmt.Sprintf("tag:%s", TagKeyManaged)),
+								Values: []string{"true"},
+							},
+							types.Filter{
+								Name:   aws.String("vpc-id"),
+								Values: []string{vpcID},
+							},
+							types.Filter{
+								Name:   aws.String(fmt.Sprintf("tag:%s", TagKeyNodeName)),
+								Values: []string{nodeName},
+							},
+						))
+						return &ec2.DescribeSecurityGroupsOutput{
+							SecurityGroups: []types.SecurityGroup{
+								{
+									GroupId: aws.String(securityGroupID),
+									IpPermissions: []types.IpPermission{
+										{
+											IpProtocol: aws.String("TCP"),
+											FromPort:   aws.Int32(5970),
+											ToPort:     aws.Int32(5970),
+											IpRanges: []types.IpRange{
+												{
+													CidrIp:      aws.String("0.0.0.0/0"),
+													Description: aws.String(""),
+												},
+											},
+										},
+									},
+								},
+							},
+						}, nil
+					})
+				mockEC2API.EXPECT().
+					DescribeNetworkInterfaces(ctx, gomock.AssignableToTypeOf(&ec2.DescribeNetworkInterfacesInput{})).
+					DoAndReturn(func(_ context.Context, input *ec2.DescribeNetworkInterfacesInput, _ ...func(*ec2.Options)) (*ec2.DescribeNetworkInterfacesOutput, error) {
+						Expect(input.Filters).To(ConsistOf(
+							types.Filter{
+								Name:   aws.String("group-id"),
+								Values: []string{securityGroupID},
+							},
+						))
+						return &ec2.DescribeNetworkInterfacesOutput{
+							NetworkInterfaces: []types.NetworkInterface{
+								{
+									NetworkInterfaceId: eniID,
+									Groups: []types.GroupIdentifier{
+										{
+											GroupId: aws.String(securityGroupID),
+										},
+									},
+								},
+							},
+						}, nil
+					})
+				mockEC2API.EXPECT().
+					AuthorizeSecurityGroupEgress(ctx, gomock.AssignableToTypeOf(&ec2.AuthorizeSecurityGroupEgressInput{})).
+					DoAndReturn(func(_ context.Context, input *ec2.AuthorizeSecurityGroupEgressInput, _ ...func(*ec2.Options)) (*ec2.AuthorizeSecurityGroupEgressOutput, error) {
+						Expect(aws.ToString(input.GroupId)).To(Equal(securityGroupID))
+						Expect(input.IpPermissions).To(ConsistOf(
+							types.IpPermission{
+								IpProtocol: aws.String("TCP"),
+								FromPort:   aws.Int32(5969),
+								ToPort:     aws.Int32(5969),
+								IpRanges: []types.IpRange{
+									{
+										CidrIp: aws.String("0.0.0.0/0"),
+									},
+								},
+							},
+						))
+						return &ec2.AuthorizeSecurityGroupEgressOutput{}, fmt.Errorf("authorize security group egress error")
+					})
+
+				// 2. Act: Call the function under test
+				status, err := provider.ReconcileFirewallRule(ctx, log, nodeName, instanceID, firewallRule, firewallrules)
+				// 3. Assert: Check the result
+				Expect(status).To(MatchFields(IgnoreExtras, Fields{
+					"State": Equal(v1alpha1.FirewallRuleStatePending),
+					"Conditions": HaveExactElements(MatchConditions([]kmetav1.Condition{
+						{
+							Type:   v1alpha1.FirewallRuleConditionTypeSecurityGroupCreated,
+							Status: kmetav1.ConditionTrue,
+							Reason: v1alpha1.FirewallRuleConditionReasonSecurityGroupCreated,
+						},
+						{
+							Type:   v1alpha1.FirewallRuleConditionTypeNetworkInterfaceAssociated,
+							Status: kmetav1.ConditionTrue,
+							Reason: v1alpha1.FirewallRuleConditionReasonNetworkInterfaceAssociated,
+						},
+						{
+							Type:   v1alpha1.FirewallRuleConditionTypeSecurityGroupRuleAuthorized,
+							Status: kmetav1.ConditionFalse,
+							Reason: v1alpha1.FirewallRuleConditionReasonProviderError,
+						},
+					}, "LastTransitionTime", "ObservedGeneration", "Message")),
+				}))
+				Expect(err).To(HaveOccurred())
+			})
+		})
+
+		It("should return an applied status when the firewallRule is added without error", func() {
+			// 1. Arrange: Set up mock return values
+			mockEC2API.EXPECT().
+				DescribeInstances(ctx, gomock.AssignableToTypeOf(&ec2.DescribeInstancesInput{})).
+				DoAndReturn(func(_ context.Context, input *ec2.DescribeInstancesInput, _ ...func(*ec2.Options)) (*ec2.DescribeInstancesOutput, error) {
+					Expect(input.InstanceIds).To(ConsistOf(instanceID))
+					return &ec2.DescribeInstancesOutput{
+						Reservations: []types.Reservation{
+							{
+								Instances: []types.Instance{
+									{
+										InstanceId: aws.String(instanceID),
+										VpcId:      aws.String(vpcID),
+										NetworkInterfaces: []types.InstanceNetworkInterface{
+											{
+												Association: &types.InstanceNetworkInterfaceAssociation{
+													IpOwnerId: aws.String("aws"),
+													PublicIp:  publicIP,
+												},
+												NetworkInterfaceId: eniID,
+												Groups: []types.GroupIdentifier{
+													{
+														GroupId: aws.String(securityGroupID),
+													},
+												},
+											},
+										},
+									},
+								},
+							},
+						},
+					}, nil
+				})
+			mockEC2API.EXPECT().
+				DescribeSecurityGroups(ctx, gomock.AssignableToTypeOf(&ec2.DescribeSecurityGroupsInput{})).
+				DoAndReturn(func(_ context.Context, input *ec2.DescribeSecurityGroupsInput, _ ...func(*ec2.Options)) (*ec2.DescribeSecurityGroupsOutput, error) {
+					Expect(input.Filters).To(ConsistOf(
+						types.Filter{
+							Name:   aws.String(fmt.Sprintf("tag:%s", TagKeyManaged)),
+							Values: []string{"true"},
+						},
+						types.Filter{
+							Name:   aws.String("vpc-id"),
+							Values: []string{vpcID},
+						},
+						types.Filter{
+							Name:   aws.String(fmt.Sprintf("tag:%s", TagKeyNodeName)),
+							Values: []string{nodeName},
+						},
+					))
+					return &ec2.DescribeSecurityGroupsOutput{
+						SecurityGroups: []types.SecurityGroup{
+							{
+								GroupId: aws.String(securityGroupID),
+								IpPermissions: []types.IpPermission{
+									{
+										IpProtocol: aws.String("TCP"),
+										FromPort:   aws.Int32(5970),
+										ToPort:     aws.Int32(5970),
+										IpRanges: []types.IpRange{
+											{
+												CidrIp:      aws.String("0.0.0.0/0"),
+												Description: aws.String(""),
+											},
+										},
+									},
+								},
+							},
+						},
+					}, nil
+				})
+			mockEC2API.EXPECT().
+				DescribeNetworkInterfaces(ctx, gomock.AssignableToTypeOf(&ec2.DescribeNetworkInterfacesInput{})).
+				DoAndReturn(func(_ context.Context, input *ec2.DescribeNetworkInterfacesInput, _ ...func(*ec2.Options)) (*ec2.DescribeNetworkInterfacesOutput, error) {
+					Expect(input.Filters).To(ConsistOf(
+						types.Filter{
+							Name:   aws.String("group-id"),
+							Values: []string{securityGroupID},
+						},
+					))
+					return &ec2.DescribeNetworkInterfacesOutput{
+						NetworkInterfaces: []types.NetworkInterface{
+							{
+								NetworkInterfaceId: eniID,
+								Groups: []types.GroupIdentifier{
+									{
+										GroupId: aws.String(securityGroupID),
+									},
+								},
+							},
+						},
+					}, nil
+				})
+			mockEC2API.EXPECT().
+				AuthorizeSecurityGroupIngress(ctx, gomock.AssignableToTypeOf(&ec2.AuthorizeSecurityGroupIngressInput{})).
+				DoAndReturn(func(_ context.Context, input *ec2.AuthorizeSecurityGroupIngressInput, _ ...func(*ec2.Options)) (*ec2.AuthorizeSecurityGroupIngressOutput, error) {
+					Expect(aws.ToString(input.GroupId)).To(Equal(securityGroupID))
+					Expect(input.IpPermissions).To(ConsistOf(
+						types.IpPermission{
+							IpProtocol: aws.String("TCP"),
+							FromPort:   aws.Int32(5969),
+							ToPort:     aws.Int32(5969),
+							IpRanges: []types.IpRange{
+								{
+									CidrIp: aws.String("0.0.0.0/0"),
+								},
+							},
+						},
+					))
+					return &ec2.AuthorizeSecurityGroupIngressOutput{}, nil
+				})
+
+			// 2. Act: Call the function under test
+			status, err := provider.ReconcileFirewallRule(ctx, log, nodeName, instanceID, firewallRule, firewallrules)
+			// 3. Assert: Check the result
+			Expect(status).To(MatchFields(IgnoreExtras, Fields{
+				"State": Equal(v1alpha1.FirewallRuleStateApplied),
+				"Conditions": HaveExactElements(MatchConditions([]kmetav1.Condition{
+					{
+						Type:   v1alpha1.FirewallRuleConditionTypeSecurityGroupCreated,
+						Status: kmetav1.ConditionTrue,
+						Reason: v1alpha1.FirewallRuleConditionReasonSecurityGroupCreated,
+					},
+					{
+						Type:   v1alpha1.FirewallRuleConditionTypeNetworkInterfaceAssociated,
+						Status: kmetav1.ConditionTrue,
+						Reason: v1alpha1.FirewallRuleConditionReasonNetworkInterfaceAssociated,
+					},
+					{
+						Type:   v1alpha1.FirewallRuleConditionTypeSecurityGroupRuleAuthorized,
+						Status: kmetav1.ConditionTrue,
+						Reason: v1alpha1.FirewallRuleConditionReasonSecurityGroupRuleAuthorized,
+					},
+				}, "LastTransitionTime", "ObservedGeneration", "Message")),
+			}))
+			Expect(err).ToNot(HaveOccurred())
+		})
+	})
+})
