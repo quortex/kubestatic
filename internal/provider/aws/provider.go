@@ -37,6 +37,7 @@ const (
 	TagKeyNodeName       TagKey = TagKeyDomain + "/node-name"        // Tag key for node name
 	TagKeyInstanceID     TagKey = TagKeyDomain + "/instance-id"      // Tag key for instance ID
 	TagKeyExternalIPName TagKey = TagKeyDomain + "/external-ip-name" // Tag key for external IP name
+	TagKeyClusterID      TagKey = TagKeyDomain + "/cluster-id"       // Tag key for cluster ID
 )
 
 // FilterOption is a filter option for AWS API calls.
@@ -138,9 +139,26 @@ func WithAddressID(addressID string) AddressIDFilter {
 	return AddressIDFilter{AddressID: addressID}
 }
 
+// ClusterIDFilter is a filter option to filter by environment ID.
+type ClusterIDFilter struct {
+	ClusterID string
+}
+
+func (f ClusterIDFilter) Filter() types.Filter {
+	return types.Filter{
+		Name:   aws.String(fmt.Sprintf("tag:%s", TagKeyClusterID)),
+		Values: []string{f.ClusterID},
+	}
+}
+
+func WithClusterID(clusterID string) ClusterIDFilter {
+	return ClusterIDFilter{ClusterID: clusterID}
+}
+
 // awsProvider is an AWS provider implementation for the provider.Provider interface
 type awsProvider struct {
-	ec2 *ec2.Client
+	clusterID string
+	ec2       *ec2.Client
 	// These Mutexes ensure that when a cache miss occurs, only one controller makes
 	// the AWS API call while others wait for the result, preventing duplicate
 	// requests for the same data.
@@ -155,7 +173,7 @@ type awsProvider struct {
 }
 
 // NewProvider instantiate a Provider implementation for AWS
-func NewProvider(defaultTTL, defaultCleanupInterval time.Duration) (provider.Provider, error) {
+func NewProvider(defaultTTL, defaultCleanupInterval time.Duration, clusterID string) (provider.Provider, error) {
 	// Load the Shared AWS Configuration (~/.aws/config)
 	cfg, err := config.LoadDefaultConfig(context.TODO())
 	if err != nil {
@@ -168,6 +186,7 @@ func NewProvider(defaultTTL, defaultCleanupInterval time.Duration) (provider.Pro
 	}
 
 	return &awsProvider{
+		clusterID: clusterID,
 		ec2: ec2.NewFromConfig(cfg, func(o *ec2.Options) {
 			// https://github.com/aws/aws-sdk-go-v2/discussions/2810
 			o.MeterProvider = smithyotelmetrics.Adapt(meterProvider)
@@ -341,6 +360,10 @@ func (p *awsProvider) createSecurityGroup(ctx context.Context, vpcID, nodeName, 
 						Key:   aws.String(string(TagKeyInstanceID)),
 						Value: aws.String(instanceID),
 					},
+					{
+						Key:   aws.String(string(TagKeyClusterID)),
+						Value: aws.String(p.clusterID),
+					},
 				},
 			},
 		},
@@ -512,6 +535,10 @@ func (p *awsProvider) createAddress(ctx context.Context, externalIPName, instanc
 						Key:   aws.String(string(TagKeyInstanceID)),
 						Value: aws.String(instanceID),
 					},
+					{
+						Key:   aws.String(string(TagKeyClusterID)),
+						Value: aws.String(p.clusterID),
+					},
 				},
 			},
 		},
@@ -612,7 +639,13 @@ func (p *awsProvider) ReconcileFirewallRule(
 	}
 
 	// Get the security group associated with the instance
-	securityGroup, err := p.getSecurityGroup(ctx, Managed(), WithVPCID(aws.ToString(instance.VpcId)), WithNodeName(nodeName))
+	securityGroup, err := p.getSecurityGroup(
+		ctx,
+		Managed(),
+		WithClusterID(p.clusterID),
+		WithVPCID(aws.ToString(instance.VpcId)),
+		WithNodeName(nodeName),
+	)
 	if err != nil && err.(*provider.Error).Code != provider.NotFoundError {
 		meta.SetStatusCondition(&status.Conditions, kmetav1.Condition{
 			Type:               v1alpha1.FirewallRuleConditionTypeSecurityGroupCreated,
@@ -648,6 +681,7 @@ func (p *awsProvider) ReconcileFirewallRule(
 		securityGroup, err = p.getSecurityGroup(
 			ctx,
 			Managed(),
+			WithClusterID(p.clusterID),
 			WithVPCID(aws.ToString(instance.VpcId)),
 			WithNodeName(nodeName),
 			WithSecurityGroupID(securityGroupID),
@@ -930,7 +964,7 @@ func (p *awsProvider) ReconcileFirewallRulesDeletion(
 	nodeName string,
 ) error {
 	// Get the security group associated with the instance
-	securityGroup, err := p.getSecurityGroup(ctx, Managed(), WithNodeName(nodeName))
+	securityGroup, err := p.getSecurityGroup(ctx, Managed(), WithClusterID(p.clusterID), WithNodeName(nodeName))
 	if err != nil {
 		// The security group does not exist, end of reconciliation
 		if err.(*provider.Error).Code == provider.NotFoundError {
@@ -998,7 +1032,7 @@ func (p *awsProvider) ReconcileExternalIP(
 	}
 
 	// Get the address associated with the instance
-	address, err := p.getAddress(ctx, Managed(), WithExternalIPName(externalIP.Name))
+	address, err := p.getAddress(ctx, Managed(), WithClusterID(p.clusterID), WithExternalIPName(externalIP.Name))
 	if err != nil && err.(*provider.Error).Code != provider.NotFoundError {
 		meta.SetStatusCondition(&status.Conditions, kmetav1.Condition{
 			Type:               v1alpha1.ExternalIPConditionReasonIPCreated,
@@ -1035,7 +1069,7 @@ func (p *awsProvider) ReconcileExternalIP(
 		}
 		log.Info("Address created", "addressID", addressID)
 
-		address, err = p.getAddress(ctx, Managed(), WithExternalIPName(externalIP.Name), WithAddressID(addressID))
+		address, err = p.getAddress(ctx, Managed(), WithClusterID(p.clusterID), WithExternalIPName(externalIP.Name), WithAddressID(addressID))
 		if err != nil {
 			meta.SetStatusCondition(&status.Conditions, kmetav1.Condition{
 				Type:               v1alpha1.ExternalIPConditionReasonIPCreated,
@@ -1182,7 +1216,7 @@ func (p *awsProvider) ReconcileExternalIPDeletion(
 	externalIP *v1alpha1.ExternalIP,
 ) error {
 	// Get the address associated with the instance
-	address, err := p.getAddress(ctx, Managed(), WithExternalIPName(externalIP.Name))
+	address, err := p.getAddress(ctx, Managed(), WithClusterID(p.clusterID), WithExternalIPName(externalIP.Name))
 	if err != nil {
 		var providerErr *provider.Error
 		// The address does not exist, end of reconciliation
