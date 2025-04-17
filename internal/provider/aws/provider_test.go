@@ -28,6 +28,7 @@ var _ = Describe("AWSProvider", func() {
 		mockCtrl      *gomock.Controller
 		mockec2Client *mocks.Mockec2Client
 		provider      provider.Provider
+		clusterID     string
 	)
 
 	ctx := context.Background()
@@ -36,9 +37,10 @@ var _ = Describe("AWSProvider", func() {
 	BeforeEach(func() {
 		mockCtrl = gomock.NewController(GinkgoT())
 		mockec2Client = mocks.NewMockec2Client(mockCtrl)
+		clusterID = "cluster-id"
 
 		// Inject the mock EC2 into the provider
-		provider = newProviderWithClient(mockec2Client, 5*time.Minute, 10*time.Minute)
+		provider = newProviderWithClient(mockec2Client, 5*time.Minute, 10*time.Minute, clusterID)
 	})
 
 	AfterEach(func() {
@@ -69,6 +71,10 @@ var _ = Describe("AWSProvider", func() {
 							Values: []string{nodeName},
 						},
 						types.Filter{
+							Name:   aws.String(fmt.Sprintf("tag:%s", TagKeyClusterID)),
+							Values: []string{clusterID},
+						},
+						types.Filter{
 							Name:   aws.String(fmt.Sprintf("tag:%s", TagKeyManaged)),
 							Values: []string{"true"},
 						},
@@ -88,6 +94,10 @@ var _ = Describe("AWSProvider", func() {
 						types.Filter{
 							Name:   aws.String(fmt.Sprintf("tag:%s", TagKeyNodeName)),
 							Values: []string{nodeName},
+						},
+						types.Filter{
+							Name:   aws.String(fmt.Sprintf("tag:%s", TagKeyClusterID)),
+							Values: []string{clusterID},
 						},
 						types.Filter{
 							Name:   aws.String(fmt.Sprintf("tag:%s", TagKeyManaged)),
@@ -110,6 +120,10 @@ var _ = Describe("AWSProvider", func() {
 						types.Filter{
 							Name:   aws.String(fmt.Sprintf("tag:%s", TagKeyNodeName)),
 							Values: []string{nodeName},
+						},
+						types.Filter{
+							Name:   aws.String(fmt.Sprintf("tag:%s", TagKeyClusterID)),
+							Values: []string{clusterID},
 						},
 						types.Filter{
 							Name:   aws.String(fmt.Sprintf("tag:%s", TagKeyManaged)),
@@ -148,6 +162,10 @@ var _ = Describe("AWSProvider", func() {
 						types.Filter{
 							Name:   aws.String(fmt.Sprintf("tag:%s", TagKeyNodeName)),
 							Values: []string{nodeName},
+						},
+						types.Filter{
+							Name:   aws.String(fmt.Sprintf("tag:%s", TagKeyClusterID)),
+							Values: []string{clusterID},
 						},
 						types.Filter{
 							Name:   aws.String(fmt.Sprintf("tag:%s", TagKeyManaged)),
@@ -244,6 +262,10 @@ var _ = Describe("AWSProvider", func() {
 						types.Filter{
 							Name:   aws.String(fmt.Sprintf("tag:%s", TagKeyNodeName)),
 							Values: []string{nodeName},
+						},
+						types.Filter{
+							Name:   aws.String(fmt.Sprintf("tag:%s", TagKeyClusterID)),
+							Values: []string{clusterID},
 						},
 						types.Filter{
 							Name:   aws.String(fmt.Sprintf("tag:%s", TagKeyManaged)),
@@ -347,6 +369,10 @@ var _ = Describe("AWSProvider", func() {
 						types.Filter{
 							Name:   aws.String(fmt.Sprintf("tag:%s", TagKeyNodeName)),
 							Values: []string{nodeName},
+						},
+						types.Filter{
+							Name:   aws.String(fmt.Sprintf("tag:%s", TagKeyClusterID)),
+							Values: []string{clusterID},
 						},
 						types.Filter{
 							Name:   aws.String(fmt.Sprintf("tag:%s", TagKeyManaged)),
@@ -483,6 +509,10 @@ var _ = Describe("AWSProvider", func() {
 							Values: []string{"true"},
 						},
 						types.Filter{
+							Name:   aws.String(fmt.Sprintf("tag:%s", TagKeyClusterID)),
+							Values: []string{clusterID},
+						},
+						types.Filter{
 							Name:   aws.String(fmt.Sprintf("tag:%s", TagKeyExternalIPName)),
 							Values: []string{externalIP.Name},
 						},
@@ -502,6 +532,10 @@ var _ = Describe("AWSProvider", func() {
 						types.Filter{
 							Name:   aws.String(fmt.Sprintf("tag:%s", TagKeyManaged)),
 							Values: []string{"true"},
+						},
+						types.Filter{
+							Name:   aws.String(fmt.Sprintf("tag:%s", TagKeyClusterID)),
+							Values: []string{clusterID},
 						},
 						types.Filter{
 							Name:   aws.String(fmt.Sprintf("tag:%s", TagKeyExternalIPName)),
@@ -525,6 +559,10 @@ var _ = Describe("AWSProvider", func() {
 						types.Filter{
 							Name:   aws.String(fmt.Sprintf("tag:%s", TagKeyManaged)),
 							Values: []string{"true"},
+						},
+						types.Filter{
+							Name:   aws.String(fmt.Sprintf("tag:%s", TagKeyClusterID)),
+							Values: []string{clusterID},
 						},
 						types.Filter{
 							Name:   aws.String(fmt.Sprintf("tag:%s", TagKeyExternalIPName)),
@@ -559,6 +597,10 @@ var _ = Describe("AWSProvider", func() {
 						types.Filter{
 							Name:   aws.String(fmt.Sprintf("tag:%s", TagKeyManaged)),
 							Values: []string{"true"},
+						},
+						types.Filter{
+							Name:   aws.String(fmt.Sprintf("tag:%s", TagKeyClusterID)),
+							Values: []string{clusterID},
 						},
 						types.Filter{
 							Name:   aws.String(fmt.Sprintf("tag:%s", TagKeyExternalIPName)),
@@ -599,6 +641,10 @@ var _ = Describe("AWSProvider", func() {
 						types.Filter{
 							Name:   aws.String(fmt.Sprintf("tag:%s", TagKeyManaged)),
 							Values: []string{"true"},
+						},
+						types.Filter{
+							Name:   aws.String(fmt.Sprintf("tag:%s", TagKeyClusterID)),
+							Values: []string{clusterID},
 						},
 						types.Filter{
 							Name:   aws.String(fmt.Sprintf("tag:%s", TagKeyExternalIPName)),
@@ -677,6 +723,10 @@ var _ = Describe("AWSProvider", func() {
 								Values: []string{"true"},
 							},
 							types.Filter{
+								Name:   aws.String(fmt.Sprintf("tag:%s", TagKeyClusterID)),
+								Values: []string{clusterID},
+							},
+							types.Filter{
 								Name:   aws.String(fmt.Sprintf("tag:%s", TagKeyExternalIPName)),
 								Values: []string{externalIP.Name},
 							},
@@ -707,6 +757,10 @@ var _ = Describe("AWSProvider", func() {
 								Values: []string{"true"},
 							},
 							types.Filter{
+								Name:   aws.String(fmt.Sprintf("tag:%s", TagKeyClusterID)),
+								Values: []string{clusterID},
+							},
+							types.Filter{
 								Name:   aws.String(fmt.Sprintf("tag:%s", TagKeyExternalIPName)),
 								Values: []string{externalIP.Name},
 							},
@@ -723,6 +777,10 @@ var _ = Describe("AWSProvider", func() {
 							types.Tag{
 								Key:   aws.String(string(TagKeyManaged)),
 								Value: aws.String("true"),
+							},
+							types.Tag{
+								Key:   aws.String(string(TagKeyClusterID)),
+								Value: aws.String(clusterID),
 							},
 							types.Tag{
 								Key:   aws.String(string(TagKeyExternalIPName)),
@@ -766,6 +824,10 @@ var _ = Describe("AWSProvider", func() {
 								Values: []string{"true"},
 							},
 							types.Filter{
+								Name:   aws.String(fmt.Sprintf("tag:%s", TagKeyClusterID)),
+								Values: []string{clusterID},
+							},
+							types.Filter{
 								Name:   aws.String(fmt.Sprintf("tag:%s", TagKeyExternalIPName)),
 								Values: []string{externalIP.Name},
 							},
@@ -782,6 +844,10 @@ var _ = Describe("AWSProvider", func() {
 							types.Tag{
 								Key:   aws.String(string(TagKeyManaged)),
 								Value: aws.String("true"),
+							},
+							types.Tag{
+								Key:   aws.String(string(TagKeyClusterID)),
+								Value: aws.String(clusterID),
 							},
 							types.Tag{
 								Key:   aws.String(string(TagKeyExternalIPName)),
@@ -815,11 +881,15 @@ var _ = Describe("AWSProvider", func() {
 					DescribeAddresses(ctx, gomock.AssignableToTypeOf(&ec2.DescribeAddressesInput{})).
 					DoAndReturn(func(_ context.Context, input *ec2.DescribeAddressesInput, _ ...func(*ec2.Options)) (*ec2.DescribeAddressesOutput, error) {
 						switch len(input.Filters) {
-						case 2:
+						case 3:
 							Expect(input.Filters).To(ConsistOf(
 								types.Filter{
 									Name:   aws.String(fmt.Sprintf("tag:%s", TagKeyManaged)),
 									Values: []string{"true"},
+								},
+								types.Filter{
+									Name:   aws.String(fmt.Sprintf("tag:%s", TagKeyClusterID)),
+									Values: []string{clusterID},
 								},
 								types.Filter{
 									Name:   aws.String(fmt.Sprintf("tag:%s", TagKeyExternalIPName)),
@@ -827,11 +897,15 @@ var _ = Describe("AWSProvider", func() {
 								},
 							))
 							return &ec2.DescribeAddressesOutput{}, nil
-						case 3:
+						case 4:
 							Expect(input.Filters).To(ConsistOf(
 								types.Filter{
 									Name:   aws.String(fmt.Sprintf("tag:%s", TagKeyManaged)),
 									Values: []string{"true"},
+								},
+								types.Filter{
+									Name:   aws.String(fmt.Sprintf("tag:%s", TagKeyClusterID)),
+									Values: []string{clusterID},
 								},
 								types.Filter{
 									Name:   aws.String(fmt.Sprintf("tag:%s", TagKeyExternalIPName)),
@@ -857,6 +931,10 @@ var _ = Describe("AWSProvider", func() {
 							types.Tag{
 								Key:   aws.String(string(TagKeyManaged)),
 								Value: aws.String("true"),
+							},
+							types.Tag{
+								Key:   aws.String(string(TagKeyClusterID)),
+								Value: aws.String(clusterID),
 							},
 							types.Tag{
 								Key:   aws.String(string(TagKeyExternalIPName)),
@@ -893,11 +971,15 @@ var _ = Describe("AWSProvider", func() {
 						DescribeAddresses(ctx, gomock.AssignableToTypeOf(&ec2.DescribeAddressesInput{})).
 						DoAndReturn(func(_ context.Context, input *ec2.DescribeAddressesInput, _ ...func(*ec2.Options)) (*ec2.DescribeAddressesOutput, error) {
 							switch len(input.Filters) {
-							case 2:
+							case 3:
 								Expect(input.Filters).To(ConsistOf(
 									types.Filter{
 										Name:   aws.String(fmt.Sprintf("tag:%s", TagKeyManaged)),
 										Values: []string{"true"},
+									},
+									types.Filter{
+										Name:   aws.String(fmt.Sprintf("tag:%s", TagKeyClusterID)),
+										Values: []string{clusterID},
 									},
 									types.Filter{
 										Name:   aws.String(fmt.Sprintf("tag:%s", TagKeyExternalIPName)),
@@ -905,11 +987,15 @@ var _ = Describe("AWSProvider", func() {
 									},
 								))
 								return &ec2.DescribeAddressesOutput{}, nil
-							case 3:
+							case 4:
 								Expect(input.Filters).To(ConsistOf(
 									types.Filter{
 										Name:   aws.String(fmt.Sprintf("tag:%s", TagKeyManaged)),
 										Values: []string{"true"},
+									},
+									types.Filter{
+										Name:   aws.String(fmt.Sprintf("tag:%s", TagKeyClusterID)),
+										Values: []string{clusterID},
 									},
 									types.Filter{
 										Name:   aws.String(fmt.Sprintf("tag:%s", TagKeyExternalIPName)),
@@ -941,6 +1027,10 @@ var _ = Describe("AWSProvider", func() {
 								types.Tag{
 									Key:   aws.String(string(TagKeyManaged)),
 									Value: aws.String("true"),
+								},
+								types.Tag{
+									Key:   aws.String(string(TagKeyClusterID)),
+									Value: aws.String(clusterID),
 								},
 								types.Tag{
 									Key:   aws.String(string(TagKeyExternalIPName)),
@@ -985,11 +1075,15 @@ var _ = Describe("AWSProvider", func() {
 						DescribeAddresses(ctx, gomock.AssignableToTypeOf(&ec2.DescribeAddressesInput{})).
 						DoAndReturn(func(_ context.Context, input *ec2.DescribeAddressesInput, _ ...func(*ec2.Options)) (*ec2.DescribeAddressesOutput, error) {
 							switch len(input.Filters) {
-							case 2:
+							case 3:
 								Expect(input.Filters).To(ConsistOf(
 									types.Filter{
 										Name:   aws.String(fmt.Sprintf("tag:%s", TagKeyManaged)),
 										Values: []string{"true"},
+									},
+									types.Filter{
+										Name:   aws.String(fmt.Sprintf("tag:%s", TagKeyClusterID)),
+										Values: []string{clusterID},
 									},
 									types.Filter{
 										Name:   aws.String(fmt.Sprintf("tag:%s", TagKeyExternalIPName)),
@@ -997,11 +1091,15 @@ var _ = Describe("AWSProvider", func() {
 									},
 								))
 								return &ec2.DescribeAddressesOutput{}, nil
-							case 3:
+							case 4:
 								Expect(input.Filters).To(ConsistOf(
 									types.Filter{
 										Name:   aws.String(fmt.Sprintf("tag:%s", TagKeyManaged)),
 										Values: []string{"true"},
+									},
+									types.Filter{
+										Name:   aws.String(fmt.Sprintf("tag:%s", TagKeyClusterID)),
+										Values: []string{clusterID},
 									},
 									types.Filter{
 										Name:   aws.String(fmt.Sprintf("tag:%s", TagKeyExternalIPName)),
@@ -1034,6 +1132,10 @@ var _ = Describe("AWSProvider", func() {
 								types.Tag{
 									Key:   aws.String(string(TagKeyManaged)),
 									Value: aws.String("true"),
+								},
+								types.Tag{
+									Key:   aws.String(string(TagKeyClusterID)),
+									Value: aws.String(clusterID),
 								},
 								types.Tag{
 									Key:   aws.String(string(TagKeyExternalIPName)),
@@ -1080,11 +1182,15 @@ var _ = Describe("AWSProvider", func() {
 						DescribeAddresses(ctx, gomock.AssignableToTypeOf(&ec2.DescribeAddressesInput{})).
 						DoAndReturn(func(_ context.Context, input *ec2.DescribeAddressesInput, _ ...func(*ec2.Options)) (*ec2.DescribeAddressesOutput, error) {
 							switch len(input.Filters) {
-							case 2:
+							case 3:
 								Expect(input.Filters).To(ConsistOf(
 									types.Filter{
 										Name:   aws.String(fmt.Sprintf("tag:%s", TagKeyManaged)),
 										Values: []string{"true"},
+									},
+									types.Filter{
+										Name:   aws.String(fmt.Sprintf("tag:%s", TagKeyClusterID)),
+										Values: []string{clusterID},
 									},
 									types.Filter{
 										Name:   aws.String(fmt.Sprintf("tag:%s", TagKeyExternalIPName)),
@@ -1092,11 +1198,15 @@ var _ = Describe("AWSProvider", func() {
 									},
 								))
 								return &ec2.DescribeAddressesOutput{}, nil
-							case 3:
+							case 4:
 								Expect(input.Filters).To(ConsistOf(
 									types.Filter{
 										Name:   aws.String(fmt.Sprintf("tag:%s", TagKeyManaged)),
 										Values: []string{"true"},
+									},
+									types.Filter{
+										Name:   aws.String(fmt.Sprintf("tag:%s", TagKeyClusterID)),
+										Values: []string{clusterID},
 									},
 									types.Filter{
 										Name:   aws.String(fmt.Sprintf("tag:%s", TagKeyExternalIPName)),
@@ -1133,6 +1243,10 @@ var _ = Describe("AWSProvider", func() {
 								types.Tag{
 									Key:   aws.String(string(TagKeyExternalIPName)),
 									Value: aws.String(externalIP.Name),
+								},
+								types.Tag{
+									Key:   aws.String(string(TagKeyClusterID)),
+									Value: aws.String(clusterID),
 								},
 								types.Tag{
 									Key:   aws.String(string(TagKeyInstanceID)),
@@ -1188,6 +1302,10 @@ var _ = Describe("AWSProvider", func() {
 								Values: []string{"true"},
 							},
 							types.Filter{
+								Name:   aws.String(fmt.Sprintf("tag:%s", TagKeyClusterID)),
+								Values: []string{clusterID},
+							},
+							types.Filter{
 								Name:   aws.String(fmt.Sprintf("tag:%s", TagKeyExternalIPName)),
 								Values: []string{externalIP.Name},
 							},
@@ -1216,6 +1334,10 @@ var _ = Describe("AWSProvider", func() {
 							types.Filter{
 								Name:   aws.String(fmt.Sprintf("tag:%s", TagKeyManaged)),
 								Values: []string{"true"},
+							},
+							types.Filter{
+								Name:   aws.String(fmt.Sprintf("tag:%s", TagKeyClusterID)),
+								Values: []string{clusterID},
 							},
 							types.Filter{
 								Name:   aws.String(fmt.Sprintf("tag:%s", TagKeyExternalIPName)),
@@ -1259,6 +1381,10 @@ var _ = Describe("AWSProvider", func() {
 							types.Filter{
 								Name:   aws.String(fmt.Sprintf("tag:%s", TagKeyManaged)),
 								Values: []string{"true"},
+							},
+							types.Filter{
+								Name:   aws.String(fmt.Sprintf("tag:%s", TagKeyClusterID)),
+								Values: []string{clusterID},
 							},
 							types.Filter{
 								Name:   aws.String(fmt.Sprintf("tag:%s", TagKeyExternalIPName)),
@@ -1305,6 +1431,10 @@ var _ = Describe("AWSProvider", func() {
 							types.Filter{
 								Name:   aws.String(fmt.Sprintf("tag:%s", TagKeyManaged)),
 								Values: []string{"true"},
+							},
+							types.Filter{
+								Name:   aws.String(fmt.Sprintf("tag:%s", TagKeyClusterID)),
+								Values: []string{clusterID},
 							},
 							types.Filter{
 								Name:   aws.String(fmt.Sprintf("tag:%s", TagKeyExternalIPName)),
@@ -1371,6 +1501,10 @@ var _ = Describe("AWSProvider", func() {
 							types.Filter{
 								Name:   aws.String(fmt.Sprintf("tag:%s", TagKeyManaged)),
 								Values: []string{"true"},
+							},
+							types.Filter{
+								Name:   aws.String(fmt.Sprintf("tag:%s", TagKeyClusterID)),
+								Values: []string{clusterID},
 							},
 							types.Filter{
 								Name:   aws.String(fmt.Sprintf("tag:%s", TagKeyExternalIPName)),
@@ -1443,6 +1577,10 @@ var _ = Describe("AWSProvider", func() {
 									Values: []string{"true"},
 								},
 								types.Filter{
+									Name:   aws.String(fmt.Sprintf("tag:%s", TagKeyClusterID)),
+									Values: []string{clusterID},
+								},
+								types.Filter{
 									Name:   aws.String(fmt.Sprintf("tag:%s", TagKeyExternalIPName)),
 									Values: []string{externalIP.Name},
 								},
@@ -1510,6 +1648,10 @@ var _ = Describe("AWSProvider", func() {
 								types.Filter{
 									Name:   aws.String(fmt.Sprintf("tag:%s", TagKeyManaged)),
 									Values: []string{"true"},
+								},
+								types.Filter{
+									Name:   aws.String(fmt.Sprintf("tag:%s", TagKeyClusterID)),
+									Values: []string{clusterID},
 								},
 								types.Filter{
 									Name:   aws.String(fmt.Sprintf("tag:%s", TagKeyExternalIPName)),
@@ -1585,6 +1727,10 @@ var _ = Describe("AWSProvider", func() {
 								types.Filter{
 									Name:   aws.String(fmt.Sprintf("tag:%s", TagKeyManaged)),
 									Values: []string{"true"},
+								},
+								types.Filter{
+									Name:   aws.String(fmt.Sprintf("tag:%s", TagKeyClusterID)),
+									Values: []string{clusterID},
 								},
 								types.Filter{
 									Name:   aws.String(fmt.Sprintf("tag:%s", TagKeyExternalIPName)),
@@ -1671,6 +1817,10 @@ var _ = Describe("AWSProvider", func() {
 								Values: []string{"true"},
 							},
 							types.Filter{
+								Name:   aws.String(fmt.Sprintf("tag:%s", TagKeyClusterID)),
+								Values: []string{clusterID},
+							},
+							types.Filter{
 								Name:   aws.String(fmt.Sprintf("tag:%s", TagKeyExternalIPName)),
 								Values: []string{externalIP.Name},
 							},
@@ -1744,6 +1894,10 @@ var _ = Describe("AWSProvider", func() {
 							types.Filter{
 								Name:   aws.String(fmt.Sprintf("tag:%s", TagKeyManaged)),
 								Values: []string{"true"},
+							},
+							types.Filter{
+								Name:   aws.String(fmt.Sprintf("tag:%s", TagKeyClusterID)),
+								Values: []string{clusterID},
 							},
 							types.Filter{
 								Name:   aws.String(fmt.Sprintf("tag:%s", TagKeyExternalIPName)),
@@ -1948,6 +2102,10 @@ var _ = Describe("AWSProvider", func() {
 							Values: []string{"true"},
 						},
 						types.Filter{
+							Name:   aws.String(fmt.Sprintf("tag:%s", TagKeyClusterID)),
+							Values: []string{clusterID},
+						},
+						types.Filter{
 							Name:   aws.String("vpc-id"),
 							Values: []string{vpcID},
 						},
@@ -2010,6 +2168,10 @@ var _ = Describe("AWSProvider", func() {
 								Values: []string{"true"},
 							},
 							types.Filter{
+								Name:   aws.String(fmt.Sprintf("tag:%s", TagKeyClusterID)),
+								Values: []string{clusterID},
+							},
+							types.Filter{
 								Name:   aws.String("vpc-id"),
 								Values: []string{vpcID},
 							},
@@ -2065,6 +2227,10 @@ var _ = Describe("AWSProvider", func() {
 								Values: []string{"true"},
 							},
 							types.Filter{
+								Name:   aws.String(fmt.Sprintf("tag:%s", TagKeyClusterID)),
+								Values: []string{clusterID},
+							},
+							types.Filter{
 								Name:   aws.String("vpc-id"),
 								Values: []string{vpcID},
 							},
@@ -2084,6 +2250,10 @@ var _ = Describe("AWSProvider", func() {
 							types.Tag{
 								Key:   aws.String(string(TagKeyManaged)),
 								Value: aws.String("true"),
+							},
+							types.Tag{
+								Key:   aws.String(string(TagKeyClusterID)),
+								Value: aws.String(clusterID),
 							},
 							types.Tag{
 								Key:   aws.String(string(TagKeyNodeName)),
@@ -2141,22 +2311,6 @@ var _ = Describe("AWSProvider", func() {
 					DescribeSecurityGroups(ctx, gomock.AssignableToTypeOf(&ec2.DescribeSecurityGroupsInput{})).
 					DoAndReturn(func(_ context.Context, input *ec2.DescribeSecurityGroupsInput, _ ...func(*ec2.Options)) (*ec2.DescribeSecurityGroupsOutput, error) {
 						switch len(input.Filters) {
-						case 3:
-							Expect(input.Filters).To(ConsistOf(
-								types.Filter{
-									Name:   aws.String(fmt.Sprintf("tag:%s", TagKeyManaged)),
-									Values: []string{"true"},
-								},
-								types.Filter{
-									Name:   aws.String("vpc-id"),
-									Values: []string{vpcID},
-								},
-								types.Filter{
-									Name:   aws.String(fmt.Sprintf("tag:%s", TagKeyNodeName)),
-									Values: []string{nodeName},
-								},
-							))
-							return &ec2.DescribeSecurityGroupsOutput{}, nil
 						case 4:
 							Expect(input.Filters).To(ConsistOf(
 								types.Filter{
@@ -2168,8 +2322,32 @@ var _ = Describe("AWSProvider", func() {
 									Values: []string{vpcID},
 								},
 								types.Filter{
+									Name:   aws.String(fmt.Sprintf("tag:%s", TagKeyClusterID)),
+									Values: []string{clusterID},
+								},
+								types.Filter{
 									Name:   aws.String(fmt.Sprintf("tag:%s", TagKeyNodeName)),
 									Values: []string{nodeName},
+								},
+							))
+							return &ec2.DescribeSecurityGroupsOutput{}, nil
+						case 6:
+							Expect(input.Filters).To(ConsistOf(
+								types.Filter{
+									Name:   aws.String(fmt.Sprintf("tag:%s", TagKeyManaged)),
+									Values: []string{"true"},
+								},
+								types.Filter{
+									Name:   aws.String("vpc-id"),
+									Values: []string{vpcID},
+								},
+								types.Filter{
+									Name:   aws.String(fmt.Sprintf("tag:%s", TagKeyNodeName)),
+									Values: []string{nodeName},
+								},
+								types.Filter{
+									Name:   aws.String(fmt.Sprintf("tag:%s", TagKeyClusterID)),
+									Values: []string{"cluster-id"},
 								},
 								types.Filter{
 									Name:   aws.String("group-id"),
@@ -2194,6 +2372,10 @@ var _ = Describe("AWSProvider", func() {
 							types.Tag{
 								Key:   aws.String(string(TagKeyNodeName)),
 								Value: aws.String(nodeName),
+							},
+							types.Tag{
+								Key:   aws.String(string(TagKeyClusterID)),
+								Value: aws.String(clusterID),
 							},
 							types.Tag{
 								Key:   aws.String(string(TagKeyInstanceID)),
@@ -2262,6 +2444,10 @@ var _ = Describe("AWSProvider", func() {
 						types.Filter{
 							Name:   aws.String("vpc-id"),
 							Values: []string{vpcID},
+						},
+						types.Filter{
+							Name:   aws.String(fmt.Sprintf("tag:%s", TagKeyClusterID)),
+							Values: []string{clusterID},
 						},
 						types.Filter{
 							Name:   aws.String(fmt.Sprintf("tag:%s", TagKeyNodeName)),
@@ -2334,6 +2520,10 @@ var _ = Describe("AWSProvider", func() {
 						types.Filter{
 							Name:   aws.String("vpc-id"),
 							Values: []string{vpcID},
+						},
+						types.Filter{
+							Name:   aws.String(fmt.Sprintf("tag:%s", TagKeyClusterID)),
+							Values: []string{clusterID},
 						},
 						types.Filter{
 							Name:   aws.String(fmt.Sprintf("tag:%s", TagKeyNodeName)),
@@ -2417,6 +2607,10 @@ var _ = Describe("AWSProvider", func() {
 						types.Filter{
 							Name:   aws.String("vpc-id"),
 							Values: []string{vpcID},
+						},
+						types.Filter{
+							Name:   aws.String(fmt.Sprintf("tag:%s", TagKeyClusterID)),
+							Values: []string{clusterID},
 						},
 						types.Filter{
 							Name:   aws.String(fmt.Sprintf("tag:%s", TagKeyNodeName)),
@@ -2501,6 +2695,10 @@ var _ = Describe("AWSProvider", func() {
 							types.Filter{
 								Name:   aws.String("vpc-id"),
 								Values: []string{vpcID},
+							},
+							types.Filter{
+								Name:   aws.String(fmt.Sprintf("tag:%s", TagKeyClusterID)),
+								Values: []string{clusterID},
 							},
 							types.Filter{
 								Name:   aws.String(fmt.Sprintf("tag:%s", TagKeyNodeName)),
@@ -2645,6 +2843,10 @@ var _ = Describe("AWSProvider", func() {
 								Values: []string{vpcID},
 							},
 							types.Filter{
+								Name:   aws.String(fmt.Sprintf("tag:%s", TagKeyClusterID)),
+								Values: []string{clusterID},
+							},
+							types.Filter{
 								Name:   aws.String(fmt.Sprintf("tag:%s", TagKeyNodeName)),
 								Values: []string{nodeName},
 							},
@@ -2741,6 +2943,10 @@ var _ = Describe("AWSProvider", func() {
 							types.Filter{
 								Name:   aws.String("vpc-id"),
 								Values: []string{vpcID},
+							},
+							types.Filter{
+								Name:   aws.String(fmt.Sprintf("tag:%s", TagKeyClusterID)),
+								Values: []string{clusterID},
 							},
 							types.Filter{
 								Name:   aws.String(fmt.Sprintf("tag:%s", TagKeyNodeName)),
@@ -2860,6 +3066,10 @@ var _ = Describe("AWSProvider", func() {
 							types.Filter{
 								Name:   aws.String("vpc-id"),
 								Values: []string{vpcID},
+							},
+							types.Filter{
+								Name:   aws.String(fmt.Sprintf("tag:%s", TagKeyClusterID)),
+								Values: []string{clusterID},
 							},
 							types.Filter{
 								Name:   aws.String(fmt.Sprintf("tag:%s", TagKeyNodeName)),
@@ -2997,7 +3207,7 @@ var _ = Describe("AWSProvider", func() {
 						DescribeSecurityGroups(ctx, gomock.AssignableToTypeOf(&ec2.DescribeSecurityGroupsInput{})).
 						DoAndReturn(func(_ context.Context, input *ec2.DescribeSecurityGroupsInput, _ ...func(*ec2.Options)) (*ec2.DescribeSecurityGroupsOutput, error) {
 							switch len(input.Filters) {
-							case 3:
+							case 4:
 								Expect(input.Filters).To(ConsistOf(
 									types.Filter{
 										Name:   aws.String(fmt.Sprintf("tag:%s", TagKeyManaged)),
@@ -3006,6 +3216,10 @@ var _ = Describe("AWSProvider", func() {
 									types.Filter{
 										Name:   aws.String("vpc-id"),
 										Values: []string{vpcID},
+									},
+									types.Filter{
+										Name:   aws.String(fmt.Sprintf("tag:%s", TagKeyClusterID)),
+										Values: []string{clusterID},
 									},
 									types.Filter{
 										Name:   aws.String(fmt.Sprintf("tag:%s", TagKeyNodeName)),
@@ -3032,11 +3246,15 @@ var _ = Describe("AWSProvider", func() {
 										},
 									},
 								}, nil
-							case 2:
+							case 3:
 								Expect(input.Filters).To(ConsistOf(
 									types.Filter{
 										Name:   aws.String(fmt.Sprintf("tag:%s", TagKeyManaged)),
 										Values: []string{"true"},
+									},
+									types.Filter{
+										Name:   aws.String(fmt.Sprintf("tag:%s", TagKeyClusterID)),
+										Values: []string{clusterID},
 									},
 									types.Filter{
 										Name:   aws.String(fmt.Sprintf("tag:%s", TagKeyNodeName)),
@@ -3136,6 +3354,10 @@ var _ = Describe("AWSProvider", func() {
 								types.Filter{
 									Name:   aws.String("vpc-id"),
 									Values: []string{vpcID},
+								},
+								types.Filter{
+									Name:   aws.String(fmt.Sprintf("tag:%s", TagKeyClusterID)),
+									Values: []string{clusterID},
 								},
 								types.Filter{
 									Name:   aws.String(fmt.Sprintf("tag:%s", TagKeyNodeName)),
@@ -3283,6 +3505,10 @@ var _ = Describe("AWSProvider", func() {
 									Values: []string{vpcID},
 								},
 								types.Filter{
+									Name:   aws.String(fmt.Sprintf("tag:%s", TagKeyClusterID)),
+									Values: []string{clusterID},
+								},
+								types.Filter{
 									Name:   aws.String(fmt.Sprintf("tag:%s", TagKeyNodeName)),
 									Values: []string{nodeName},
 								},
@@ -3421,7 +3647,7 @@ var _ = Describe("AWSProvider", func() {
 						DescribeSecurityGroups(ctx, gomock.AssignableToTypeOf(&ec2.DescribeSecurityGroupsInput{})).
 						DoAndReturn(func(_ context.Context, input *ec2.DescribeSecurityGroupsInput, _ ...func(*ec2.Options)) (*ec2.DescribeSecurityGroupsOutput, error) {
 							switch len(input.Filters) {
-							case 3:
+							case 4:
 								Expect(input.Filters).To(ConsistOf(
 									types.Filter{
 										Name:   aws.String(fmt.Sprintf("tag:%s", TagKeyManaged)),
@@ -3430,6 +3656,10 @@ var _ = Describe("AWSProvider", func() {
 									types.Filter{
 										Name:   aws.String("vpc-id"),
 										Values: []string{vpcID},
+									},
+									types.Filter{
+										Name:   aws.String(fmt.Sprintf("tag:%s", TagKeyClusterID)),
+										Values: []string{clusterID},
 									},
 									types.Filter{
 										Name:   aws.String(fmt.Sprintf("tag:%s", TagKeyNodeName)),
@@ -3456,11 +3686,15 @@ var _ = Describe("AWSProvider", func() {
 										},
 									},
 								}, nil
-							case 2:
+							case 3:
 								Expect(input.Filters).To(ConsistOf(
 									types.Filter{
 										Name:   aws.String(fmt.Sprintf("tag:%s", TagKeyManaged)),
 										Values: []string{"true"},
+									},
+									types.Filter{
+										Name:   aws.String(fmt.Sprintf("tag:%s", TagKeyClusterID)),
+										Values: []string{clusterID},
 									},
 									types.Filter{
 										Name:   aws.String(fmt.Sprintf("tag:%s", TagKeyNodeName)),
@@ -3561,6 +3795,10 @@ var _ = Describe("AWSProvider", func() {
 								types.Filter{
 									Name:   aws.String(fmt.Sprintf("tag:%s", TagKeyManaged)),
 									Values: []string{"true"},
+								},
+								types.Filter{
+									Name:   aws.String(fmt.Sprintf("tag:%s", TagKeyClusterID)),
+									Values: []string{clusterID},
 								},
 								types.Filter{
 									Name:   aws.String("vpc-id"),
@@ -3706,6 +3944,10 @@ var _ = Describe("AWSProvider", func() {
 								types.Filter{
 									Name:   aws.String(fmt.Sprintf("tag:%s", TagKeyManaged)),
 									Values: []string{"true"},
+								},
+								types.Filter{
+									Name:   aws.String(fmt.Sprintf("tag:%s", TagKeyClusterID)),
+									Values: []string{clusterID},
 								},
 								types.Filter{
 									Name:   aws.String("vpc-id"),
@@ -3854,6 +4096,10 @@ var _ = Describe("AWSProvider", func() {
 								Values: []string{vpcID},
 							},
 							types.Filter{
+								Name:   aws.String(fmt.Sprintf("tag:%s", TagKeyClusterID)),
+								Values: []string{clusterID},
+							},
+							types.Filter{
 								Name:   aws.String(fmt.Sprintf("tag:%s", TagKeyNodeName)),
 								Values: []string{nodeName},
 							},
@@ -3995,6 +4241,10 @@ var _ = Describe("AWSProvider", func() {
 								Values: []string{vpcID},
 							},
 							types.Filter{
+								Name:   aws.String(fmt.Sprintf("tag:%s", TagKeyClusterID)),
+								Values: []string{clusterID},
+							},
+							types.Filter{
 								Name:   aws.String(fmt.Sprintf("tag:%s", TagKeyNodeName)),
 								Values: []string{nodeName},
 							},
@@ -4128,6 +4378,10 @@ var _ = Describe("AWSProvider", func() {
 							types.Filter{
 								Name:   aws.String(fmt.Sprintf("tag:%s", TagKeyManaged)),
 								Values: []string{"true"},
+							},
+							types.Filter{
+								Name:   aws.String(fmt.Sprintf("tag:%s", TagKeyClusterID)),
+								Values: []string{clusterID},
 							},
 							types.Filter{
 								Name:   aws.String("vpc-id"),
@@ -4269,6 +4523,10 @@ var _ = Describe("AWSProvider", func() {
 							types.Filter{
 								Name:   aws.String(fmt.Sprintf("tag:%s", TagKeyManaged)),
 								Values: []string{"true"},
+							},
+							types.Filter{
+								Name:   aws.String(fmt.Sprintf("tag:%s", TagKeyClusterID)),
+								Values: []string{clusterID},
 							},
 							types.Filter{
 								Name:   aws.String("vpc-id"),
@@ -4414,6 +4672,10 @@ var _ = Describe("AWSProvider", func() {
 								Values: []string{vpcID},
 							},
 							types.Filter{
+								Name:   aws.String(fmt.Sprintf("tag:%s", TagKeyClusterID)),
+								Values: []string{clusterID},
+							},
+							types.Filter{
 								Name:   aws.String(fmt.Sprintf("tag:%s", TagKeyNodeName)),
 								Values: []string{nodeName},
 							},
@@ -4544,6 +4806,10 @@ var _ = Describe("AWSProvider", func() {
 						types.Filter{
 							Name:   aws.String(fmt.Sprintf("tag:%s", TagKeyManaged)),
 							Values: []string{"true"},
+						},
+						types.Filter{
+							Name:   aws.String(fmt.Sprintf("tag:%s", TagKeyClusterID)),
+							Values: []string{clusterID},
 						},
 						types.Filter{
 							Name:   aws.String("vpc-id"),
