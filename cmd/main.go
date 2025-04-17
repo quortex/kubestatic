@@ -78,6 +78,7 @@ func main() {
 	var nodeReconciliationRequeueInterval time.Duration
 	var cacheTTL time.Duration
 	var cacheCleanupInterval time.Duration
+	var clusterID string
 	flag.StringVar(&metricsAddr, "metrics-bind-address", "0", "The address the metrics endpoint binds to. "+
 		"Use :8443 for HTTPS or :8080 for HTTP, or leave as 0 to disable the metrics service.")
 	flag.StringVar(&probeAddr, "health-probe-bind-address", ":8081", "The address the probe endpoint binds to.")
@@ -101,6 +102,7 @@ func main() {
 	flag.DurationVar(&cacheCleanupInterval, "cache-cleanup-interval", time.Minute,
 		"The interval at which expired cache entries are removed. "+
 			"A shorter interval ensures frequent cleanup but may impact performance.")
+	flag.StringVar(&clusterID, "cluster-id", "", "A required unique identifier used to track ownership of cloud resources.")
 	opts := zap.Options{}
 	opts.BindFlags(flag.CommandLine)
 	flag.Parse()
@@ -116,6 +118,14 @@ func main() {
 	disableHTTP2 := func(c *tls.Config) {
 		setupLog.Info("disabling http/2")
 		c.NextProtos = []string{"http/1.1"}
+	}
+
+	// clusterID is used to tag resources on AWS. It is used to identify
+	// resources created by kubestatic. It is to safely manage resources created
+	// by kubestatic.
+	if clusterID == "" {
+		setupLog.Error(nil, "cluster-id is required")
+		os.Exit(1)
 	}
 
 	if !enableHTTP2 {
@@ -155,7 +165,7 @@ func main() {
 	switch cloudProvider {
 	case providerAWS:
 		var err error
-		pvd, err = aws.NewProvider(cacheTTL, cacheCleanupInterval)
+		pvd, err = aws.NewProvider(cacheTTL, cacheCleanupInterval, clusterID)
 		if err != nil {
 			setupLog.Error(err, "Failed to initialize provider")
 			os.Exit(1)
