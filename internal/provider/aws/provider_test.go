@@ -470,15 +470,14 @@ var _ = Describe("AWSProvider", func() {
 
 	Context("ReconcileExternalIPDeletion", func() {
 		var (
-			externalIP                  *v1alpha1.ExternalIP
-			testID                      string
-			associationID, allocationID *string
+			externalIP                          *v1alpha1.ExternalIP
+			testID, associationID, allocationID string
 		)
 
 		BeforeEach(func() {
 			testID = rand.String(5)
-			associationID = aws.String("eipassoc-" + testID)
-			allocationID = aws.String("eipalloc-" + testID)
+			associationID = "eipassoc-" + testID
+			allocationID = "eipalloc-" + testID
 			externalIP = &v1alpha1.ExternalIP{
 				ObjectMeta: kmetav1.ObjectMeta{
 					Name:      "external-ip-" + testID,
@@ -572,8 +571,8 @@ var _ = Describe("AWSProvider", func() {
 					return &ec2.DescribeAddressesOutput{
 						Addresses: []types.Address{
 							{
-								AssociationId: associationID,
-								AllocationId:  allocationID,
+								AssociationId: aws.String(associationID),
+								AllocationId:  aws.String(allocationID),
 							},
 						},
 					}, nil
@@ -581,7 +580,7 @@ var _ = Describe("AWSProvider", func() {
 			mockec2Client.EXPECT().
 				DisassociateAddress(ctx, gomock.AssignableToTypeOf(&ec2.DisassociateAddressInput{})).
 				DoAndReturn(func(_ context.Context, input *ec2.DisassociateAddressInput, _ ...func(*ec2.Options)) (*ec2.DisassociateAddressOutput, error) {
-					Expect(aws.ToString(input.AssociationId)).To(Equal(aws.ToString(associationID)))
+					Expect(aws.ToString(input.AssociationId)).To(Equal(associationID))
 					return &ec2.DisassociateAddressOutput{}, fmt.Errorf("disassociate address error")
 				})
 
@@ -610,8 +609,8 @@ var _ = Describe("AWSProvider", func() {
 					return &ec2.DescribeAddressesOutput{
 						Addresses: []types.Address{
 							{
-								AssociationId: associationID,
-								AllocationId:  allocationID,
+								AssociationId: aws.String(associationID),
+								AllocationId:  aws.String(allocationID),
 							},
 						},
 					}, nil
@@ -619,13 +618,13 @@ var _ = Describe("AWSProvider", func() {
 			mockec2Client.EXPECT().
 				DisassociateAddress(ctx, gomock.AssignableToTypeOf(&ec2.DisassociateAddressInput{})).
 				DoAndReturn(func(_ context.Context, input *ec2.DisassociateAddressInput, _ ...func(*ec2.Options)) (*ec2.DisassociateAddressOutput, error) {
-					Expect(aws.ToString(input.AssociationId)).To(Equal(aws.ToString(associationID)))
+					Expect(aws.ToString(input.AssociationId)).To(Equal(associationID))
 					return &ec2.DisassociateAddressOutput{}, nil
 				})
 			mockec2Client.EXPECT().
 				ReleaseAddress(ctx, gomock.AssignableToTypeOf(&ec2.ReleaseAddressInput{})).
 				DoAndReturn(func(_ context.Context, input *ec2.ReleaseAddressInput, _ ...func(*ec2.Options)) (*ec2.ReleaseAddressOutput, error) {
-					Expect(aws.ToString(input.AllocationId)).To(Equal(aws.ToString(allocationID)))
+					Expect(aws.ToString(input.AllocationId)).To(Equal(allocationID))
 					return &ec2.ReleaseAddressOutput{}, fmt.Errorf("release address error")
 				})
 
@@ -654,8 +653,8 @@ var _ = Describe("AWSProvider", func() {
 					return &ec2.DescribeAddressesOutput{
 						Addresses: []types.Address{
 							{
-								AssociationId: associationID,
-								AllocationId:  allocationID,
+								AssociationId: aws.String(associationID),
+								AllocationId:  aws.String(allocationID),
 							},
 						},
 					}, nil
@@ -663,13 +662,13 @@ var _ = Describe("AWSProvider", func() {
 			mockec2Client.EXPECT().
 				DisassociateAddress(ctx, gomock.AssignableToTypeOf(&ec2.DisassociateAddressInput{})).
 				DoAndReturn(func(_ context.Context, input *ec2.DisassociateAddressInput, _ ...func(*ec2.Options)) (*ec2.DisassociateAddressOutput, error) {
-					Expect(aws.ToString(input.AssociationId)).To(Equal(aws.ToString(associationID)))
+					Expect(aws.ToString(input.AssociationId)).To(Equal(associationID))
 					return &ec2.DisassociateAddressOutput{}, nil
 				})
 			mockec2Client.EXPECT().
 				ReleaseAddress(ctx, gomock.AssignableToTypeOf(&ec2.ReleaseAddressInput{})).
 				DoAndReturn(func(_ context.Context, input *ec2.ReleaseAddressInput, _ ...func(*ec2.Options)) (*ec2.ReleaseAddressOutput, error) {
-					Expect(aws.ToString(input.AllocationId)).To(Equal(aws.ToString(allocationID)))
+					Expect(aws.ToString(input.AllocationId)).To(Equal(allocationID))
 					return &ec2.ReleaseAddressOutput{}, nil
 				})
 
@@ -680,14 +679,13 @@ var _ = Describe("AWSProvider", func() {
 
 	Context("ReconcileExternalIP", func() {
 		var (
-			externalIP                                            *v1alpha1.ExternalIP
-			testID, instanceID                                    string
-			allocationID, associationID, publicIP, eniID, eni01ID *string
+			externalIP                                                                *v1alpha1.ExternalIP
+			testID, instanceID, allocationID, associationID, publicIP, eniID, eni01ID string
 		)
 
 		BeforeEach(func() {
 			testID = rand.String(5)
-			allocationID = aws.String("eipalloc-" + testID)
+			allocationID = "eipalloc-" + testID
 			externalIP = &v1alpha1.ExternalIP{
 				ObjectMeta: kmetav1.ObjectMeta{
 					Name:      "external-ip-" + testID,
@@ -913,7 +911,7 @@ var _ = Describe("AWSProvider", func() {
 								},
 								types.Filter{
 									Name:   aws.String("allocation-id"),
-									Values: []string{aws.ToString(allocationID)},
+									Values: []string{allocationID},
 								},
 							))
 							return &ec2.DescribeAddressesOutput{}, fmt.Errorf("describe addresses error")
@@ -947,7 +945,7 @@ var _ = Describe("AWSProvider", func() {
 						))
 
 						return &ec2.AllocateAddressOutput{
-							AllocationId: allocationID,
+							AllocationId: aws.String(allocationID),
 						}, nil
 					})
 
@@ -1003,13 +1001,13 @@ var _ = Describe("AWSProvider", func() {
 									},
 									types.Filter{
 										Name:   aws.String("allocation-id"),
-										Values: []string{aws.ToString(allocationID)},
+										Values: []string{allocationID},
 									},
 								))
 								return &ec2.DescribeAddressesOutput{
 									Addresses: []types.Address{
 										{
-											AllocationId: allocationID,
+											AllocationId: aws.String(allocationID),
 										},
 									},
 								}, nil
@@ -1043,7 +1041,7 @@ var _ = Describe("AWSProvider", func() {
 							))
 
 							return &ec2.AllocateAddressOutput{
-								AllocationId: allocationID,
+								AllocationId: aws.String(allocationID),
 							}, nil
 						})
 
@@ -1068,7 +1066,7 @@ var _ = Describe("AWSProvider", func() {
 			})
 
 			When("the address is associated to an instance", func() {
-				associationID = aws.String("eipassoc-" + testID)
+				associationID = "eipassoc-" + testID
 
 				It("should return a reserved state and specify IPCreation and NetworkInterfaceAssociation condition and an error when an AWS API call (DisassociateAddress) fails", func() {
 					mockec2Client.EXPECT().
@@ -1107,14 +1105,14 @@ var _ = Describe("AWSProvider", func() {
 									},
 									types.Filter{
 										Name:   aws.String("allocation-id"),
-										Values: []string{aws.ToString(allocationID)},
+										Values: []string{allocationID},
 									},
 								))
 								return &ec2.DescribeAddressesOutput{
 									Addresses: []types.Address{
 										{
-											AllocationId:  allocationID,
-											AssociationId: associationID,
+											AllocationId:  aws.String(allocationID),
+											AssociationId: aws.String(associationID),
 										},
 									},
 								}, nil
@@ -1148,13 +1146,13 @@ var _ = Describe("AWSProvider", func() {
 							))
 
 							return &ec2.AllocateAddressOutput{
-								AllocationId: allocationID,
+								AllocationId: aws.String(allocationID),
 							}, nil
 						})
 					mockec2Client.EXPECT().
 						DisassociateAddress(ctx, gomock.AssignableToTypeOf(&ec2.DisassociateAddressInput{})).
 						DoAndReturn(func(_ context.Context, input *ec2.DisassociateAddressInput, _ ...func(*ec2.Options)) (*ec2.DisassociateAddressOutput, error) {
-							Expect(aws.ToString(input.AssociationId)).To(Equal(aws.ToString(associationID)))
+							Expect(aws.ToString(input.AssociationId)).To(Equal(associationID))
 							return &ec2.DisassociateAddressOutput{}, fmt.Errorf("disassociate address error")
 						})
 
@@ -1214,14 +1212,14 @@ var _ = Describe("AWSProvider", func() {
 									},
 									types.Filter{
 										Name:   aws.String("allocation-id"),
-										Values: []string{aws.ToString(allocationID)},
+										Values: []string{allocationID},
 									},
 								))
 								return &ec2.DescribeAddressesOutput{
 									Addresses: []types.Address{
 										{
-											AllocationId:  allocationID,
-											AssociationId: associationID,
+											AllocationId:  aws.String(allocationID),
+											AssociationId: aws.String(associationID),
 										},
 									},
 								}, nil
@@ -1255,13 +1253,13 @@ var _ = Describe("AWSProvider", func() {
 							))
 
 							return &ec2.AllocateAddressOutput{
-								AllocationId: allocationID,
+								AllocationId: aws.String(allocationID),
 							}, nil
 						})
 					mockec2Client.EXPECT().
 						DisassociateAddress(ctx, gomock.AssignableToTypeOf(&ec2.DisassociateAddressInput{})).
 						DoAndReturn(func(_ context.Context, input *ec2.DisassociateAddressInput, _ ...func(*ec2.Options)) (*ec2.DisassociateAddressOutput, error) {
-							Expect(aws.ToString(input.AssociationId)).To(Equal(aws.ToString(associationID)))
+							Expect(aws.ToString(input.AssociationId)).To(Equal(associationID))
 							return &ec2.DisassociateAddressOutput{}, nil
 						})
 
@@ -1347,8 +1345,8 @@ var _ = Describe("AWSProvider", func() {
 						return &ec2.DescribeAddressesOutput{
 							Addresses: []types.Address{
 								{
-									AllocationId:  allocationID,
-									AssociationId: associationID,
+									AllocationId:  aws.String(allocationID),
+									AssociationId: aws.String(associationID),
 								},
 							},
 						}, nil
@@ -1394,8 +1392,8 @@ var _ = Describe("AWSProvider", func() {
 						return &ec2.DescribeAddressesOutput{
 							Addresses: []types.Address{
 								{
-									AllocationId:  allocationID,
-									AssociationId: associationID,
+									AllocationId:  aws.String(allocationID),
+									AssociationId: aws.String(associationID),
 								},
 							},
 						}, nil
@@ -1444,8 +1442,8 @@ var _ = Describe("AWSProvider", func() {
 						return &ec2.DescribeAddressesOutput{
 							Addresses: []types.Address{
 								{
-									AllocationId:  allocationID,
-									AssociationId: associationID,
+									AllocationId:  aws.String(allocationID),
+									AssociationId: aws.String(associationID),
 								},
 							},
 						}, nil
@@ -1514,8 +1512,8 @@ var _ = Describe("AWSProvider", func() {
 						return &ec2.DescribeAddressesOutput{
 							Addresses: []types.Address{
 								{
-									AllocationId:  allocationID,
-									AssociationId: associationID,
+									AllocationId:  aws.String(allocationID),
+									AssociationId: aws.String(associationID),
 								},
 							},
 						}, nil
@@ -1564,9 +1562,9 @@ var _ = Describe("AWSProvider", func() {
 			})
 
 			When("the address has a network interface associated", func() {
-				publicIP = aws.String("ip-" + testID)
-				eniID = aws.String("eni-" + testID)
-				eni01ID = aws.String("eni-01-" + testID)
+				publicIP = "ip-" + testID
+				eniID = "eni-" + testID
+				eni01ID = "eni-01-" + testID
 				It("should return an associated state if it's associated with the current instance", func() {
 					mockec2Client.EXPECT().
 						DescribeAddresses(ctx, gomock.AssignableToTypeOf(&ec2.DescribeAddressesInput{})).
@@ -1588,9 +1586,9 @@ var _ = Describe("AWSProvider", func() {
 							return &ec2.DescribeAddressesOutput{
 								Addresses: []types.Address{
 									{
-										AllocationId:       allocationID,
-										AssociationId:      associationID,
-										NetworkInterfaceId: eniID,
+										AllocationId:       aws.String(allocationID),
+										AssociationId:      aws.String(associationID),
+										NetworkInterfaceId: aws.String(eniID),
 									},
 								},
 							}, nil
@@ -1609,9 +1607,9 @@ var _ = Describe("AWSProvider", func() {
 													{
 														Association: &types.InstanceNetworkInterfaceAssociation{
 															IpOwnerId: aws.String("aws"),
-															PublicIp:  publicIP,
+															PublicIp:  aws.String(publicIP),
 														},
-														NetworkInterfaceId: eniID,
+														NetworkInterfaceId: aws.String(eniID),
 													},
 												},
 											},
@@ -1661,9 +1659,9 @@ var _ = Describe("AWSProvider", func() {
 							return &ec2.DescribeAddressesOutput{
 								Addresses: []types.Address{
 									{
-										AllocationId:       allocationID,
-										AssociationId:      associationID,
-										NetworkInterfaceId: eniID,
+										AllocationId:       aws.String(allocationID),
+										AssociationId:      aws.String(associationID),
+										NetworkInterfaceId: aws.String(eniID),
 									},
 								},
 							}, nil
@@ -1682,9 +1680,9 @@ var _ = Describe("AWSProvider", func() {
 													{
 														Association: &types.InstanceNetworkInterfaceAssociation{
 															IpOwnerId: aws.String("aws"),
-															PublicIp:  publicIP,
+															PublicIp:  aws.String(publicIP),
 														},
-														NetworkInterfaceId: eni01ID,
+														NetworkInterfaceId: aws.String(eni01ID),
 													},
 												},
 											},
@@ -1696,7 +1694,7 @@ var _ = Describe("AWSProvider", func() {
 					mockec2Client.EXPECT().
 						DisassociateAddress(ctx, gomock.AssignableToTypeOf(&ec2.DisassociateAddressInput{})).
 						DoAndReturn(func(_ context.Context, input *ec2.DisassociateAddressInput, _ ...func(*ec2.Options)) (*ec2.DisassociateAddressOutput, error) {
-							Expect(aws.ToString(input.AssociationId)).To(Equal(aws.ToString(associationID)))
+							Expect(aws.ToString(input.AssociationId)).To(Equal(associationID))
 							return &ec2.DisassociateAddressOutput{}, fmt.Errorf("disassociate address error")
 						})
 
@@ -1740,9 +1738,9 @@ var _ = Describe("AWSProvider", func() {
 							return &ec2.DescribeAddressesOutput{
 								Addresses: []types.Address{
 									{
-										AllocationId:       allocationID,
-										AssociationId:      associationID,
-										NetworkInterfaceId: eniID,
+										AllocationId:       aws.String(allocationID),
+										AssociationId:      aws.String(associationID),
+										NetworkInterfaceId: aws.String(eniID),
 									},
 								},
 							}, nil
@@ -1761,9 +1759,9 @@ var _ = Describe("AWSProvider", func() {
 													{
 														Association: &types.InstanceNetworkInterfaceAssociation{
 															IpOwnerId: aws.String("aws"),
-															PublicIp:  publicIP,
+															PublicIp:  aws.String(publicIP),
 														},
-														NetworkInterfaceId: eni01ID,
+														NetworkInterfaceId: aws.String(eni01ID),
 													},
 												},
 											},
@@ -1775,14 +1773,14 @@ var _ = Describe("AWSProvider", func() {
 					mockec2Client.EXPECT().
 						DisassociateAddress(ctx, gomock.AssignableToTypeOf(&ec2.DisassociateAddressInput{})).
 						DoAndReturn(func(_ context.Context, input *ec2.DisassociateAddressInput, _ ...func(*ec2.Options)) (*ec2.DisassociateAddressOutput, error) {
-							Expect(aws.ToString(input.AssociationId)).To(Equal(aws.ToString(associationID)))
+							Expect(aws.ToString(input.AssociationId)).To(Equal(associationID))
 							return &ec2.DisassociateAddressOutput{}, nil
 						})
 					mockec2Client.EXPECT().
 						AssociateAddress(ctx, gomock.AssignableToTypeOf(&ec2.AssociateAddressInput{})).
 						DoAndReturn(func(_ context.Context, input *ec2.AssociateAddressInput, _ ...func(*ec2.Options)) (*ec2.AssociateAddressOutput, error) {
-							Expect(aws.ToString(input.AllocationId)).To(Equal(aws.ToString(allocationID)))
-							Expect(aws.ToString(input.NetworkInterfaceId)).To(Equal(aws.ToString(eni01ID)))
+							Expect(aws.ToString(input.AllocationId)).To(Equal(allocationID))
+							Expect(aws.ToString(input.NetworkInterfaceId)).To(Equal(eni01ID))
 							return &ec2.AssociateAddressOutput{}, nil
 						})
 
@@ -1828,8 +1826,8 @@ var _ = Describe("AWSProvider", func() {
 						return &ec2.DescribeAddressesOutput{
 							Addresses: []types.Address{
 								{
-									AllocationId:  allocationID,
-									AssociationId: associationID,
+									AllocationId:  aws.String(allocationID),
+									AssociationId: aws.String(associationID),
 								},
 							},
 						}, nil
@@ -1848,9 +1846,9 @@ var _ = Describe("AWSProvider", func() {
 												{
 													Association: &types.InstanceNetworkInterfaceAssociation{
 														IpOwnerId: aws.String("aws"),
-														PublicIp:  publicIP,
+														PublicIp:  aws.String(publicIP),
 													},
-													NetworkInterfaceId: eniID,
+													NetworkInterfaceId: aws.String(eniID),
 												},
 											},
 										},
@@ -1862,8 +1860,8 @@ var _ = Describe("AWSProvider", func() {
 				mockec2Client.EXPECT().
 					AssociateAddress(ctx, gomock.AssignableToTypeOf(&ec2.AssociateAddressInput{})).
 					DoAndReturn(func(_ context.Context, input *ec2.AssociateAddressInput, _ ...func(*ec2.Options)) (*ec2.AssociateAddressOutput, error) {
-						Expect(aws.ToString(input.AllocationId)).To(Equal(aws.ToString(allocationID)))
-						Expect(aws.ToString(input.NetworkInterfaceId)).To(Equal(aws.ToString(eniID)))
+						Expect(aws.ToString(input.AllocationId)).To(Equal(allocationID))
+						Expect(aws.ToString(input.NetworkInterfaceId)).To(Equal(eniID))
 						return &ec2.AssociateAddressOutput{}, fmt.Errorf("associate address error")
 					})
 
@@ -1907,8 +1905,8 @@ var _ = Describe("AWSProvider", func() {
 						return &ec2.DescribeAddressesOutput{
 							Addresses: []types.Address{
 								{
-									AllocationId:  allocationID,
-									AssociationId: associationID,
+									AllocationId:  aws.String(allocationID),
+									AssociationId: aws.String(associationID),
 								},
 							},
 						}, nil
@@ -1927,9 +1925,9 @@ var _ = Describe("AWSProvider", func() {
 												{
 													Association: &types.InstanceNetworkInterfaceAssociation{
 														IpOwnerId: aws.String("aws"),
-														PublicIp:  publicIP,
+														PublicIp:  aws.String(publicIP),
 													},
-													NetworkInterfaceId: eniID,
+													NetworkInterfaceId: aws.String(eniID),
 												},
 											},
 										},
@@ -1941,8 +1939,8 @@ var _ = Describe("AWSProvider", func() {
 				mockec2Client.EXPECT().
 					AssociateAddress(ctx, gomock.AssignableToTypeOf(&ec2.AssociateAddressInput{})).
 					DoAndReturn(func(_ context.Context, input *ec2.AssociateAddressInput, _ ...func(*ec2.Options)) (*ec2.AssociateAddressOutput, error) {
-						Expect(aws.ToString(input.AllocationId)).To(Equal(aws.ToString(allocationID)))
-						Expect(aws.ToString(input.NetworkInterfaceId)).To(Equal(aws.ToString(eniID)))
+						Expect(aws.ToString(input.AllocationId)).To(Equal(allocationID))
+						Expect(aws.ToString(input.NetworkInterfaceId)).To(Equal(eniID))
 						return &ec2.AssociateAddressOutput{}, nil
 					})
 
@@ -1970,18 +1968,17 @@ var _ = Describe("AWSProvider", func() {
 
 	Context("ReconcileFirewallRule", func() {
 		var (
-			firewallRule, firewallRule01                                            *v1alpha1.FirewallRule
-			firewallrules                                                           []v1alpha1.FirewallRule
-			testID, instanceID, nodeName, vpcID, securityGroupID, securityGroup01ID string
-			publicIP, eniID, eni01ID, eni02ID                                       *string
+			firewallRule, firewallRule01                                                                               *v1alpha1.FirewallRule
+			firewallrules                                                                                              []v1alpha1.FirewallRule
+			testID, instanceID, nodeName, vpcID, securityGroupID, securityGroup01ID, publicIP, eniID, eni01ID, eni02ID string
 		)
 
 		BeforeEach(func() {
 			testID = rand.String(5)
-			publicIP = aws.String("ip-" + testID)
-			eniID = aws.String("eni-" + testID)
-			eni01ID = aws.String("eni-01-" + testID)
-			eni02ID = aws.String("eni-02-" + testID)
+			publicIP = "ip-" + testID
+			eniID = "eni-" + testID
+			eni01ID = "eni-01-" + testID
+			eni02ID = "eni-02-" + testID
 			instanceID = "i-" + testID
 			vpcID = os.Getenv("VPC_ID")
 			securityGroupID = "sg-" + testID
@@ -2082,9 +2079,9 @@ var _ = Describe("AWSProvider", func() {
 											{
 												Association: &types.InstanceNetworkInterfaceAssociation{
 													IpOwnerId: aws.String("aws"),
-													PublicIp:  publicIP,
+													PublicIp:  aws.String(publicIP),
 												},
-												NetworkInterfaceId: eniID,
+												NetworkInterfaceId: aws.String(eniID),
 											},
 										},
 									},
@@ -2148,9 +2145,9 @@ var _ = Describe("AWSProvider", func() {
 												{
 													Association: &types.InstanceNetworkInterfaceAssociation{
 														IpOwnerId: aws.String("aws"),
-														PublicIp:  publicIP,
+														PublicIp:  aws.String(publicIP),
 													},
-													NetworkInterfaceId: eniID,
+													NetworkInterfaceId: aws.String(eniID),
 												},
 											},
 										},
@@ -2207,9 +2204,9 @@ var _ = Describe("AWSProvider", func() {
 												{
 													Association: &types.InstanceNetworkInterfaceAssociation{
 														IpOwnerId: aws.String("aws"),
-														PublicIp:  publicIP,
+														PublicIp:  aws.String(publicIP),
 													},
-													NetworkInterfaceId: eniID,
+													NetworkInterfaceId: aws.String(eniID),
 												},
 											},
 										},
@@ -2296,9 +2293,9 @@ var _ = Describe("AWSProvider", func() {
 												{
 													Association: &types.InstanceNetworkInterfaceAssociation{
 														IpOwnerId: aws.String("aws"),
-														PublicIp:  publicIP,
+														PublicIp:  aws.String(publicIP),
 													},
-													NetworkInterfaceId: eniID,
+													NetworkInterfaceId: aws.String(eniID),
 												},
 											},
 										},
@@ -2424,7 +2421,7 @@ var _ = Describe("AWSProvider", func() {
 												Association: &types.InstanceNetworkInterfaceAssociation{
 													IpOwnerId: aws.String("aws"),
 												},
-												NetworkInterfaceId: eniID,
+												NetworkInterfaceId: aws.String(eniID),
 											},
 										},
 									},
@@ -2498,9 +2495,9 @@ var _ = Describe("AWSProvider", func() {
 											{
 												Association: &types.InstanceNetworkInterfaceAssociation{
 													IpOwnerId: aws.String("aws"),
-													PublicIp:  publicIP,
+													PublicIp:  aws.String(publicIP),
 												},
-												NetworkInterfaceId: eniID,
+												NetworkInterfaceId: aws.String(eniID),
 											},
 										},
 									},
@@ -2585,9 +2582,9 @@ var _ = Describe("AWSProvider", func() {
 											{
 												Association: &types.InstanceNetworkInterfaceAssociation{
 													IpOwnerId: aws.String("aws"),
-													PublicIp:  publicIP,
+													PublicIp:  aws.String(publicIP),
 												},
-												NetworkInterfaceId: eniID,
+												NetworkInterfaceId: aws.String(eniID),
 											},
 										},
 									},
@@ -2673,9 +2670,9 @@ var _ = Describe("AWSProvider", func() {
 												{
 													Association: &types.InstanceNetworkInterfaceAssociation{
 														IpOwnerId: aws.String("aws"),
-														PublicIp:  publicIP,
+														PublicIp:  aws.String(publicIP),
 													},
-													NetworkInterfaceId: eniID,
+													NetworkInterfaceId: aws.String(eniID),
 												},
 											},
 										},
@@ -2725,7 +2722,7 @@ var _ = Describe("AWSProvider", func() {
 						return &ec2.DescribeNetworkInterfacesOutput{
 							NetworkInterfaces: []types.NetworkInterface{
 								{
-									NetworkInterfaceId: eniID,
+									NetworkInterfaceId: aws.String(eniID),
 									Groups: []types.GroupIdentifier{
 										{
 											GroupId: aws.String(securityGroupID),
@@ -2733,7 +2730,7 @@ var _ = Describe("AWSProvider", func() {
 									},
 								},
 								{
-									NetworkInterfaceId: eni01ID,
+									NetworkInterfaceId: aws.String(eni01ID),
 									Groups: []types.GroupIdentifier{
 										{
 											GroupId: aws.String(securityGroupID),
@@ -2744,7 +2741,7 @@ var _ = Describe("AWSProvider", func() {
 									},
 								},
 								{
-									NetworkInterfaceId: eni02ID,
+									NetworkInterfaceId: aws.String(eni02ID),
 									Groups: []types.GroupIdentifier{
 										{
 											GroupId: aws.String(securityGroupID),
@@ -2761,12 +2758,12 @@ var _ = Describe("AWSProvider", func() {
 					ModifyNetworkInterfaceAttribute(ctx, gomock.AssignableToTypeOf(&ec2.ModifyNetworkInterfaceAttributeInput{})).
 					DoAndReturn(func(_ context.Context, input *ec2.ModifyNetworkInterfaceAttributeInput, _ ...func(*ec2.Options)) (*ec2.ModifyNetworkInterfaceAttributeOutput, error) {
 						switch aws.ToString(input.NetworkInterfaceId) {
-						case aws.ToString(eni01ID):
-							Expect(aws.ToString(input.NetworkInterfaceId)).To(Equal(aws.ToString(eni01ID)))
+						case eni01ID:
+							Expect(aws.ToString(input.NetworkInterfaceId)).To(Equal(eni01ID))
 							Expect(input.Groups).To(ConsistOf(securityGroup01ID))
 							return &ec2.ModifyNetworkInterfaceAttributeOutput{}, nil
-						case aws.ToString(eni02ID):
-							Expect(aws.ToString(input.NetworkInterfaceId)).To(Equal(aws.ToString(eni02ID)))
+						case eni02ID:
+							Expect(aws.ToString(input.NetworkInterfaceId)).To(Equal(eni02ID))
 							Expect(input.Groups).To(ConsistOf(securityGroup01ID))
 							return &ec2.ModifyNetworkInterfaceAttributeOutput{}, fmt.Errorf("modify network interface attribute error")
 						default:
@@ -2811,9 +2808,9 @@ var _ = Describe("AWSProvider", func() {
 												{
 													Association: &types.InstanceNetworkInterfaceAssociation{
 														IpOwnerId: aws.String("aws"),
-														PublicIp:  publicIP,
+														PublicIp:  aws.String(publicIP),
 													},
-													NetworkInterfaceId: eniID,
+													NetworkInterfaceId: aws.String(eniID),
 													Groups: []types.GroupIdentifier{
 														{
 															GroupId: aws.String(securityGroupID),
@@ -2873,7 +2870,7 @@ var _ = Describe("AWSProvider", func() {
 				mockec2Client.EXPECT().
 					ModifyNetworkInterfaceAttribute(ctx, gomock.AssignableToTypeOf(&ec2.ModifyNetworkInterfaceAttributeInput{})).
 					DoAndReturn(func(_ context.Context, input *ec2.ModifyNetworkInterfaceAttributeInput, _ ...func(*ec2.Options)) (*ec2.ModifyNetworkInterfaceAttributeOutput, error) {
-						Expect(aws.ToString(input.NetworkInterfaceId)).To(Equal(aws.ToString(eniID)))
+						Expect(aws.ToString(input.NetworkInterfaceId)).To(Equal(eniID))
 						Expect(input.Groups).To(ConsistOf(securityGroupID, securityGroup01ID))
 						return &ec2.ModifyNetworkInterfaceAttributeOutput{}, fmt.Errorf("modify network interface attribute error")
 					})
@@ -2913,9 +2910,9 @@ var _ = Describe("AWSProvider", func() {
 												{
 													Association: &types.InstanceNetworkInterfaceAssociation{
 														IpOwnerId: aws.String("aws"),
-														PublicIp:  publicIP,
+														PublicIp:  aws.String(publicIP),
 													},
-													NetworkInterfaceId: eniID,
+													NetworkInterfaceId: aws.String(eniID),
 													Groups: []types.GroupIdentifier{
 														{
 															GroupId: aws.String(securityGroupID),
@@ -2982,7 +2979,7 @@ var _ = Describe("AWSProvider", func() {
 				mockec2Client.EXPECT().
 					ModifyNetworkInterfaceAttribute(ctx, gomock.AssignableToTypeOf(&ec2.ModifyNetworkInterfaceAttributeInput{})).
 					DoAndReturn(func(_ context.Context, input *ec2.ModifyNetworkInterfaceAttributeInput, _ ...func(*ec2.Options)) (*ec2.ModifyNetworkInterfaceAttributeOutput, error) {
-						Expect(aws.ToString(input.NetworkInterfaceId)).To(Equal(aws.ToString(eniID)))
+						Expect(aws.ToString(input.NetworkInterfaceId)).To(Equal(eniID))
 						Expect(input.Groups).To(ConsistOf(securityGroupID, securityGroup01ID))
 						return &ec2.ModifyNetworkInterfaceAttributeOutput{}, nil
 					})
@@ -3036,9 +3033,9 @@ var _ = Describe("AWSProvider", func() {
 												{
 													Association: &types.InstanceNetworkInterfaceAssociation{
 														IpOwnerId: aws.String("aws"),
-														PublicIp:  publicIP,
+														PublicIp:  aws.String(publicIP),
 													},
-													NetworkInterfaceId: eniID,
+													NetworkInterfaceId: aws.String(eniID),
 													Groups: []types.GroupIdentifier{
 														{
 															GroupId: aws.String(securityGroupID),
@@ -3112,7 +3109,7 @@ var _ = Describe("AWSProvider", func() {
 				mockec2Client.EXPECT().
 					ModifyNetworkInterfaceAttribute(ctx, gomock.AssignableToTypeOf(&ec2.ModifyNetworkInterfaceAttributeInput{})).
 					DoAndReturn(func(_ context.Context, input *ec2.ModifyNetworkInterfaceAttributeInput, _ ...func(*ec2.Options)) (*ec2.ModifyNetworkInterfaceAttributeOutput, error) {
-						Expect(aws.ToString(input.NetworkInterfaceId)).To(Equal(aws.ToString(eniID)))
+						Expect(aws.ToString(input.NetworkInterfaceId)).To(Equal(eniID))
 						Expect(input.Groups).To(ConsistOf(securityGroupID, securityGroup01ID))
 						return &ec2.ModifyNetworkInterfaceAttributeOutput{}, nil
 					})
@@ -3187,9 +3184,9 @@ var _ = Describe("AWSProvider", func() {
 													{
 														Association: &types.InstanceNetworkInterfaceAssociation{
 															IpOwnerId: aws.String("aws"),
-															PublicIp:  publicIP,
+															PublicIp:  aws.String(publicIP),
 														},
-														NetworkInterfaceId: eniID,
+														NetworkInterfaceId: aws.String(eniID),
 														Groups: []types.GroupIdentifier{
 															{
 																GroupId: aws.String(securityGroupID),
@@ -3279,7 +3276,7 @@ var _ = Describe("AWSProvider", func() {
 							return &ec2.DescribeNetworkInterfacesOutput{
 								NetworkInterfaces: []types.NetworkInterface{
 									{
-										NetworkInterfaceId: eniID,
+										NetworkInterfaceId: aws.String(eniID),
 										Groups: []types.GroupIdentifier{
 											{
 												GroupId: aws.String(securityGroupID),
@@ -3327,9 +3324,9 @@ var _ = Describe("AWSProvider", func() {
 													{
 														Association: &types.InstanceNetworkInterfaceAssociation{
 															IpOwnerId: aws.String("aws"),
-															PublicIp:  publicIP,
+															PublicIp:  aws.String(publicIP),
 														},
-														NetworkInterfaceId: eniID,
+														NetworkInterfaceId: aws.String(eniID),
 														Groups: []types.GroupIdentifier{
 															{
 																GroupId: aws.String(securityGroupID),
@@ -3406,7 +3403,7 @@ var _ = Describe("AWSProvider", func() {
 							return &ec2.DescribeNetworkInterfacesOutput{
 								NetworkInterfaces: []types.NetworkInterface{
 									{
-										NetworkInterfaceId: eniID,
+										NetworkInterfaceId: aws.String(eniID),
 										Groups: []types.GroupIdentifier{
 											{
 												GroupId: aws.String(securityGroupID),
@@ -3476,9 +3473,9 @@ var _ = Describe("AWSProvider", func() {
 													{
 														Association: &types.InstanceNetworkInterfaceAssociation{
 															IpOwnerId: aws.String("aws"),
-															PublicIp:  publicIP,
+															PublicIp:  aws.String(publicIP),
 														},
-														NetworkInterfaceId: eniID,
+														NetworkInterfaceId: aws.String(eniID),
 														Groups: []types.GroupIdentifier{
 															{
 																GroupId: aws.String(securityGroupID),
@@ -3557,7 +3554,7 @@ var _ = Describe("AWSProvider", func() {
 							return &ec2.DescribeNetworkInterfacesOutput{
 								NetworkInterfaces: []types.NetworkInterface{
 									{
-										NetworkInterfaceId: eniID,
+										NetworkInterfaceId: aws.String(eniID),
 										Groups: []types.GroupIdentifier{
 											{
 												GroupId: aws.String(securityGroupID),
@@ -3627,9 +3624,9 @@ var _ = Describe("AWSProvider", func() {
 													{
 														Association: &types.InstanceNetworkInterfaceAssociation{
 															IpOwnerId: aws.String("aws"),
-															PublicIp:  publicIP,
+															PublicIp:  aws.String(publicIP),
 														},
-														NetworkInterfaceId: eniID,
+														NetworkInterfaceId: aws.String(eniID),
 														Groups: []types.GroupIdentifier{
 															{
 																GroupId: aws.String(securityGroupID),
@@ -3719,7 +3716,7 @@ var _ = Describe("AWSProvider", func() {
 							return &ec2.DescribeNetworkInterfacesOutput{
 								NetworkInterfaces: []types.NetworkInterface{
 									{
-										NetworkInterfaceId: eniID,
+										NetworkInterfaceId: aws.String(eniID),
 										Groups: []types.GroupIdentifier{
 											{
 												GroupId: aws.String(securityGroupID),
@@ -3772,9 +3769,9 @@ var _ = Describe("AWSProvider", func() {
 													{
 														Association: &types.InstanceNetworkInterfaceAssociation{
 															IpOwnerId: aws.String("aws"),
-															PublicIp:  publicIP,
+															PublicIp:  aws.String(publicIP),
 														},
-														NetworkInterfaceId: eniID,
+														NetworkInterfaceId: aws.String(eniID),
 														Groups: []types.GroupIdentifier{
 															{
 																GroupId: aws.String(securityGroupID),
@@ -3851,7 +3848,7 @@ var _ = Describe("AWSProvider", func() {
 							return &ec2.DescribeNetworkInterfacesOutput{
 								NetworkInterfaces: []types.NetworkInterface{
 									{
-										NetworkInterfaceId: eniID,
+										NetworkInterfaceId: aws.String(eniID),
 										Groups: []types.GroupIdentifier{
 											{
 												GroupId: aws.String(securityGroupID),
@@ -3921,9 +3918,9 @@ var _ = Describe("AWSProvider", func() {
 													{
 														Association: &types.InstanceNetworkInterfaceAssociation{
 															IpOwnerId: aws.String("aws"),
-															PublicIp:  publicIP,
+															PublicIp:  aws.String(publicIP),
 														},
-														NetworkInterfaceId: eniID,
+														NetworkInterfaceId: aws.String(eniID),
 														Groups: []types.GroupIdentifier{
 															{
 																GroupId: aws.String(securityGroupID),
@@ -4002,7 +3999,7 @@ var _ = Describe("AWSProvider", func() {
 							return &ec2.DescribeNetworkInterfacesOutput{
 								NetworkInterfaces: []types.NetworkInterface{
 									{
-										NetworkInterfaceId: eniID,
+										NetworkInterfaceId: aws.String(eniID),
 										Groups: []types.GroupIdentifier{
 											{
 												GroupId: aws.String(securityGroupID),
@@ -4067,9 +4064,9 @@ var _ = Describe("AWSProvider", func() {
 												{
 													Association: &types.InstanceNetworkInterfaceAssociation{
 														IpOwnerId: aws.String("aws"),
-														PublicIp:  publicIP,
+														PublicIp:  aws.String(publicIP),
 													},
-													NetworkInterfaceId: eniID,
+													NetworkInterfaceId: aws.String(eniID),
 													Groups: []types.GroupIdentifier{
 														{
 															GroupId: aws.String(securityGroupID),
@@ -4146,7 +4143,7 @@ var _ = Describe("AWSProvider", func() {
 						return &ec2.DescribeNetworkInterfacesOutput{
 							NetworkInterfaces: []types.NetworkInterface{
 								{
-									NetworkInterfaceId: eniID,
+									NetworkInterfaceId: aws.String(eniID),
 									Groups: []types.GroupIdentifier{
 										{
 											GroupId: aws.String(securityGroupID),
@@ -4212,9 +4209,9 @@ var _ = Describe("AWSProvider", func() {
 												{
 													Association: &types.InstanceNetworkInterfaceAssociation{
 														IpOwnerId: aws.String("aws"),
-														PublicIp:  publicIP,
+														PublicIp:  aws.String(publicIP),
 													},
-													NetworkInterfaceId: eniID,
+													NetworkInterfaceId: aws.String(eniID),
 													Groups: []types.GroupIdentifier{
 														{
 															GroupId: aws.String(securityGroupID),
@@ -4282,7 +4279,7 @@ var _ = Describe("AWSProvider", func() {
 						return &ec2.DescribeNetworkInterfacesOutput{
 							NetworkInterfaces: []types.NetworkInterface{
 								{
-									NetworkInterfaceId: eniID,
+									NetworkInterfaceId: aws.String(eniID),
 									Groups: []types.GroupIdentifier{
 										{
 											GroupId: aws.String(securityGroupID),
@@ -4355,9 +4352,9 @@ var _ = Describe("AWSProvider", func() {
 												{
 													Association: &types.InstanceNetworkInterfaceAssociation{
 														IpOwnerId: aws.String("aws"),
-														PublicIp:  publicIP,
+														PublicIp:  aws.String(publicIP),
 													},
-													NetworkInterfaceId: eniID,
+													NetworkInterfaceId: aws.String(eniID),
 													Groups: []types.GroupIdentifier{
 														{
 															GroupId: aws.String(securityGroupID),
@@ -4425,7 +4422,7 @@ var _ = Describe("AWSProvider", func() {
 						return &ec2.DescribeNetworkInterfacesOutput{
 							NetworkInterfaces: []types.NetworkInterface{
 								{
-									NetworkInterfaceId: eniID,
+									NetworkInterfaceId: aws.String(eniID),
 									Groups: []types.GroupIdentifier{
 										{
 											GroupId: aws.String(securityGroupID),
@@ -4500,9 +4497,9 @@ var _ = Describe("AWSProvider", func() {
 												{
 													Association: &types.InstanceNetworkInterfaceAssociation{
 														IpOwnerId: aws.String("aws"),
-														PublicIp:  publicIP,
+														PublicIp:  aws.String(publicIP),
 													},
-													NetworkInterfaceId: eniID,
+													NetworkInterfaceId: aws.String(eniID),
 													Groups: []types.GroupIdentifier{
 														{
 															GroupId: aws.String(securityGroupID),
@@ -4570,7 +4567,7 @@ var _ = Describe("AWSProvider", func() {
 						return &ec2.DescribeNetworkInterfacesOutput{
 							NetworkInterfaces: []types.NetworkInterface{
 								{
-									NetworkInterfaceId: eniID,
+									NetworkInterfaceId: aws.String(eniID),
 									Groups: []types.GroupIdentifier{
 										{
 											GroupId: aws.String(securityGroupID),
@@ -4643,9 +4640,9 @@ var _ = Describe("AWSProvider", func() {
 												{
 													Association: &types.InstanceNetworkInterfaceAssociation{
 														IpOwnerId: aws.String("aws"),
-														PublicIp:  publicIP,
+														PublicIp:  aws.String(publicIP),
 													},
-													NetworkInterfaceId: eniID,
+													NetworkInterfaceId: aws.String(eniID),
 													Groups: []types.GroupIdentifier{
 														{
 															GroupId: aws.String(securityGroupID),
@@ -4713,7 +4710,7 @@ var _ = Describe("AWSProvider", func() {
 						return &ec2.DescribeNetworkInterfacesOutput{
 							NetworkInterfaces: []types.NetworkInterface{
 								{
-									NetworkInterfaceId: eniID,
+									NetworkInterfaceId: aws.String(eniID),
 									Groups: []types.GroupIdentifier{
 										{
 											GroupId: aws.String(securityGroupID),
@@ -4783,9 +4780,9 @@ var _ = Describe("AWSProvider", func() {
 											{
 												Association: &types.InstanceNetworkInterfaceAssociation{
 													IpOwnerId: aws.String("aws"),
-													PublicIp:  publicIP,
+													PublicIp:  aws.String(publicIP),
 												},
-												NetworkInterfaceId: eniID,
+												NetworkInterfaceId: aws.String(eniID),
 												Groups: []types.GroupIdentifier{
 													{
 														GroupId: aws.String(securityGroupID),
@@ -4853,7 +4850,7 @@ var _ = Describe("AWSProvider", func() {
 					return &ec2.DescribeNetworkInterfacesOutput{
 						NetworkInterfaces: []types.NetworkInterface{
 							{
-								NetworkInterfaceId: eniID,
+								NetworkInterfaceId: aws.String(eniID),
 								Groups: []types.GroupIdentifier{
 									{
 										GroupId: aws.String(securityGroupID),
