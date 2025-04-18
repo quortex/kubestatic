@@ -197,7 +197,7 @@ GOLANGCI_LINT_VERSION ?= v2.0.2
 CRD_REF_DOCS_VERSION ?= v0.1.0
 YQ_VERSION ?= v4.44.3
 HELM_DOCS_VERSION ?= v1.14.2
-MOCKGEN_VERSION ?= v0.5.0
+MOCKGEN_VERSION ?= v0.5.1
 
 .PHONY: kustomize
 kustomize: $(KUSTOMIZE) ## Download kustomize locally if necessary.

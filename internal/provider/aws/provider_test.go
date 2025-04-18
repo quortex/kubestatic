@@ -32,7 +32,7 @@ var _ = Describe("AWSProvider", func() {
 	)
 
 	ctx := context.Background()
-	log := logf.Log.WithName("input-controller-test")
+	log := logf.Log.WithName("aws-provider-test")
 
 	BeforeEach(func() {
 		mockCtrl = gomock.NewController(GinkgoT())
