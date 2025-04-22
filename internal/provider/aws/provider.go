@@ -750,7 +750,6 @@ func (p *awsProvider) ReconcileFirewallRule(
 			}
 		}
 
-		p.securityGroupsMutex.Lock()
 		p.networkInterfacesMutex.Lock()
 		_, err = p.ec2.ModifyNetworkInterfaceAttribute(ctx, &ec2.ModifyNetworkInterfaceAttributeInput{
 			NetworkInterfaceId: ni.NetworkInterfaceId,
@@ -770,9 +769,6 @@ func (p *awsProvider) ReconcileFirewallRule(
 
 		p.networkInterfacesCache.Delete(securityGroupID)
 		p.networkInterfacesMutex.Unlock()
-
-		p.securityGroupsCache.Flush()
-		p.securityGroupsMutex.Unlock()
 	}
 
 	if !isAssociated {
@@ -785,7 +781,6 @@ func (p *awsProvider) ReconcileFirewallRule(
 			}
 		}
 		groups = append(groups, securityGroupID)
-		p.securityGroupsMutex.Lock()
 		p.networkInterfacesMutex.Lock()
 		_, err = p.ec2.ModifyNetworkInterfaceAttribute(ctx, &ec2.ModifyNetworkInterfaceAttributeInput{
 			NetworkInterfaceId: networkInterface.NetworkInterfaceId,
@@ -812,9 +807,6 @@ func (p *awsProvider) ReconcileFirewallRule(
 
 		p.networkInterfacesCache.Delete(securityGroupID)
 		p.networkInterfacesMutex.Unlock()
-
-		p.securityGroupsCache.Flush()
-		p.securityGroupsMutex.Unlock()
 	}
 
 	meta.SetStatusCondition(&status.Conditions, kmetav1.Condition{
@@ -993,7 +985,6 @@ func (p *awsProvider) ReconcileFirewallRulesDeletion(
 			}
 		}
 
-		p.securityGroupsMutex.Lock()
 		p.networkInterfacesMutex.Lock()
 		_, err = p.ec2.ModifyNetworkInterfaceAttribute(ctx, &ec2.ModifyNetworkInterfaceAttributeInput{
 			NetworkInterfaceId: ni.NetworkInterfaceId,
@@ -1001,9 +992,6 @@ func (p *awsProvider) ReconcileFirewallRulesDeletion(
 		})
 		p.networkInterfacesCache.Delete(securityGroupID)
 		p.networkInterfacesMutex.Unlock()
-
-		p.securityGroupsCache.Flush()
-		p.securityGroupsMutex.Unlock()
 
 		if err != nil {
 			return fmt.Errorf("failed to modify network interface attribute: %w", err)
