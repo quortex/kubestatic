@@ -751,6 +751,7 @@ func (p *awsProvider) ReconcileFirewallRule(
 		}
 
 		p.securityGroupsMutex.Lock()
+		p.networkInterfacesMutex.Lock()
 		_, err = p.ec2.ModifyNetworkInterfaceAttribute(ctx, &ec2.ModifyNetworkInterfaceAttributeInput{
 			NetworkInterfaceId: ni.NetworkInterfaceId,
 			Groups:             groups,
@@ -768,6 +769,7 @@ func (p *awsProvider) ReconcileFirewallRule(
 		log.Info("Security group disassociated from network interface", "securityGroupID", securityGroupID, "networkInterfaceID", ni.NetworkInterfaceId)
 
 		p.networkInterfacesCache.Delete(securityGroupID)
+		p.networkInterfacesMutex.Unlock()
 
 		p.securityGroupsCache.Flush()
 		p.securityGroupsMutex.Unlock()
@@ -784,6 +786,7 @@ func (p *awsProvider) ReconcileFirewallRule(
 		}
 		groups = append(groups, securityGroupID)
 		p.securityGroupsMutex.Lock()
+		p.networkInterfacesMutex.Lock()
 		_, err = p.ec2.ModifyNetworkInterfaceAttribute(ctx, &ec2.ModifyNetworkInterfaceAttributeInput{
 			NetworkInterfaceId: networkInterface.NetworkInterfaceId,
 			Groups:             groups,
@@ -808,6 +811,7 @@ func (p *awsProvider) ReconcileFirewallRule(
 		)
 
 		p.networkInterfacesCache.Delete(securityGroupID)
+		p.networkInterfacesMutex.Unlock()
 
 		p.securityGroupsCache.Flush()
 		p.securityGroupsMutex.Unlock()
@@ -988,10 +992,19 @@ func (p *awsProvider) ReconcileFirewallRulesDeletion(
 				groups = append(groups, aws.ToString(group.GroupId))
 			}
 		}
+
+		p.securityGroupsMutex.Lock()
+		p.networkInterfacesMutex.Lock()
 		_, err = p.ec2.ModifyNetworkInterfaceAttribute(ctx, &ec2.ModifyNetworkInterfaceAttributeInput{
 			NetworkInterfaceId: ni.NetworkInterfaceId,
 			Groups:             groups,
 		})
+		p.networkInterfacesCache.Delete(securityGroupID)
+		p.networkInterfacesMutex.Unlock()
+
+		p.securityGroupsCache.Flush()
+		p.securityGroupsMutex.Unlock()
+
 		if err != nil {
 			return fmt.Errorf("failed to modify network interface attribute: %w", err)
 		}
