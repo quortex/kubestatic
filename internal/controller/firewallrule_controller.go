@@ -249,7 +249,7 @@ func (r *FirewallRuleReconciler) reconcileFirewallRule(
 	var node corev1.Node
 	if err := r.Get(ctx, types.NamespacedName{Name: nodeName}, &node); err != nil {
 		if apierrors.IsNotFound(err) {
-			if err := r.Provider.ReconcileFirewallRulesDeletion(ctx, log, nodeName); err != nil {
+			if err := r.Provider.ReconcileFirewallRulesDeletion(ctx, log, nodeName, ""); err != nil {
 				log.Error(err, "Failed to reconcile FirewallRule deletion")
 				return err
 			}

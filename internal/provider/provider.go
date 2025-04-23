@@ -25,7 +25,7 @@ type Client interface {
 		firewallRule *v1alpha1.FirewallRule,
 		firewallrules []v1alpha1.FirewallRule,
 	) (v1alpha1.FirewallRuleStatus, error)
-	ReconcileFirewallRulesDeletion(ctx context.Context, log logr.Logger, nodeName string) error
+	ReconcileFirewallRulesDeletion(ctx context.Context, log logr.Logger, nodeName string, instanceID string) error
 	ReconcileExternalIP(ctx context.Context, log logr.Logger, instanceID string, externalIP *v1alpha1.ExternalIP) (v1alpha1.ExternalIPStatus, error)
 	ReconcileExternalIPDeletion(ctx context.Context, log logr.Logger, externalIP *v1alpha1.ExternalIP) error
 }
