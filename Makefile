@@ -62,7 +62,7 @@ vet: ## Run go vet against code.
 .PHONY: mocks
 mocks: mockgen ## Generate all mocks used for testing
 	@mkdir -p internal/provider/aws/mocks
-	@$(MOCKGEN) -source=internal/provider/aws/ec2Client.go -package=mocks -destination=internal/provider/aws/mocks/zz_generated.ec2Client.go
+	@$(MOCKGEN) -source=internal/provider/aws/ec2_client.go -package=mocks -destination=internal/provider/aws/mocks/zz_generated.ec2_client.go
 
 .PHONY: test
 test: mocks manifests generate fmt vet envtest ## Run tests.

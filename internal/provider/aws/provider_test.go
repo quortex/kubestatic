@@ -29,15 +29,17 @@ var _ = Describe("AWSProvider", func() {
 		mockec2Client *mocks.Mockec2Client
 		provider      provider.Provider
 		clusterID     string
+		filters       []types.Filter
+		tags          []types.Tag
 	)
 
 	ctx := context.Background()
 	log := logf.Log.WithName("aws-provider-test")
+	clusterID = "cluster-id"
 
 	BeforeEach(func() {
 		mockCtrl = gomock.NewController(GinkgoT())
 		mockec2Client = mocks.NewMockec2Client(mockCtrl)
-		clusterID = "cluster-id"
 
 		// Inject the mock EC2 into the provider
 		provider = newProviderWithClient(mockec2Client, 5*time.Minute, 10*time.Minute, clusterID)
@@ -48,9 +50,7 @@ var _ = Describe("AWSProvider", func() {
 	})
 
 	Context("ReconcileFirewallRulesDeletion", func() {
-		var (
-			nodeName, testID, groupID, sgName, eniID, eni01ID string
-		)
+		var nodeName, testID, groupID, sgName, eniID, eni01ID string
 
 		BeforeEach(func() {
 			testID = rand.String(5)
@@ -59,30 +59,31 @@ var _ = Describe("AWSProvider", func() {
 			sgName = fmt.Sprintf("test-%s-sg", testID)
 			eniID = "eni-" + testID
 			eni01ID = "eni-1-" + testID
+			filters = []types.Filter{
+				{
+					Name:   aws.String(fmt.Sprintf("tag:%s", TagKeyNodeName)),
+					Values: []string{nodeName},
+				},
+				{
+					Name:   aws.String(fmt.Sprintf("tag:%s", TagKeyClusterID)),
+					Values: []string{clusterID},
+				},
+				{
+					Name:   aws.String(fmt.Sprintf("tag:%s", TagKeyManaged)),
+					Values: []string{"true"},
+				},
+			}
 		})
 
 		It("should return an error when an AWS API call (DescribeSecurityGroups) fails", func() {
 			mockec2Client.EXPECT().
 				DescribeSecurityGroups(ctx, gomock.AssignableToTypeOf(&ec2.DescribeSecurityGroupsInput{})).
 				DoAndReturn(func(_ context.Context, input *ec2.DescribeSecurityGroupsInput, _ ...func(*ec2.Options)) (*ec2.DescribeSecurityGroupsOutput, error) {
-					Expect(input.Filters).To(ConsistOf(
-						types.Filter{
-							Name:   aws.String(fmt.Sprintf("tag:%s", TagKeyNodeName)),
-							Values: []string{nodeName},
-						},
-						types.Filter{
-							Name:   aws.String(fmt.Sprintf("tag:%s", TagKeyClusterID)),
-							Values: []string{clusterID},
-						},
-						types.Filter{
-							Name:   aws.String(fmt.Sprintf("tag:%s", TagKeyManaged)),
-							Values: []string{"true"},
-						},
-					))
+					Expect(input.Filters).To(ConsistOf(filters))
 					return &ec2.DescribeSecurityGroupsOutput{}, fmt.Errorf("describe security groups error")
 				})
 
-			err := provider.ReconcileFirewallRulesDeletion(ctx, log, nodeName)
+			err := provider.ReconcileFirewallRulesDeletion(ctx, log, nodeName, "")
 			Expect(err).To(HaveOccurred())
 		})
 
@@ -90,25 +91,12 @@ var _ = Describe("AWSProvider", func() {
 			mockec2Client.EXPECT().
 				DescribeSecurityGroups(ctx, gomock.AssignableToTypeOf(&ec2.DescribeSecurityGroupsInput{})).
 				DoAndReturn(func(_ context.Context, input *ec2.DescribeSecurityGroupsInput, _ ...func(*ec2.Options)) (*ec2.DescribeSecurityGroupsOutput, error) {
-					Expect(input.Filters).To(ConsistOf(
-						types.Filter{
-							Name:   aws.String(fmt.Sprintf("tag:%s", TagKeyNodeName)),
-							Values: []string{nodeName},
-						},
-						types.Filter{
-							Name:   aws.String(fmt.Sprintf("tag:%s", TagKeyClusterID)),
-							Values: []string{clusterID},
-						},
-						types.Filter{
-							Name:   aws.String(fmt.Sprintf("tag:%s", TagKeyManaged)),
-							Values: []string{"true"},
-						},
-					))
+					Expect(input.Filters).To(ConsistOf(filters))
 					return &ec2.DescribeSecurityGroupsOutput{
 						SecurityGroups: []types.SecurityGroup{},
 					}, nil
 				})
-			err := provider.ReconcileFirewallRulesDeletion(ctx, log, nodeName)
+			err := provider.ReconcileFirewallRulesDeletion(ctx, log, nodeName, "")
 			Expect(err).ToNot(HaveOccurred())
 		})
 
@@ -116,20 +104,7 @@ var _ = Describe("AWSProvider", func() {
 			mockec2Client.EXPECT().
 				DescribeSecurityGroups(ctx, gomock.AssignableToTypeOf(&ec2.DescribeSecurityGroupsInput{})).
 				DoAndReturn(func(_ context.Context, input *ec2.DescribeSecurityGroupsInput, _ ...func(*ec2.Options)) (*ec2.DescribeSecurityGroupsOutput, error) {
-					Expect(input.Filters).To(ConsistOf(
-						types.Filter{
-							Name:   aws.String(fmt.Sprintf("tag:%s", TagKeyNodeName)),
-							Values: []string{nodeName},
-						},
-						types.Filter{
-							Name:   aws.String(fmt.Sprintf("tag:%s", TagKeyClusterID)),
-							Values: []string{clusterID},
-						},
-						types.Filter{
-							Name:   aws.String(fmt.Sprintf("tag:%s", TagKeyManaged)),
-							Values: []string{"true"},
-						},
-					))
+					Expect(input.Filters).To(ConsistOf(filters))
 					return &ec2.DescribeSecurityGroupsOutput{
 						SecurityGroups: []types.SecurityGroup{
 							{
@@ -150,7 +125,7 @@ var _ = Describe("AWSProvider", func() {
 					}, fmt.Errorf("describe network interfaces error")
 				})
 
-			err := provider.ReconcileFirewallRulesDeletion(ctx, log, nodeName)
+			err := provider.ReconcileFirewallRulesDeletion(ctx, log, nodeName, "")
 			Expect(err).To(HaveOccurred())
 		})
 
@@ -158,20 +133,7 @@ var _ = Describe("AWSProvider", func() {
 			mockec2Client.EXPECT().
 				DescribeSecurityGroups(ctx, gomock.AssignableToTypeOf(&ec2.DescribeSecurityGroupsInput{})).
 				DoAndReturn(func(_ context.Context, input *ec2.DescribeSecurityGroupsInput, _ ...func(*ec2.Options)) (*ec2.DescribeSecurityGroupsOutput, error) {
-					Expect(input.Filters).To(ConsistOf(
-						types.Filter{
-							Name:   aws.String(fmt.Sprintf("tag:%s", TagKeyNodeName)),
-							Values: []string{nodeName},
-						},
-						types.Filter{
-							Name:   aws.String(fmt.Sprintf("tag:%s", TagKeyClusterID)),
-							Values: []string{clusterID},
-						},
-						types.Filter{
-							Name:   aws.String(fmt.Sprintf("tag:%s", TagKeyManaged)),
-							Values: []string{"true"},
-						},
-					))
+					Expect(input.Filters).To(ConsistOf(filters))
 					return &ec2.DescribeSecurityGroupsOutput{
 						SecurityGroups: []types.SecurityGroup{
 							{
@@ -250,7 +212,7 @@ var _ = Describe("AWSProvider", func() {
 					}
 				}).Times(2)
 
-			err := provider.ReconcileFirewallRulesDeletion(ctx, log, nodeName)
+			err := provider.ReconcileFirewallRulesDeletion(ctx, log, nodeName, "")
 			Expect(err).To(HaveOccurred())
 		})
 
@@ -258,20 +220,7 @@ var _ = Describe("AWSProvider", func() {
 			mockec2Client.EXPECT().
 				DescribeSecurityGroups(ctx, gomock.AssignableToTypeOf(&ec2.DescribeSecurityGroupsInput{})).
 				DoAndReturn(func(_ context.Context, input *ec2.DescribeSecurityGroupsInput, _ ...func(*ec2.Options)) (*ec2.DescribeSecurityGroupsOutput, error) {
-					Expect(input.Filters).To(ConsistOf(
-						types.Filter{
-							Name:   aws.String(fmt.Sprintf("tag:%s", TagKeyNodeName)),
-							Values: []string{nodeName},
-						},
-						types.Filter{
-							Name:   aws.String(fmt.Sprintf("tag:%s", TagKeyClusterID)),
-							Values: []string{clusterID},
-						},
-						types.Filter{
-							Name:   aws.String(fmt.Sprintf("tag:%s", TagKeyManaged)),
-							Values: []string{"true"},
-						},
-					))
+					Expect(input.Filters).To(ConsistOf(filters))
 					return &ec2.DescribeSecurityGroupsOutput{
 						SecurityGroups: []types.SecurityGroup{
 							{
@@ -357,7 +306,7 @@ var _ = Describe("AWSProvider", func() {
 					return &ec2.DeleteSecurityGroupOutput{}, fmt.Errorf("delete security group error")
 				})
 
-			err := provider.ReconcileFirewallRulesDeletion(ctx, log, nodeName)
+			err := provider.ReconcileFirewallRulesDeletion(ctx, log, nodeName, "")
 			Expect(err).To(HaveOccurred())
 		})
 
@@ -365,20 +314,7 @@ var _ = Describe("AWSProvider", func() {
 			mockec2Client.EXPECT().
 				DescribeSecurityGroups(ctx, gomock.AssignableToTypeOf(&ec2.DescribeSecurityGroupsInput{})).
 				DoAndReturn(func(_ context.Context, input *ec2.DescribeSecurityGroupsInput, _ ...func(*ec2.Options)) (*ec2.DescribeSecurityGroupsOutput, error) {
-					Expect(input.Filters).To(ConsistOf(
-						types.Filter{
-							Name:   aws.String(fmt.Sprintf("tag:%s", TagKeyNodeName)),
-							Values: []string{nodeName},
-						},
-						types.Filter{
-							Name:   aws.String(fmt.Sprintf("tag:%s", TagKeyClusterID)),
-							Values: []string{clusterID},
-						},
-						types.Filter{
-							Name:   aws.String(fmt.Sprintf("tag:%s", TagKeyManaged)),
-							Values: []string{"true"},
-						},
-					))
+					Expect(input.Filters).To(ConsistOf(filters))
 					return &ec2.DescribeSecurityGroupsOutput{
 						SecurityGroups: []types.SecurityGroup{
 							{
@@ -463,7 +399,7 @@ var _ = Describe("AWSProvider", func() {
 					return &ec2.DeleteSecurityGroupOutput{}, nil
 				})
 
-			err := provider.ReconcileFirewallRulesDeletion(ctx, log, nodeName)
+			err := provider.ReconcileFirewallRulesDeletion(ctx, log, nodeName, "")
 			Expect(err).ToNot(HaveOccurred())
 		})
 	})
@@ -496,26 +432,27 @@ var _ = Describe("AWSProvider", func() {
 					NodeName: "node-" + testID,
 				},
 			}
+			filters = []types.Filter{
+				{
+					Name:   aws.String(fmt.Sprintf("tag:%s", TagKeyManaged)),
+					Values: []string{"true"},
+				},
+				{
+					Name:   aws.String(fmt.Sprintf("tag:%s", TagKeyClusterID)),
+					Values: []string{clusterID},
+				},
+				{
+					Name:   aws.String(fmt.Sprintf("tag:%s", TagKeyExternalIPName)),
+					Values: []string{externalIP.Name},
+				},
+			}
 		})
 
 		It("should return an error when an AWS API call (DescribeAddresses) fails", func() {
 			mockec2Client.EXPECT().
 				DescribeAddresses(ctx, gomock.AssignableToTypeOf(&ec2.DescribeAddressesInput{})).
 				DoAndReturn(func(_ context.Context, input *ec2.DescribeAddressesInput, _ ...func(*ec2.Options)) (*ec2.DescribeAddressesOutput, error) {
-					Expect(input.Filters).To(ConsistOf(
-						types.Filter{
-							Name:   aws.String(fmt.Sprintf("tag:%s", TagKeyManaged)),
-							Values: []string{"true"},
-						},
-						types.Filter{
-							Name:   aws.String(fmt.Sprintf("tag:%s", TagKeyClusterID)),
-							Values: []string{clusterID},
-						},
-						types.Filter{
-							Name:   aws.String(fmt.Sprintf("tag:%s", TagKeyExternalIPName)),
-							Values: []string{externalIP.Name},
-						},
-					))
+					Expect(input.Filters).To(ConsistOf(filters))
 					return &ec2.DescribeAddressesOutput{}, fmt.Errorf("describe addresses error")
 				})
 
@@ -527,20 +464,7 @@ var _ = Describe("AWSProvider", func() {
 			mockec2Client.EXPECT().
 				DescribeAddresses(ctx, gomock.AssignableToTypeOf(&ec2.DescribeAddressesInput{})).
 				DoAndReturn(func(_ context.Context, input *ec2.DescribeAddressesInput, _ ...func(*ec2.Options)) (*ec2.DescribeAddressesOutput, error) {
-					Expect(input.Filters).To(ConsistOf(
-						types.Filter{
-							Name:   aws.String(fmt.Sprintf("tag:%s", TagKeyManaged)),
-							Values: []string{"true"},
-						},
-						types.Filter{
-							Name:   aws.String(fmt.Sprintf("tag:%s", TagKeyClusterID)),
-							Values: []string{clusterID},
-						},
-						types.Filter{
-							Name:   aws.String(fmt.Sprintf("tag:%s", TagKeyExternalIPName)),
-							Values: []string{externalIP.Name},
-						},
-					))
+					Expect(input.Filters).To(ConsistOf(filters))
 					return &ec2.DescribeAddressesOutput{
 						Addresses: []types.Address{},
 					}, nil
@@ -554,20 +478,7 @@ var _ = Describe("AWSProvider", func() {
 			mockec2Client.EXPECT().
 				DescribeAddresses(ctx, gomock.AssignableToTypeOf(&ec2.DescribeAddressesInput{})).
 				DoAndReturn(func(_ context.Context, input *ec2.DescribeAddressesInput, _ ...func(*ec2.Options)) (*ec2.DescribeAddressesOutput, error) {
-					Expect(input.Filters).To(ConsistOf(
-						types.Filter{
-							Name:   aws.String(fmt.Sprintf("tag:%s", TagKeyManaged)),
-							Values: []string{"true"},
-						},
-						types.Filter{
-							Name:   aws.String(fmt.Sprintf("tag:%s", TagKeyClusterID)),
-							Values: []string{clusterID},
-						},
-						types.Filter{
-							Name:   aws.String(fmt.Sprintf("tag:%s", TagKeyExternalIPName)),
-							Values: []string{externalIP.Name},
-						},
-					))
+					Expect(input.Filters).To(ConsistOf(filters))
 					return &ec2.DescribeAddressesOutput{
 						Addresses: []types.Address{
 							{
@@ -592,20 +503,7 @@ var _ = Describe("AWSProvider", func() {
 			mockec2Client.EXPECT().
 				DescribeAddresses(ctx, gomock.AssignableToTypeOf(&ec2.DescribeAddressesInput{})).
 				DoAndReturn(func(_ context.Context, input *ec2.DescribeAddressesInput, _ ...func(*ec2.Options)) (*ec2.DescribeAddressesOutput, error) {
-					Expect(input.Filters).To(ConsistOf(
-						types.Filter{
-							Name:   aws.String(fmt.Sprintf("tag:%s", TagKeyManaged)),
-							Values: []string{"true"},
-						},
-						types.Filter{
-							Name:   aws.String(fmt.Sprintf("tag:%s", TagKeyClusterID)),
-							Values: []string{clusterID},
-						},
-						types.Filter{
-							Name:   aws.String(fmt.Sprintf("tag:%s", TagKeyExternalIPName)),
-							Values: []string{externalIP.Name},
-						},
-					))
+					Expect(input.Filters).To(ConsistOf(filters))
 					return &ec2.DescribeAddressesOutput{
 						Addresses: []types.Address{
 							{
@@ -636,20 +534,7 @@ var _ = Describe("AWSProvider", func() {
 			mockec2Client.EXPECT().
 				DescribeAddresses(ctx, gomock.AssignableToTypeOf(&ec2.DescribeAddressesInput{})).
 				DoAndReturn(func(_ context.Context, input *ec2.DescribeAddressesInput, _ ...func(*ec2.Options)) (*ec2.DescribeAddressesOutput, error) {
-					Expect(input.Filters).To(ConsistOf(
-						types.Filter{
-							Name:   aws.String(fmt.Sprintf("tag:%s", TagKeyManaged)),
-							Values: []string{"true"},
-						},
-						types.Filter{
-							Name:   aws.String(fmt.Sprintf("tag:%s", TagKeyClusterID)),
-							Values: []string{clusterID},
-						},
-						types.Filter{
-							Name:   aws.String(fmt.Sprintf("tag:%s", TagKeyExternalIPName)),
-							Values: []string{externalIP.Name},
-						},
-					))
+					Expect(input.Filters).To(ConsistOf(filters))
 					return &ec2.DescribeAddressesOutput{
 						Addresses: []types.Address{
 							{
@@ -704,6 +589,38 @@ var _ = Describe("AWSProvider", func() {
 					NodeName: "node-" + testID,
 				},
 			}
+			filters = []types.Filter{
+				{
+					Name:   aws.String(fmt.Sprintf("tag:%s", TagKeyManaged)),
+					Values: []string{"true"},
+				},
+				{
+					Name:   aws.String(fmt.Sprintf("tag:%s", TagKeyClusterID)),
+					Values: []string{clusterID},
+				},
+				{
+					Name:   aws.String(fmt.Sprintf("tag:%s", TagKeyExternalIPName)),
+					Values: []string{externalIP.Name},
+				},
+			}
+			tags = []types.Tag{
+				{
+					Key:   aws.String(string(TagKeyManaged)),
+					Value: aws.String("true"),
+				},
+				{
+					Key:   aws.String(string(TagKeyClusterID)),
+					Value: aws.String(clusterID),
+				},
+				{
+					Key:   aws.String(string(TagKeyExternalIPName)),
+					Value: aws.String(externalIP.Name),
+				},
+				{
+					Key:   aws.String(string(TagKeyInstanceID)),
+					Value: aws.String(instanceID),
+				},
+			}
 		})
 
 		When("the instance ID is empty", func() {
@@ -715,20 +632,7 @@ var _ = Describe("AWSProvider", func() {
 				mockec2Client.EXPECT().
 					DescribeAddresses(ctx, gomock.AssignableToTypeOf(&ec2.DescribeAddressesInput{})).
 					DoAndReturn(func(_ context.Context, input *ec2.DescribeAddressesInput, _ ...func(*ec2.Options)) (*ec2.DescribeAddressesOutput, error) {
-						Expect(input.Filters).To(ConsistOf(
-							types.Filter{
-								Name:   aws.String(fmt.Sprintf("tag:%s", TagKeyManaged)),
-								Values: []string{"true"},
-							},
-							types.Filter{
-								Name:   aws.String(fmt.Sprintf("tag:%s", TagKeyClusterID)),
-								Values: []string{clusterID},
-							},
-							types.Filter{
-								Name:   aws.String(fmt.Sprintf("tag:%s", TagKeyExternalIPName)),
-								Values: []string{externalIP.Name},
-							},
-						))
+						Expect(input.Filters).To(ConsistOf(filters))
 						return &ec2.DescribeAddressesOutput{}, fmt.Errorf("describe addresses error")
 					})
 
@@ -749,20 +653,7 @@ var _ = Describe("AWSProvider", func() {
 				mockec2Client.EXPECT().
 					DescribeAddresses(ctx, gomock.AssignableToTypeOf(&ec2.DescribeAddressesInput{})).
 					DoAndReturn(func(_ context.Context, input *ec2.DescribeAddressesInput, _ ...func(*ec2.Options)) (*ec2.DescribeAddressesOutput, error) {
-						Expect(input.Filters).To(ConsistOf(
-							types.Filter{
-								Name:   aws.String(fmt.Sprintf("tag:%s", TagKeyManaged)),
-								Values: []string{"true"},
-							},
-							types.Filter{
-								Name:   aws.String(fmt.Sprintf("tag:%s", TagKeyClusterID)),
-								Values: []string{clusterID},
-							},
-							types.Filter{
-								Name:   aws.String(fmt.Sprintf("tag:%s", TagKeyExternalIPName)),
-								Values: []string{externalIP.Name},
-							},
-						))
+						Expect(input.Filters).To(ConsistOf(filters))
 						return &ec2.DescribeAddressesOutput{}, nil
 					})
 				mockec2Client.EXPECT().
@@ -771,25 +662,7 @@ var _ = Describe("AWSProvider", func() {
 						Expect(input.Domain).To(Equal(types.DomainTypeVpc))
 						Expect(input.TagSpecifications).To(HaveLen(1))
 						Expect(input.TagSpecifications[0].ResourceType).To(Equal(types.ResourceTypeElasticIp))
-						Expect(input.TagSpecifications[0].Tags).To(ConsistOf(
-							types.Tag{
-								Key:   aws.String(string(TagKeyManaged)),
-								Value: aws.String("true"),
-							},
-							types.Tag{
-								Key:   aws.String(string(TagKeyClusterID)),
-								Value: aws.String(clusterID),
-							},
-							types.Tag{
-								Key:   aws.String(string(TagKeyExternalIPName)),
-								Value: aws.String(externalIP.Name),
-							},
-							types.Tag{
-								Key:   aws.String(string(TagKeyInstanceID)),
-								Value: aws.String(instanceID),
-							},
-						))
-
+						Expect(input.TagSpecifications[0].Tags).To(ConsistOf(tags))
 						return &ec2.AllocateAddressOutput{}, &smithy.GenericAPIError{
 							Code:    "AddressLimitExceeded",
 							Message: "Too many addresses allocated",
@@ -816,20 +689,7 @@ var _ = Describe("AWSProvider", func() {
 				mockec2Client.EXPECT().
 					DescribeAddresses(ctx, gomock.AssignableToTypeOf(&ec2.DescribeAddressesInput{})).
 					DoAndReturn(func(_ context.Context, input *ec2.DescribeAddressesInput, _ ...func(*ec2.Options)) (*ec2.DescribeAddressesOutput, error) {
-						Expect(input.Filters).To(ConsistOf(
-							types.Filter{
-								Name:   aws.String(fmt.Sprintf("tag:%s", TagKeyManaged)),
-								Values: []string{"true"},
-							},
-							types.Filter{
-								Name:   aws.String(fmt.Sprintf("tag:%s", TagKeyClusterID)),
-								Values: []string{clusterID},
-							},
-							types.Filter{
-								Name:   aws.String(fmt.Sprintf("tag:%s", TagKeyExternalIPName)),
-								Values: []string{externalIP.Name},
-							},
-						))
+						Expect(input.Filters).To(ConsistOf(filters))
 						return &ec2.DescribeAddressesOutput{}, nil
 					})
 				mockec2Client.EXPECT().
@@ -838,25 +698,7 @@ var _ = Describe("AWSProvider", func() {
 						Expect(input.Domain).To(Equal(types.DomainTypeVpc))
 						Expect(input.TagSpecifications).To(HaveLen(1))
 						Expect(input.TagSpecifications[0].ResourceType).To(Equal(types.ResourceTypeElasticIp))
-						Expect(input.TagSpecifications[0].Tags).To(ConsistOf(
-							types.Tag{
-								Key:   aws.String(string(TagKeyManaged)),
-								Value: aws.String("true"),
-							},
-							types.Tag{
-								Key:   aws.String(string(TagKeyClusterID)),
-								Value: aws.String(clusterID),
-							},
-							types.Tag{
-								Key:   aws.String(string(TagKeyExternalIPName)),
-								Value: aws.String(externalIP.Name),
-							},
-							types.Tag{
-								Key:   aws.String(string(TagKeyInstanceID)),
-								Value: aws.String(instanceID),
-							},
-						))
-
+						Expect(input.TagSpecifications[0].Tags).To(ConsistOf(tags))
 						return &ec2.AllocateAddressOutput{}, fmt.Errorf("allocate address error")
 					})
 
@@ -880,39 +722,17 @@ var _ = Describe("AWSProvider", func() {
 					DoAndReturn(func(_ context.Context, input *ec2.DescribeAddressesInput, _ ...func(*ec2.Options)) (*ec2.DescribeAddressesOutput, error) {
 						switch len(input.Filters) {
 						case 3:
-							Expect(input.Filters).To(ConsistOf(
-								types.Filter{
-									Name:   aws.String(fmt.Sprintf("tag:%s", TagKeyManaged)),
-									Values: []string{"true"},
-								},
-								types.Filter{
-									Name:   aws.String(fmt.Sprintf("tag:%s", TagKeyClusterID)),
-									Values: []string{clusterID},
-								},
-								types.Filter{
-									Name:   aws.String(fmt.Sprintf("tag:%s", TagKeyExternalIPName)),
-									Values: []string{externalIP.Name},
-								},
-							))
+							Expect(input.Filters).To(ConsistOf(filters))
 							return &ec2.DescribeAddressesOutput{}, nil
 						case 4:
 							Expect(input.Filters).To(ConsistOf(
-								types.Filter{
-									Name:   aws.String(fmt.Sprintf("tag:%s", TagKeyManaged)),
-									Values: []string{"true"},
-								},
-								types.Filter{
-									Name:   aws.String(fmt.Sprintf("tag:%s", TagKeyClusterID)),
-									Values: []string{clusterID},
-								},
-								types.Filter{
-									Name:   aws.String(fmt.Sprintf("tag:%s", TagKeyExternalIPName)),
-									Values: []string{externalIP.Name},
-								},
-								types.Filter{
-									Name:   aws.String("allocation-id"),
-									Values: []string{allocationID},
-								},
+								append(
+									filters,
+									types.Filter{
+										Name:   aws.String("allocation-id"),
+										Values: []string{allocationID},
+									},
+								),
 							))
 							return &ec2.DescribeAddressesOutput{}, fmt.Errorf("describe addresses error")
 						default:
@@ -925,24 +745,7 @@ var _ = Describe("AWSProvider", func() {
 						Expect(input.Domain).To(Equal(types.DomainTypeVpc))
 						Expect(input.TagSpecifications).To(HaveLen(1))
 						Expect(input.TagSpecifications[0].ResourceType).To(Equal(types.ResourceTypeElasticIp))
-						Expect(input.TagSpecifications[0].Tags).To(ConsistOf(
-							types.Tag{
-								Key:   aws.String(string(TagKeyManaged)),
-								Value: aws.String("true"),
-							},
-							types.Tag{
-								Key:   aws.String(string(TagKeyClusterID)),
-								Value: aws.String(clusterID),
-							},
-							types.Tag{
-								Key:   aws.String(string(TagKeyExternalIPName)),
-								Value: aws.String(externalIP.Name),
-							},
-							types.Tag{
-								Key:   aws.String(string(TagKeyInstanceID)),
-								Value: aws.String(instanceID),
-							},
-						))
+						Expect(input.TagSpecifications[0].Tags).To(ConsistOf(tags))
 
 						return &ec2.AllocateAddressOutput{
 							AllocationId: aws.String(allocationID),
@@ -953,7 +756,6 @@ var _ = Describe("AWSProvider", func() {
 				Expect(status).To(MatchFields(IgnoreExtras, Fields{
 					"State": Equal(v1alpha1.ExternalIPStatePending),
 					"Conditions": HaveExactElements(matchCondition(kmetav1.Condition{
-
 						Type:   v1alpha1.ExternalIPConditionReasonIPCreated,
 						Status: kmetav1.ConditionTrue,
 						Reason: v1alpha1.ExternalIPConditionReasonProviderError,
@@ -970,39 +772,16 @@ var _ = Describe("AWSProvider", func() {
 						DoAndReturn(func(_ context.Context, input *ec2.DescribeAddressesInput, _ ...func(*ec2.Options)) (*ec2.DescribeAddressesOutput, error) {
 							switch len(input.Filters) {
 							case 3:
-								Expect(input.Filters).To(ConsistOf(
-									types.Filter{
-										Name:   aws.String(fmt.Sprintf("tag:%s", TagKeyManaged)),
-										Values: []string{"true"},
-									},
-									types.Filter{
-										Name:   aws.String(fmt.Sprintf("tag:%s", TagKeyClusterID)),
-										Values: []string{clusterID},
-									},
-									types.Filter{
-										Name:   aws.String(fmt.Sprintf("tag:%s", TagKeyExternalIPName)),
-										Values: []string{externalIP.Name},
-									},
-								))
+								Expect(input.Filters).To(ConsistOf(filters))
 								return &ec2.DescribeAddressesOutput{}, nil
 							case 4:
 								Expect(input.Filters).To(ConsistOf(
-									types.Filter{
-										Name:   aws.String(fmt.Sprintf("tag:%s", TagKeyManaged)),
-										Values: []string{"true"},
-									},
-									types.Filter{
-										Name:   aws.String(fmt.Sprintf("tag:%s", TagKeyClusterID)),
-										Values: []string{clusterID},
-									},
-									types.Filter{
-										Name:   aws.String(fmt.Sprintf("tag:%s", TagKeyExternalIPName)),
-										Values: []string{externalIP.Name},
-									},
-									types.Filter{
-										Name:   aws.String("allocation-id"),
-										Values: []string{allocationID},
-									},
+									append(
+										filters,
+										types.Filter{
+											Name:   aws.String("allocation-id"),
+											Values: []string{allocationID},
+										}),
 								))
 								return &ec2.DescribeAddressesOutput{
 									Addresses: []types.Address{
@@ -1021,24 +800,7 @@ var _ = Describe("AWSProvider", func() {
 							Expect(input.Domain).To(Equal(types.DomainTypeVpc))
 							Expect(input.TagSpecifications).To(HaveLen(1))
 							Expect(input.TagSpecifications[0].ResourceType).To(Equal(types.ResourceTypeElasticIp))
-							Expect(input.TagSpecifications[0].Tags).To(ConsistOf(
-								types.Tag{
-									Key:   aws.String(string(TagKeyManaged)),
-									Value: aws.String("true"),
-								},
-								types.Tag{
-									Key:   aws.String(string(TagKeyClusterID)),
-									Value: aws.String(clusterID),
-								},
-								types.Tag{
-									Key:   aws.String(string(TagKeyExternalIPName)),
-									Value: aws.String(externalIP.Name),
-								},
-								types.Tag{
-									Key:   aws.String(string(TagKeyInstanceID)),
-									Value: aws.String(instanceID),
-								},
-							))
+							Expect(input.TagSpecifications[0].Tags).To(ConsistOf(tags))
 
 							return &ec2.AllocateAddressOutput{
 								AllocationId: aws.String(allocationID),
@@ -1074,39 +836,17 @@ var _ = Describe("AWSProvider", func() {
 						DoAndReturn(func(_ context.Context, input *ec2.DescribeAddressesInput, _ ...func(*ec2.Options)) (*ec2.DescribeAddressesOutput, error) {
 							switch len(input.Filters) {
 							case 3:
-								Expect(input.Filters).To(ConsistOf(
-									types.Filter{
-										Name:   aws.String(fmt.Sprintf("tag:%s", TagKeyManaged)),
-										Values: []string{"true"},
-									},
-									types.Filter{
-										Name:   aws.String(fmt.Sprintf("tag:%s", TagKeyClusterID)),
-										Values: []string{clusterID},
-									},
-									types.Filter{
-										Name:   aws.String(fmt.Sprintf("tag:%s", TagKeyExternalIPName)),
-										Values: []string{externalIP.Name},
-									},
-								))
+								Expect(input.Filters).To(ConsistOf(filters))
 								return &ec2.DescribeAddressesOutput{}, nil
 							case 4:
 								Expect(input.Filters).To(ConsistOf(
-									types.Filter{
-										Name:   aws.String(fmt.Sprintf("tag:%s", TagKeyManaged)),
-										Values: []string{"true"},
-									},
-									types.Filter{
-										Name:   aws.String(fmt.Sprintf("tag:%s", TagKeyClusterID)),
-										Values: []string{clusterID},
-									},
-									types.Filter{
-										Name:   aws.String(fmt.Sprintf("tag:%s", TagKeyExternalIPName)),
-										Values: []string{externalIP.Name},
-									},
-									types.Filter{
-										Name:   aws.String("allocation-id"),
-										Values: []string{allocationID},
-									},
+									append(
+										filters,
+										types.Filter{
+											Name:   aws.String("allocation-id"),
+											Values: []string{allocationID},
+										},
+									),
 								))
 								return &ec2.DescribeAddressesOutput{
 									Addresses: []types.Address{
@@ -1124,27 +864,12 @@ var _ = Describe("AWSProvider", func() {
 						AllocateAddress(ctx, gomock.AssignableToTypeOf(&ec2.AllocateAddressInput{})).
 						DoAndReturn(func(_ context.Context, input *ec2.AllocateAddressInput, _ ...func(*ec2.Options)) (*ec2.AllocateAddressOutput, error) {
 							Expect(input.Domain).To(Equal(types.DomainTypeVpc))
-							Expect(input.TagSpecifications).To(HaveLen(1))
-							Expect(input.TagSpecifications[0].ResourceType).To(Equal(types.ResourceTypeElasticIp))
-							Expect(input.TagSpecifications[0].Tags).To(ConsistOf(
-								types.Tag{
-									Key:   aws.String(string(TagKeyManaged)),
-									Value: aws.String("true"),
-								},
-								types.Tag{
-									Key:   aws.String(string(TagKeyClusterID)),
-									Value: aws.String(clusterID),
-								},
-								types.Tag{
-									Key:   aws.String(string(TagKeyExternalIPName)),
-									Value: aws.String(externalIP.Name),
-								},
-								types.Tag{
-									Key:   aws.String(string(TagKeyInstanceID)),
-									Value: aws.String(instanceID),
-								},
+							Expect(input.TagSpecifications).To(ConsistOf(
+								MatchFields(IgnoreExtras, Fields{
+									"ResourceType": Equal(types.ResourceTypeElasticIp),
+									"Tags":         ConsistOf(tags),
+								}),
 							))
-
 							return &ec2.AllocateAddressOutput{
 								AllocationId: aws.String(allocationID),
 							}, nil
@@ -1181,39 +906,17 @@ var _ = Describe("AWSProvider", func() {
 						DoAndReturn(func(_ context.Context, input *ec2.DescribeAddressesInput, _ ...func(*ec2.Options)) (*ec2.DescribeAddressesOutput, error) {
 							switch len(input.Filters) {
 							case 3:
-								Expect(input.Filters).To(ConsistOf(
-									types.Filter{
-										Name:   aws.String(fmt.Sprintf("tag:%s", TagKeyManaged)),
-										Values: []string{"true"},
-									},
-									types.Filter{
-										Name:   aws.String(fmt.Sprintf("tag:%s", TagKeyClusterID)),
-										Values: []string{clusterID},
-									},
-									types.Filter{
-										Name:   aws.String(fmt.Sprintf("tag:%s", TagKeyExternalIPName)),
-										Values: []string{externalIP.Name},
-									},
-								))
+								Expect(input.Filters).To(ConsistOf(filters))
 								return &ec2.DescribeAddressesOutput{}, nil
 							case 4:
 								Expect(input.Filters).To(ConsistOf(
-									types.Filter{
-										Name:   aws.String(fmt.Sprintf("tag:%s", TagKeyManaged)),
-										Values: []string{"true"},
-									},
-									types.Filter{
-										Name:   aws.String(fmt.Sprintf("tag:%s", TagKeyClusterID)),
-										Values: []string{clusterID},
-									},
-									types.Filter{
-										Name:   aws.String(fmt.Sprintf("tag:%s", TagKeyExternalIPName)),
-										Values: []string{externalIP.Name},
-									},
-									types.Filter{
-										Name:   aws.String("allocation-id"),
-										Values: []string{allocationID},
-									},
+									append(
+										filters,
+										types.Filter{
+											Name:   aws.String("allocation-id"),
+											Values: []string{allocationID},
+										},
+									),
 								))
 								return &ec2.DescribeAddressesOutput{
 									Addresses: []types.Address{
@@ -1231,27 +934,12 @@ var _ = Describe("AWSProvider", func() {
 						AllocateAddress(ctx, gomock.AssignableToTypeOf(&ec2.AllocateAddressInput{})).
 						DoAndReturn(func(_ context.Context, input *ec2.AllocateAddressInput, _ ...func(*ec2.Options)) (*ec2.AllocateAddressOutput, error) {
 							Expect(input.Domain).To(Equal(types.DomainTypeVpc))
-							Expect(input.TagSpecifications).To(HaveLen(1))
-							Expect(input.TagSpecifications[0].ResourceType).To(Equal(types.ResourceTypeElasticIp))
-							Expect(input.TagSpecifications[0].Tags).To(ConsistOf(
-								types.Tag{
-									Key:   aws.String(string(TagKeyManaged)),
-									Value: aws.String("true"),
-								},
-								types.Tag{
-									Key:   aws.String(string(TagKeyExternalIPName)),
-									Value: aws.String(externalIP.Name),
-								},
-								types.Tag{
-									Key:   aws.String(string(TagKeyClusterID)),
-									Value: aws.String(clusterID),
-								},
-								types.Tag{
-									Key:   aws.String(string(TagKeyInstanceID)),
-									Value: aws.String(instanceID),
-								},
+							Expect(input.TagSpecifications).To(ConsistOf(
+								MatchFields(IgnoreExtras, Fields{
+									"ResourceType": Equal(types.ResourceTypeElasticIp),
+									"Tags":         ConsistOf(tags),
+								}),
 							))
-
 							return &ec2.AllocateAddressOutput{
 								AllocationId: aws.String(allocationID),
 							}, nil
@@ -1294,20 +982,7 @@ var _ = Describe("AWSProvider", func() {
 				mockec2Client.EXPECT().
 					DescribeAddresses(ctx, gomock.AssignableToTypeOf(&ec2.DescribeAddressesInput{})).
 					DoAndReturn(func(_ context.Context, input *ec2.DescribeAddressesInput, _ ...func(*ec2.Options)) (*ec2.DescribeAddressesOutput, error) {
-						Expect(input.Filters).To(ConsistOf(
-							types.Filter{
-								Name:   aws.String(fmt.Sprintf("tag:%s", TagKeyManaged)),
-								Values: []string{"true"},
-							},
-							types.Filter{
-								Name:   aws.String(fmt.Sprintf("tag:%s", TagKeyClusterID)),
-								Values: []string{clusterID},
-							},
-							types.Filter{
-								Name:   aws.String(fmt.Sprintf("tag:%s", TagKeyExternalIPName)),
-								Values: []string{externalIP.Name},
-							},
-						))
+						Expect(input.Filters).To(ConsistOf(filters))
 						return &ec2.DescribeAddressesOutput{}, fmt.Errorf("describe addresses error")
 					})
 
@@ -1328,20 +1003,20 @@ var _ = Describe("AWSProvider", func() {
 				mockec2Client.EXPECT().
 					DescribeAddresses(ctx, gomock.AssignableToTypeOf(&ec2.DescribeAddressesInput{})).
 					DoAndReturn(func(_ context.Context, input *ec2.DescribeAddressesInput, _ ...func(*ec2.Options)) (*ec2.DescribeAddressesOutput, error) {
-						Expect(input.Filters).To(ConsistOf(
-							types.Filter{
+						Expect(input.Filters).To(ConsistOf([]types.Filter{
+							{
 								Name:   aws.String(fmt.Sprintf("tag:%s", TagKeyManaged)),
 								Values: []string{"true"},
 							},
-							types.Filter{
+							{
 								Name:   aws.String(fmt.Sprintf("tag:%s", TagKeyClusterID)),
 								Values: []string{clusterID},
 							},
-							types.Filter{
+							{
 								Name:   aws.String(fmt.Sprintf("tag:%s", TagKeyExternalIPName)),
 								Values: []string{externalIP.Name},
 							},
-						))
+						}))
 						return &ec2.DescribeAddressesOutput{
 							Addresses: []types.Address{
 								{
@@ -1375,20 +1050,7 @@ var _ = Describe("AWSProvider", func() {
 				mockec2Client.EXPECT().
 					DescribeAddresses(ctx, gomock.AssignableToTypeOf(&ec2.DescribeAddressesInput{})).
 					DoAndReturn(func(_ context.Context, input *ec2.DescribeAddressesInput, _ ...func(*ec2.Options)) (*ec2.DescribeAddressesOutput, error) {
-						Expect(input.Filters).To(ConsistOf(
-							types.Filter{
-								Name:   aws.String(fmt.Sprintf("tag:%s", TagKeyManaged)),
-								Values: []string{"true"},
-							},
-							types.Filter{
-								Name:   aws.String(fmt.Sprintf("tag:%s", TagKeyClusterID)),
-								Values: []string{clusterID},
-							},
-							types.Filter{
-								Name:   aws.String(fmt.Sprintf("tag:%s", TagKeyExternalIPName)),
-								Values: []string{externalIP.Name},
-							},
-						))
+						Expect(input.Filters).To(ConsistOf(filters))
 						return &ec2.DescribeAddressesOutput{
 							Addresses: []types.Address{
 								{
@@ -1425,20 +1087,7 @@ var _ = Describe("AWSProvider", func() {
 				mockec2Client.EXPECT().
 					DescribeAddresses(ctx, gomock.AssignableToTypeOf(&ec2.DescribeAddressesInput{})).
 					DoAndReturn(func(_ context.Context, input *ec2.DescribeAddressesInput, _ ...func(*ec2.Options)) (*ec2.DescribeAddressesOutput, error) {
-						Expect(input.Filters).To(ConsistOf(
-							types.Filter{
-								Name:   aws.String(fmt.Sprintf("tag:%s", TagKeyManaged)),
-								Values: []string{"true"},
-							},
-							types.Filter{
-								Name:   aws.String(fmt.Sprintf("tag:%s", TagKeyClusterID)),
-								Values: []string{clusterID},
-							},
-							types.Filter{
-								Name:   aws.String(fmt.Sprintf("tag:%s", TagKeyExternalIPName)),
-								Values: []string{externalIP.Name},
-							},
-						))
+						Expect(input.Filters).To(ConsistOf(filters))
 						return &ec2.DescribeAddressesOutput{
 							Addresses: []types.Address{
 								{
@@ -1495,20 +1144,7 @@ var _ = Describe("AWSProvider", func() {
 				mockec2Client.EXPECT().
 					DescribeAddresses(ctx, gomock.AssignableToTypeOf(&ec2.DescribeAddressesInput{})).
 					DoAndReturn(func(_ context.Context, input *ec2.DescribeAddressesInput, _ ...func(*ec2.Options)) (*ec2.DescribeAddressesOutput, error) {
-						Expect(input.Filters).To(ConsistOf(
-							types.Filter{
-								Name:   aws.String(fmt.Sprintf("tag:%s", TagKeyManaged)),
-								Values: []string{"true"},
-							},
-							types.Filter{
-								Name:   aws.String(fmt.Sprintf("tag:%s", TagKeyClusterID)),
-								Values: []string{clusterID},
-							},
-							types.Filter{
-								Name:   aws.String(fmt.Sprintf("tag:%s", TagKeyExternalIPName)),
-								Values: []string{externalIP.Name},
-							},
-						))
+						Expect(input.Filters).To(ConsistOf(filters))
 						return &ec2.DescribeAddressesOutput{
 							Addresses: []types.Address{
 								{
@@ -1569,20 +1205,7 @@ var _ = Describe("AWSProvider", func() {
 					mockec2Client.EXPECT().
 						DescribeAddresses(ctx, gomock.AssignableToTypeOf(&ec2.DescribeAddressesInput{})).
 						DoAndReturn(func(_ context.Context, input *ec2.DescribeAddressesInput, _ ...func(*ec2.Options)) (*ec2.DescribeAddressesOutput, error) {
-							Expect(input.Filters).To(ConsistOf(
-								types.Filter{
-									Name:   aws.String(fmt.Sprintf("tag:%s", TagKeyManaged)),
-									Values: []string{"true"},
-								},
-								types.Filter{
-									Name:   aws.String(fmt.Sprintf("tag:%s", TagKeyClusterID)),
-									Values: []string{clusterID},
-								},
-								types.Filter{
-									Name:   aws.String(fmt.Sprintf("tag:%s", TagKeyExternalIPName)),
-									Values: []string{externalIP.Name},
-								},
-							))
+							Expect(input.Filters).To(ConsistOf(filters))
 							return &ec2.DescribeAddressesOutput{
 								Addresses: []types.Address{
 									{
@@ -1642,20 +1265,7 @@ var _ = Describe("AWSProvider", func() {
 					mockec2Client.EXPECT().
 						DescribeAddresses(ctx, gomock.AssignableToTypeOf(&ec2.DescribeAddressesInput{})).
 						DoAndReturn(func(_ context.Context, input *ec2.DescribeAddressesInput, _ ...func(*ec2.Options)) (*ec2.DescribeAddressesOutput, error) {
-							Expect(input.Filters).To(ConsistOf(
-								types.Filter{
-									Name:   aws.String(fmt.Sprintf("tag:%s", TagKeyManaged)),
-									Values: []string{"true"},
-								},
-								types.Filter{
-									Name:   aws.String(fmt.Sprintf("tag:%s", TagKeyClusterID)),
-									Values: []string{clusterID},
-								},
-								types.Filter{
-									Name:   aws.String(fmt.Sprintf("tag:%s", TagKeyExternalIPName)),
-									Values: []string{externalIP.Name},
-								},
-							))
+							Expect(input.Filters).To(ConsistOf(filters))
 							return &ec2.DescribeAddressesOutput{
 								Addresses: []types.Address{
 									{
@@ -1721,20 +1331,7 @@ var _ = Describe("AWSProvider", func() {
 					mockec2Client.EXPECT().
 						DescribeAddresses(ctx, gomock.AssignableToTypeOf(&ec2.DescribeAddressesInput{})).
 						DoAndReturn(func(_ context.Context, input *ec2.DescribeAddressesInput, _ ...func(*ec2.Options)) (*ec2.DescribeAddressesOutput, error) {
-							Expect(input.Filters).To(ConsistOf(
-								types.Filter{
-									Name:   aws.String(fmt.Sprintf("tag:%s", TagKeyManaged)),
-									Values: []string{"true"},
-								},
-								types.Filter{
-									Name:   aws.String(fmt.Sprintf("tag:%s", TagKeyClusterID)),
-									Values: []string{clusterID},
-								},
-								types.Filter{
-									Name:   aws.String(fmt.Sprintf("tag:%s", TagKeyExternalIPName)),
-									Values: []string{externalIP.Name},
-								},
-							))
+							Expect(input.Filters).To(ConsistOf(filters))
 							return &ec2.DescribeAddressesOutput{
 								Addresses: []types.Address{
 									{
@@ -1809,20 +1406,7 @@ var _ = Describe("AWSProvider", func() {
 				mockec2Client.EXPECT().
 					DescribeAddresses(ctx, gomock.AssignableToTypeOf(&ec2.DescribeAddressesInput{})).
 					DoAndReturn(func(_ context.Context, input *ec2.DescribeAddressesInput, _ ...func(*ec2.Options)) (*ec2.DescribeAddressesOutput, error) {
-						Expect(input.Filters).To(ConsistOf(
-							types.Filter{
-								Name:   aws.String(fmt.Sprintf("tag:%s", TagKeyManaged)),
-								Values: []string{"true"},
-							},
-							types.Filter{
-								Name:   aws.String(fmt.Sprintf("tag:%s", TagKeyClusterID)),
-								Values: []string{clusterID},
-							},
-							types.Filter{
-								Name:   aws.String(fmt.Sprintf("tag:%s", TagKeyExternalIPName)),
-								Values: []string{externalIP.Name},
-							},
-						))
+						Expect(input.Filters).To(ConsistOf(filters))
 						return &ec2.DescribeAddressesOutput{
 							Addresses: []types.Address{
 								{
@@ -1888,20 +1472,7 @@ var _ = Describe("AWSProvider", func() {
 				mockec2Client.EXPECT().
 					DescribeAddresses(ctx, gomock.AssignableToTypeOf(&ec2.DescribeAddressesInput{})).
 					DoAndReturn(func(_ context.Context, input *ec2.DescribeAddressesInput, _ ...func(*ec2.Options)) (*ec2.DescribeAddressesOutput, error) {
-						Expect(input.Filters).To(ConsistOf(
-							types.Filter{
-								Name:   aws.String(fmt.Sprintf("tag:%s", TagKeyManaged)),
-								Values: []string{"true"},
-							},
-							types.Filter{
-								Name:   aws.String(fmt.Sprintf("tag:%s", TagKeyClusterID)),
-								Values: []string{clusterID},
-							},
-							types.Filter{
-								Name:   aws.String(fmt.Sprintf("tag:%s", TagKeyExternalIPName)),
-								Values: []string{externalIP.Name},
-							},
-						))
+						Expect(input.Filters).To(ConsistOf(filters))
 						return &ec2.DescribeAddressesOutput{
 							Addresses: []types.Address{
 								{
@@ -2027,6 +1598,42 @@ var _ = Describe("AWSProvider", func() {
 				},
 			}
 			firewallrules = []v1alpha1.FirewallRule{*firewallRule, *firewallRule01}
+			filters = []types.Filter{
+				{
+					Name:   aws.String(fmt.Sprintf("tag:%s", TagKeyNodeName)),
+					Values: []string{nodeName},
+				},
+				{
+					Name:   aws.String(fmt.Sprintf("tag:%s", TagKeyClusterID)),
+					Values: []string{clusterID},
+				},
+				{
+					Name:   aws.String("vpc-id"),
+					Values: []string{vpcID},
+				},
+				{
+					Name:   aws.String(fmt.Sprintf("tag:%s", TagKeyManaged)),
+					Values: []string{"true"},
+				},
+			}
+			tags = []types.Tag{
+				{
+					Key:   aws.String(string(TagKeyManaged)),
+					Value: aws.String("true"),
+				},
+				{
+					Key:   aws.String(string(TagKeyClusterID)),
+					Value: aws.String(clusterID),
+				},
+				{
+					Key:   aws.String(string(TagKeyNodeName)),
+					Value: aws.String(nodeName),
+				},
+				{
+					Key:   aws.String(string(TagKeyInstanceID)),
+					Value: aws.String(instanceID),
+				},
+			}
 		})
 
 		It("should return a pending state and an error when an AWS API call (DescribeInstances) fails", func() {
@@ -2093,24 +1700,7 @@ var _ = Describe("AWSProvider", func() {
 			mockec2Client.EXPECT().
 				DescribeSecurityGroups(ctx, gomock.AssignableToTypeOf(&ec2.DescribeSecurityGroupsInput{})).
 				DoAndReturn(func(_ context.Context, input *ec2.DescribeSecurityGroupsInput, _ ...func(*ec2.Options)) (*ec2.DescribeSecurityGroupsOutput, error) {
-					Expect(input.Filters).To(ConsistOf(
-						types.Filter{
-							Name:   aws.String(fmt.Sprintf("tag:%s", TagKeyManaged)),
-							Values: []string{"true"},
-						},
-						types.Filter{
-							Name:   aws.String(fmt.Sprintf("tag:%s", TagKeyClusterID)),
-							Values: []string{clusterID},
-						},
-						types.Filter{
-							Name:   aws.String("vpc-id"),
-							Values: []string{vpcID},
-						},
-						types.Filter{
-							Name:   aws.String(fmt.Sprintf("tag:%s", TagKeyNodeName)),
-							Values: []string{nodeName},
-						},
-					))
+					Expect(input.Filters).To(ConsistOf(filters))
 					return &ec2.DescribeSecurityGroupsOutput{}, fmt.Errorf("describe addresses error")
 				})
 
@@ -2159,24 +1749,7 @@ var _ = Describe("AWSProvider", func() {
 				mockec2Client.EXPECT().
 					DescribeSecurityGroups(ctx, gomock.AssignableToTypeOf(&ec2.DescribeSecurityGroupsInput{})).
 					DoAndReturn(func(_ context.Context, input *ec2.DescribeSecurityGroupsInput, _ ...func(*ec2.Options)) (*ec2.DescribeSecurityGroupsOutput, error) {
-						Expect(input.Filters).To(ConsistOf(
-							types.Filter{
-								Name:   aws.String(fmt.Sprintf("tag:%s", TagKeyManaged)),
-								Values: []string{"true"},
-							},
-							types.Filter{
-								Name:   aws.String(fmt.Sprintf("tag:%s", TagKeyClusterID)),
-								Values: []string{clusterID},
-							},
-							types.Filter{
-								Name:   aws.String("vpc-id"),
-								Values: []string{vpcID},
-							},
-							types.Filter{
-								Name:   aws.String(fmt.Sprintf("tag:%s", TagKeyNodeName)),
-								Values: []string{nodeName},
-							},
-						))
+						Expect(input.Filters).To(ConsistOf(filters))
 						return &ec2.DescribeSecurityGroupsOutput{}, nil
 					})
 
@@ -2218,24 +1791,7 @@ var _ = Describe("AWSProvider", func() {
 				mockec2Client.EXPECT().
 					DescribeSecurityGroups(ctx, gomock.AssignableToTypeOf(&ec2.DescribeSecurityGroupsInput{})).
 					DoAndReturn(func(_ context.Context, input *ec2.DescribeSecurityGroupsInput, _ ...func(*ec2.Options)) (*ec2.DescribeSecurityGroupsOutput, error) {
-						Expect(input.Filters).To(ConsistOf(
-							types.Filter{
-								Name:   aws.String(fmt.Sprintf("tag:%s", TagKeyManaged)),
-								Values: []string{"true"},
-							},
-							types.Filter{
-								Name:   aws.String(fmt.Sprintf("tag:%s", TagKeyClusterID)),
-								Values: []string{clusterID},
-							},
-							types.Filter{
-								Name:   aws.String("vpc-id"),
-								Values: []string{vpcID},
-							},
-							types.Filter{
-								Name:   aws.String(fmt.Sprintf("tag:%s", TagKeyNodeName)),
-								Values: []string{nodeName},
-							},
-						))
+						Expect(input.Filters).To(ConsistOf(filters))
 						return &ec2.DescribeSecurityGroupsOutput{}, nil
 					})
 				mockec2Client.EXPECT().
@@ -2243,24 +1799,7 @@ var _ = Describe("AWSProvider", func() {
 					DoAndReturn(func(_ context.Context, input *ec2.CreateSecurityGroupInput, _ ...func(*ec2.Options)) (*ec2.CreateSecurityGroupOutput, error) {
 						Expect(aws.ToString(input.VpcId)).To(Equal(vpcID))
 						Expect(input.TagSpecifications[0].ResourceType).To(Equal(types.ResourceTypeSecurityGroup))
-						Expect(input.TagSpecifications[0].Tags).To(ConsistOf(
-							types.Tag{
-								Key:   aws.String(string(TagKeyManaged)),
-								Value: aws.String("true"),
-							},
-							types.Tag{
-								Key:   aws.String(string(TagKeyClusterID)),
-								Value: aws.String(clusterID),
-							},
-							types.Tag{
-								Key:   aws.String(string(TagKeyNodeName)),
-								Value: aws.String(nodeName),
-							},
-							types.Tag{
-								Key:   aws.String(string(TagKeyInstanceID)),
-								Value: aws.String(instanceID),
-							},
-						))
+						Expect(input.TagSpecifications[0].Tags).To(ConsistOf(tags))
 						return &ec2.CreateSecurityGroupOutput{}, fmt.Errorf("create security group error")
 					})
 
@@ -2309,47 +1848,17 @@ var _ = Describe("AWSProvider", func() {
 					DoAndReturn(func(_ context.Context, input *ec2.DescribeSecurityGroupsInput, _ ...func(*ec2.Options)) (*ec2.DescribeSecurityGroupsOutput, error) {
 						switch len(input.Filters) {
 						case 4:
-							Expect(input.Filters).To(ConsistOf(
-								types.Filter{
-									Name:   aws.String(fmt.Sprintf("tag:%s", TagKeyManaged)),
-									Values: []string{"true"},
-								},
-								types.Filter{
-									Name:   aws.String("vpc-id"),
-									Values: []string{vpcID},
-								},
-								types.Filter{
-									Name:   aws.String(fmt.Sprintf("tag:%s", TagKeyClusterID)),
-									Values: []string{clusterID},
-								},
-								types.Filter{
-									Name:   aws.String(fmt.Sprintf("tag:%s", TagKeyNodeName)),
-									Values: []string{nodeName},
-								},
-							))
+							Expect(input.Filters).To(ConsistOf(filters))
 							return &ec2.DescribeSecurityGroupsOutput{}, nil
 						case 6:
 							Expect(input.Filters).To(ConsistOf(
-								types.Filter{
-									Name:   aws.String(fmt.Sprintf("tag:%s", TagKeyManaged)),
-									Values: []string{"true"},
-								},
-								types.Filter{
-									Name:   aws.String("vpc-id"),
-									Values: []string{vpcID},
-								},
-								types.Filter{
-									Name:   aws.String(fmt.Sprintf("tag:%s", TagKeyNodeName)),
-									Values: []string{nodeName},
-								},
-								types.Filter{
-									Name:   aws.String(fmt.Sprintf("tag:%s", TagKeyClusterID)),
-									Values: []string{"cluster-id"},
-								},
-								types.Filter{
-									Name:   aws.String("group-id"),
-									Values: []string{securityGroupID},
-								},
+								append(
+									filters,
+									types.Filter{
+										Name:   aws.String("group-id"),
+										Values: []string{securityGroupID},
+									},
+								),
 							))
 							return &ec2.DescribeSecurityGroupsOutput{}, fmt.Errorf("describe security groups error")
 						default:
@@ -2361,24 +1870,7 @@ var _ = Describe("AWSProvider", func() {
 					DoAndReturn(func(_ context.Context, input *ec2.CreateSecurityGroupInput, _ ...func(*ec2.Options)) (*ec2.CreateSecurityGroupOutput, error) {
 						Expect(aws.ToString(input.VpcId)).To(Equal(vpcID))
 						Expect(input.TagSpecifications[0].ResourceType).To(Equal(types.ResourceTypeSecurityGroup))
-						Expect(input.TagSpecifications[0].Tags).To(ConsistOf(
-							types.Tag{
-								Key:   aws.String(string(TagKeyManaged)),
-								Value: aws.String("true"),
-							},
-							types.Tag{
-								Key:   aws.String(string(TagKeyNodeName)),
-								Value: aws.String(nodeName),
-							},
-							types.Tag{
-								Key:   aws.String(string(TagKeyClusterID)),
-								Value: aws.String(clusterID),
-							},
-							types.Tag{
-								Key:   aws.String(string(TagKeyInstanceID)),
-								Value: aws.String(instanceID),
-							},
-						))
+						Expect(input.TagSpecifications[0].Tags).To(ConsistOf(tags))
 						return &ec2.CreateSecurityGroupOutput{
 							GroupId: aws.String(securityGroupID),
 						}, nil
@@ -2433,24 +1925,7 @@ var _ = Describe("AWSProvider", func() {
 			mockec2Client.EXPECT().
 				DescribeSecurityGroups(ctx, gomock.AssignableToTypeOf(&ec2.DescribeSecurityGroupsInput{})).
 				DoAndReturn(func(_ context.Context, input *ec2.DescribeSecurityGroupsInput, _ ...func(*ec2.Options)) (*ec2.DescribeSecurityGroupsOutput, error) {
-					Expect(input.Filters).To(ConsistOf(
-						types.Filter{
-							Name:   aws.String(fmt.Sprintf("tag:%s", TagKeyManaged)),
-							Values: []string{"true"},
-						},
-						types.Filter{
-							Name:   aws.String("vpc-id"),
-							Values: []string{vpcID},
-						},
-						types.Filter{
-							Name:   aws.String(fmt.Sprintf("tag:%s", TagKeyClusterID)),
-							Values: []string{clusterID},
-						},
-						types.Filter{
-							Name:   aws.String(fmt.Sprintf("tag:%s", TagKeyNodeName)),
-							Values: []string{nodeName},
-						},
-					))
+					Expect(input.Filters).To(ConsistOf(filters))
 					return &ec2.DescribeSecurityGroupsOutput{
 						SecurityGroups: []types.SecurityGroup{
 							{
@@ -2509,24 +1984,7 @@ var _ = Describe("AWSProvider", func() {
 			mockec2Client.EXPECT().
 				DescribeSecurityGroups(ctx, gomock.AssignableToTypeOf(&ec2.DescribeSecurityGroupsInput{})).
 				DoAndReturn(func(_ context.Context, input *ec2.DescribeSecurityGroupsInput, _ ...func(*ec2.Options)) (*ec2.DescribeSecurityGroupsOutput, error) {
-					Expect(input.Filters).To(ConsistOf(
-						types.Filter{
-							Name:   aws.String(fmt.Sprintf("tag:%s", TagKeyManaged)),
-							Values: []string{"true"},
-						},
-						types.Filter{
-							Name:   aws.String("vpc-id"),
-							Values: []string{vpcID},
-						},
-						types.Filter{
-							Name:   aws.String(fmt.Sprintf("tag:%s", TagKeyClusterID)),
-							Values: []string{clusterID},
-						},
-						types.Filter{
-							Name:   aws.String(fmt.Sprintf("tag:%s", TagKeyNodeName)),
-							Values: []string{nodeName},
-						},
-					))
+					Expect(input.Filters).To(ConsistOf(filters))
 					return &ec2.DescribeSecurityGroupsOutput{
 						SecurityGroups: []types.SecurityGroup{
 							{
@@ -2596,24 +2054,7 @@ var _ = Describe("AWSProvider", func() {
 			mockec2Client.EXPECT().
 				DescribeSecurityGroups(ctx, gomock.AssignableToTypeOf(&ec2.DescribeSecurityGroupsInput{})).
 				DoAndReturn(func(_ context.Context, input *ec2.DescribeSecurityGroupsInput, _ ...func(*ec2.Options)) (*ec2.DescribeSecurityGroupsOutput, error) {
-					Expect(input.Filters).To(ConsistOf(
-						types.Filter{
-							Name:   aws.String(fmt.Sprintf("tag:%s", TagKeyManaged)),
-							Values: []string{"true"},
-						},
-						types.Filter{
-							Name:   aws.String("vpc-id"),
-							Values: []string{vpcID},
-						},
-						types.Filter{
-							Name:   aws.String(fmt.Sprintf("tag:%s", TagKeyClusterID)),
-							Values: []string{clusterID},
-						},
-						types.Filter{
-							Name:   aws.String(fmt.Sprintf("tag:%s", TagKeyNodeName)),
-							Values: []string{nodeName},
-						},
-					))
+					Expect(input.Filters).To(ConsistOf(filters))
 					return &ec2.DescribeSecurityGroupsOutput{
 						SecurityGroups: []types.SecurityGroup{
 							{
@@ -2684,24 +2125,7 @@ var _ = Describe("AWSProvider", func() {
 				mockec2Client.EXPECT().
 					DescribeSecurityGroups(ctx, gomock.AssignableToTypeOf(&ec2.DescribeSecurityGroupsInput{})).
 					DoAndReturn(func(_ context.Context, input *ec2.DescribeSecurityGroupsInput, _ ...func(*ec2.Options)) (*ec2.DescribeSecurityGroupsOutput, error) {
-						Expect(input.Filters).To(ConsistOf(
-							types.Filter{
-								Name:   aws.String(fmt.Sprintf("tag:%s", TagKeyManaged)),
-								Values: []string{"true"},
-							},
-							types.Filter{
-								Name:   aws.String("vpc-id"),
-								Values: []string{vpcID},
-							},
-							types.Filter{
-								Name:   aws.String(fmt.Sprintf("tag:%s", TagKeyClusterID)),
-								Values: []string{clusterID},
-							},
-							types.Filter{
-								Name:   aws.String(fmt.Sprintf("tag:%s", TagKeyNodeName)),
-								Values: []string{nodeName},
-							},
-						))
+						Expect(input.Filters).To(ConsistOf(filters))
 						return &ec2.DescribeSecurityGroupsOutput{
 							SecurityGroups: []types.SecurityGroup{
 								{
@@ -2830,24 +2254,7 @@ var _ = Describe("AWSProvider", func() {
 				mockec2Client.EXPECT().
 					DescribeSecurityGroups(ctx, gomock.AssignableToTypeOf(&ec2.DescribeSecurityGroupsInput{})).
 					DoAndReturn(func(_ context.Context, input *ec2.DescribeSecurityGroupsInput, _ ...func(*ec2.Options)) (*ec2.DescribeSecurityGroupsOutput, error) {
-						Expect(input.Filters).To(ConsistOf(
-							types.Filter{
-								Name:   aws.String(fmt.Sprintf("tag:%s", TagKeyManaged)),
-								Values: []string{"true"},
-							},
-							types.Filter{
-								Name:   aws.String("vpc-id"),
-								Values: []string{vpcID},
-							},
-							types.Filter{
-								Name:   aws.String(fmt.Sprintf("tag:%s", TagKeyClusterID)),
-								Values: []string{clusterID},
-							},
-							types.Filter{
-								Name:   aws.String(fmt.Sprintf("tag:%s", TagKeyNodeName)),
-								Values: []string{nodeName},
-							},
-						))
+						Expect(input.Filters).To(ConsistOf(filters))
 						return &ec2.DescribeSecurityGroupsOutput{
 							SecurityGroups: []types.SecurityGroup{
 								{
@@ -2932,24 +2339,7 @@ var _ = Describe("AWSProvider", func() {
 				mockec2Client.EXPECT().
 					DescribeSecurityGroups(ctx, gomock.AssignableToTypeOf(&ec2.DescribeSecurityGroupsInput{})).
 					DoAndReturn(func(_ context.Context, input *ec2.DescribeSecurityGroupsInput, _ ...func(*ec2.Options)) (*ec2.DescribeSecurityGroupsOutput, error) {
-						Expect(input.Filters).To(ConsistOf(
-							types.Filter{
-								Name:   aws.String(fmt.Sprintf("tag:%s", TagKeyManaged)),
-								Values: []string{"true"},
-							},
-							types.Filter{
-								Name:   aws.String("vpc-id"),
-								Values: []string{vpcID},
-							},
-							types.Filter{
-								Name:   aws.String(fmt.Sprintf("tag:%s", TagKeyClusterID)),
-								Values: []string{clusterID},
-							},
-							types.Filter{
-								Name:   aws.String(fmt.Sprintf("tag:%s", TagKeyNodeName)),
-								Values: []string{nodeName},
-							},
-						))
+						Expect(input.Filters).To(ConsistOf(filters))
 						return &ec2.DescribeSecurityGroupsOutput{
 							SecurityGroups: []types.SecurityGroup{
 								{
@@ -3055,24 +2445,7 @@ var _ = Describe("AWSProvider", func() {
 				mockec2Client.EXPECT().
 					DescribeSecurityGroups(ctx, gomock.AssignableToTypeOf(&ec2.DescribeSecurityGroupsInput{})).
 					DoAndReturn(func(_ context.Context, input *ec2.DescribeSecurityGroupsInput, _ ...func(*ec2.Options)) (*ec2.DescribeSecurityGroupsOutput, error) {
-						Expect(input.Filters).To(ConsistOf(
-							types.Filter{
-								Name:   aws.String(fmt.Sprintf("tag:%s", TagKeyManaged)),
-								Values: []string{"true"},
-							},
-							types.Filter{
-								Name:   aws.String("vpc-id"),
-								Values: []string{vpcID},
-							},
-							types.Filter{
-								Name:   aws.String(fmt.Sprintf("tag:%s", TagKeyClusterID)),
-								Values: []string{clusterID},
-							},
-							types.Filter{
-								Name:   aws.String(fmt.Sprintf("tag:%s", TagKeyNodeName)),
-								Values: []string{nodeName},
-							},
-						))
+						Expect(input.Filters).To(ConsistOf(filters))
 						return &ec2.DescribeSecurityGroupsOutput{
 							SecurityGroups: []types.SecurityGroup{
 								{
@@ -3205,24 +2578,7 @@ var _ = Describe("AWSProvider", func() {
 						DoAndReturn(func(_ context.Context, input *ec2.DescribeSecurityGroupsInput, _ ...func(*ec2.Options)) (*ec2.DescribeSecurityGroupsOutput, error) {
 							switch len(input.Filters) {
 							case 4:
-								Expect(input.Filters).To(ConsistOf(
-									types.Filter{
-										Name:   aws.String(fmt.Sprintf("tag:%s", TagKeyManaged)),
-										Values: []string{"true"},
-									},
-									types.Filter{
-										Name:   aws.String("vpc-id"),
-										Values: []string{vpcID},
-									},
-									types.Filter{
-										Name:   aws.String(fmt.Sprintf("tag:%s", TagKeyClusterID)),
-										Values: []string{clusterID},
-									},
-									types.Filter{
-										Name:   aws.String(fmt.Sprintf("tag:%s", TagKeyNodeName)),
-										Values: []string{nodeName},
-									},
-								))
+								Expect(input.Filters).To(ConsistOf(filters))
 								return &ec2.DescribeSecurityGroupsOutput{
 									SecurityGroups: []types.SecurityGroup{
 										{
@@ -3343,24 +2699,7 @@ var _ = Describe("AWSProvider", func() {
 					mockec2Client.EXPECT().
 						DescribeSecurityGroups(ctx, gomock.AssignableToTypeOf(&ec2.DescribeSecurityGroupsInput{})).
 						DoAndReturn(func(_ context.Context, input *ec2.DescribeSecurityGroupsInput, _ ...func(*ec2.Options)) (*ec2.DescribeSecurityGroupsOutput, error) {
-							Expect(input.Filters).To(ConsistOf(
-								types.Filter{
-									Name:   aws.String(fmt.Sprintf("tag:%s", TagKeyManaged)),
-									Values: []string{"true"},
-								},
-								types.Filter{
-									Name:   aws.String("vpc-id"),
-									Values: []string{vpcID},
-								},
-								types.Filter{
-									Name:   aws.String(fmt.Sprintf("tag:%s", TagKeyClusterID)),
-									Values: []string{clusterID},
-								},
-								types.Filter{
-									Name:   aws.String(fmt.Sprintf("tag:%s", TagKeyNodeName)),
-									Values: []string{nodeName},
-								},
-							))
+							Expect(input.Filters).To(ConsistOf(filters))
 							return &ec2.DescribeSecurityGroupsOutput{
 								SecurityGroups: []types.SecurityGroup{
 									{
@@ -3492,24 +2831,7 @@ var _ = Describe("AWSProvider", func() {
 					mockec2Client.EXPECT().
 						DescribeSecurityGroups(ctx, gomock.AssignableToTypeOf(&ec2.DescribeSecurityGroupsInput{})).
 						DoAndReturn(func(_ context.Context, input *ec2.DescribeSecurityGroupsInput, _ ...func(*ec2.Options)) (*ec2.DescribeSecurityGroupsOutput, error) {
-							Expect(input.Filters).To(ConsistOf(
-								types.Filter{
-									Name:   aws.String(fmt.Sprintf("tag:%s", TagKeyManaged)),
-									Values: []string{"true"},
-								},
-								types.Filter{
-									Name:   aws.String("vpc-id"),
-									Values: []string{vpcID},
-								},
-								types.Filter{
-									Name:   aws.String(fmt.Sprintf("tag:%s", TagKeyClusterID)),
-									Values: []string{clusterID},
-								},
-								types.Filter{
-									Name:   aws.String(fmt.Sprintf("tag:%s", TagKeyNodeName)),
-									Values: []string{nodeName},
-								},
-							))
+							Expect(input.Filters).To(ConsistOf(filters))
 							return &ec2.DescribeSecurityGroupsOutput{
 								SecurityGroups: []types.SecurityGroup{
 									{
@@ -3645,24 +2967,7 @@ var _ = Describe("AWSProvider", func() {
 						DoAndReturn(func(_ context.Context, input *ec2.DescribeSecurityGroupsInput, _ ...func(*ec2.Options)) (*ec2.DescribeSecurityGroupsOutput, error) {
 							switch len(input.Filters) {
 							case 4:
-								Expect(input.Filters).To(ConsistOf(
-									types.Filter{
-										Name:   aws.String(fmt.Sprintf("tag:%s", TagKeyManaged)),
-										Values: []string{"true"},
-									},
-									types.Filter{
-										Name:   aws.String("vpc-id"),
-										Values: []string{vpcID},
-									},
-									types.Filter{
-										Name:   aws.String(fmt.Sprintf("tag:%s", TagKeyClusterID)),
-										Values: []string{clusterID},
-									},
-									types.Filter{
-										Name:   aws.String(fmt.Sprintf("tag:%s", TagKeyNodeName)),
-										Values: []string{nodeName},
-									},
-								))
+								Expect(input.Filters).To(ConsistOf(filters))
 								return &ec2.DescribeSecurityGroupsOutput{
 									SecurityGroups: []types.SecurityGroup{
 										{
@@ -3788,24 +3093,7 @@ var _ = Describe("AWSProvider", func() {
 					mockec2Client.EXPECT().
 						DescribeSecurityGroups(ctx, gomock.AssignableToTypeOf(&ec2.DescribeSecurityGroupsInput{})).
 						DoAndReturn(func(_ context.Context, input *ec2.DescribeSecurityGroupsInput, _ ...func(*ec2.Options)) (*ec2.DescribeSecurityGroupsOutput, error) {
-							Expect(input.Filters).To(ConsistOf(
-								types.Filter{
-									Name:   aws.String(fmt.Sprintf("tag:%s", TagKeyManaged)),
-									Values: []string{"true"},
-								},
-								types.Filter{
-									Name:   aws.String(fmt.Sprintf("tag:%s", TagKeyClusterID)),
-									Values: []string{clusterID},
-								},
-								types.Filter{
-									Name:   aws.String("vpc-id"),
-									Values: []string{vpcID},
-								},
-								types.Filter{
-									Name:   aws.String(fmt.Sprintf("tag:%s", TagKeyNodeName)),
-									Values: []string{nodeName},
-								},
-							))
+							Expect(input.Filters).To(ConsistOf(filters))
 							return &ec2.DescribeSecurityGroupsOutput{
 								SecurityGroups: []types.SecurityGroup{
 									{
@@ -3937,24 +3225,7 @@ var _ = Describe("AWSProvider", func() {
 					mockec2Client.EXPECT().
 						DescribeSecurityGroups(ctx, gomock.AssignableToTypeOf(&ec2.DescribeSecurityGroupsInput{})).
 						DoAndReturn(func(_ context.Context, input *ec2.DescribeSecurityGroupsInput, _ ...func(*ec2.Options)) (*ec2.DescribeSecurityGroupsOutput, error) {
-							Expect(input.Filters).To(ConsistOf(
-								types.Filter{
-									Name:   aws.String(fmt.Sprintf("tag:%s", TagKeyManaged)),
-									Values: []string{"true"},
-								},
-								types.Filter{
-									Name:   aws.String(fmt.Sprintf("tag:%s", TagKeyClusterID)),
-									Values: []string{clusterID},
-								},
-								types.Filter{
-									Name:   aws.String("vpc-id"),
-									Values: []string{vpcID},
-								},
-								types.Filter{
-									Name:   aws.String(fmt.Sprintf("tag:%s", TagKeyNodeName)),
-									Values: []string{nodeName},
-								},
-							))
+							Expect(input.Filters).To(ConsistOf(filters))
 							return &ec2.DescribeSecurityGroupsOutput{
 								SecurityGroups: []types.SecurityGroup{
 									{
@@ -4083,24 +3354,7 @@ var _ = Describe("AWSProvider", func() {
 				mockec2Client.EXPECT().
 					DescribeSecurityGroups(ctx, gomock.AssignableToTypeOf(&ec2.DescribeSecurityGroupsInput{})).
 					DoAndReturn(func(_ context.Context, input *ec2.DescribeSecurityGroupsInput, _ ...func(*ec2.Options)) (*ec2.DescribeSecurityGroupsOutput, error) {
-						Expect(input.Filters).To(ConsistOf(
-							types.Filter{
-								Name:   aws.String(fmt.Sprintf("tag:%s", TagKeyManaged)),
-								Values: []string{"true"},
-							},
-							types.Filter{
-								Name:   aws.String("vpc-id"),
-								Values: []string{vpcID},
-							},
-							types.Filter{
-								Name:   aws.String(fmt.Sprintf("tag:%s", TagKeyClusterID)),
-								Values: []string{clusterID},
-							},
-							types.Filter{
-								Name:   aws.String(fmt.Sprintf("tag:%s", TagKeyNodeName)),
-								Values: []string{nodeName},
-							},
-						))
+						Expect(input.Filters).To(ConsistOf(filters))
 						return &ec2.DescribeSecurityGroupsOutput{
 							SecurityGroups: []types.SecurityGroup{
 								{
@@ -4228,24 +3482,7 @@ var _ = Describe("AWSProvider", func() {
 				mockec2Client.EXPECT().
 					DescribeSecurityGroups(ctx, gomock.AssignableToTypeOf(&ec2.DescribeSecurityGroupsInput{})).
 					DoAndReturn(func(_ context.Context, input *ec2.DescribeSecurityGroupsInput, _ ...func(*ec2.Options)) (*ec2.DescribeSecurityGroupsOutput, error) {
-						Expect(input.Filters).To(ConsistOf(
-							types.Filter{
-								Name:   aws.String(fmt.Sprintf("tag:%s", TagKeyManaged)),
-								Values: []string{"true"},
-							},
-							types.Filter{
-								Name:   aws.String("vpc-id"),
-								Values: []string{vpcID},
-							},
-							types.Filter{
-								Name:   aws.String(fmt.Sprintf("tag:%s", TagKeyClusterID)),
-								Values: []string{clusterID},
-							},
-							types.Filter{
-								Name:   aws.String(fmt.Sprintf("tag:%s", TagKeyNodeName)),
-								Values: []string{nodeName},
-							},
-						))
+						Expect(input.Filters).To(ConsistOf(filters))
 						return &ec2.DescribeSecurityGroupsOutput{
 							SecurityGroups: []types.SecurityGroup{
 								{
@@ -4371,24 +3608,7 @@ var _ = Describe("AWSProvider", func() {
 				mockec2Client.EXPECT().
 					DescribeSecurityGroups(ctx, gomock.AssignableToTypeOf(&ec2.DescribeSecurityGroupsInput{})).
 					DoAndReturn(func(_ context.Context, input *ec2.DescribeSecurityGroupsInput, _ ...func(*ec2.Options)) (*ec2.DescribeSecurityGroupsOutput, error) {
-						Expect(input.Filters).To(ConsistOf(
-							types.Filter{
-								Name:   aws.String(fmt.Sprintf("tag:%s", TagKeyManaged)),
-								Values: []string{"true"},
-							},
-							types.Filter{
-								Name:   aws.String(fmt.Sprintf("tag:%s", TagKeyClusterID)),
-								Values: []string{clusterID},
-							},
-							types.Filter{
-								Name:   aws.String("vpc-id"),
-								Values: []string{vpcID},
-							},
-							types.Filter{
-								Name:   aws.String(fmt.Sprintf("tag:%s", TagKeyNodeName)),
-								Values: []string{nodeName},
-							},
-						))
+						Expect(input.Filters).To(ConsistOf(filters))
 						return &ec2.DescribeSecurityGroupsOutput{
 							SecurityGroups: []types.SecurityGroup{
 								{
@@ -4516,24 +3736,7 @@ var _ = Describe("AWSProvider", func() {
 				mockec2Client.EXPECT().
 					DescribeSecurityGroups(ctx, gomock.AssignableToTypeOf(&ec2.DescribeSecurityGroupsInput{})).
 					DoAndReturn(func(_ context.Context, input *ec2.DescribeSecurityGroupsInput, _ ...func(*ec2.Options)) (*ec2.DescribeSecurityGroupsOutput, error) {
-						Expect(input.Filters).To(ConsistOf(
-							types.Filter{
-								Name:   aws.String(fmt.Sprintf("tag:%s", TagKeyManaged)),
-								Values: []string{"true"},
-							},
-							types.Filter{
-								Name:   aws.String(fmt.Sprintf("tag:%s", TagKeyClusterID)),
-								Values: []string{clusterID},
-							},
-							types.Filter{
-								Name:   aws.String("vpc-id"),
-								Values: []string{vpcID},
-							},
-							types.Filter{
-								Name:   aws.String(fmt.Sprintf("tag:%s", TagKeyNodeName)),
-								Values: []string{nodeName},
-							},
-						))
+						Expect(input.Filters).To(ConsistOf(filters))
 						return &ec2.DescribeSecurityGroupsOutput{
 							SecurityGroups: []types.SecurityGroup{
 								{
@@ -4659,24 +3862,7 @@ var _ = Describe("AWSProvider", func() {
 				mockec2Client.EXPECT().
 					DescribeSecurityGroups(ctx, gomock.AssignableToTypeOf(&ec2.DescribeSecurityGroupsInput{})).
 					DoAndReturn(func(_ context.Context, input *ec2.DescribeSecurityGroupsInput, _ ...func(*ec2.Options)) (*ec2.DescribeSecurityGroupsOutput, error) {
-						Expect(input.Filters).To(ConsistOf(
-							types.Filter{
-								Name:   aws.String(fmt.Sprintf("tag:%s", TagKeyManaged)),
-								Values: []string{"true"},
-							},
-							types.Filter{
-								Name:   aws.String("vpc-id"),
-								Values: []string{vpcID},
-							},
-							types.Filter{
-								Name:   aws.String(fmt.Sprintf("tag:%s", TagKeyClusterID)),
-								Values: []string{clusterID},
-							},
-							types.Filter{
-								Name:   aws.String(fmt.Sprintf("tag:%s", TagKeyNodeName)),
-								Values: []string{nodeName},
-							},
-						))
+						Expect(input.Filters).To(ConsistOf(filters))
 						return &ec2.DescribeSecurityGroupsOutput{
 							SecurityGroups: []types.SecurityGroup{
 								{
@@ -4799,24 +3985,7 @@ var _ = Describe("AWSProvider", func() {
 			mockec2Client.EXPECT().
 				DescribeSecurityGroups(ctx, gomock.AssignableToTypeOf(&ec2.DescribeSecurityGroupsInput{})).
 				DoAndReturn(func(_ context.Context, input *ec2.DescribeSecurityGroupsInput, _ ...func(*ec2.Options)) (*ec2.DescribeSecurityGroupsOutput, error) {
-					Expect(input.Filters).To(ConsistOf(
-						types.Filter{
-							Name:   aws.String(fmt.Sprintf("tag:%s", TagKeyManaged)),
-							Values: []string{"true"},
-						},
-						types.Filter{
-							Name:   aws.String(fmt.Sprintf("tag:%s", TagKeyClusterID)),
-							Values: []string{clusterID},
-						},
-						types.Filter{
-							Name:   aws.String("vpc-id"),
-							Values: []string{vpcID},
-						},
-						types.Filter{
-							Name:   aws.String(fmt.Sprintf("tag:%s", TagKeyNodeName)),
-							Values: []string{nodeName},
-						},
-					))
+					Expect(input.Filters).To(ConsistOf(filters))
 					return &ec2.DescribeSecurityGroupsOutput{
 						SecurityGroups: []types.SecurityGroup{
 							{

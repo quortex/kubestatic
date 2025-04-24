@@ -74,8 +74,6 @@ jobs:
       - name: Execute tests
         run: make test
         shell: bash
-        env:
-          VPC_ID: vpc-test
 
       - name: Export coverage
         if: github.event == 'pull_request'
