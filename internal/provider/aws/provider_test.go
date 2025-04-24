@@ -3,7 +3,6 @@ package aws
 import (
 	"context"
 	"fmt"
-	"os"
 	"time"
 
 	"github.com/aws/aws-sdk-go-v2/aws"
@@ -27,7 +26,7 @@ var _ = Describe("AWSProvider", func() {
 	var (
 		mockCtrl      *gomock.Controller
 		mockec2Client *mocks.Mockec2Client
-		provider      provider.Provider
+		p             provider.Provider
 		clusterID     string
 		filters       []types.Filter
 		tags          []types.Tag
@@ -42,7 +41,7 @@ var _ = Describe("AWSProvider", func() {
 		mockec2Client = mocks.NewMockec2Client(mockCtrl)
 
 		// Inject the mock EC2 into the provider
-		provider = newProviderWithClient(mockec2Client, 5*time.Minute, 10*time.Minute, clusterID)
+		p = newProviderWithClient(mockec2Client, 5*time.Minute, 10*time.Minute, clusterID)
 	})
 
 	AfterEach(func() {
@@ -83,7 +82,7 @@ var _ = Describe("AWSProvider", func() {
 					return &ec2.DescribeSecurityGroupsOutput{}, fmt.Errorf("describe security groups error")
 				})
 
-			err := provider.ReconcileFirewallRulesDeletion(ctx, log, nodeName, "")
+			err := p.ReconcileFirewallRulesDeletion(ctx, log, nodeName, "")
 			Expect(err).To(HaveOccurred())
 		})
 
@@ -96,7 +95,7 @@ var _ = Describe("AWSProvider", func() {
 						SecurityGroups: []types.SecurityGroup{},
 					}, nil
 				})
-			err := provider.ReconcileFirewallRulesDeletion(ctx, log, nodeName, "")
+			err := p.ReconcileFirewallRulesDeletion(ctx, log, nodeName, "")
 			Expect(err).ToNot(HaveOccurred())
 		})
 
@@ -117,15 +116,16 @@ var _ = Describe("AWSProvider", func() {
 			mockec2Client.EXPECT().
 				DescribeNetworkInterfaces(ctx, gomock.AssignableToTypeOf(&ec2.DescribeNetworkInterfacesInput{})).
 				DoAndReturn(func(_ context.Context, input *ec2.DescribeNetworkInterfacesInput, _ ...func(*ec2.Options)) (*ec2.DescribeNetworkInterfacesOutput, error) {
-					Expect(input.Filters).To(HaveLen(1))
-					Expect(aws.ToString(input.Filters[0].Name)).To(Equal("group-id"))
-					Expect(input.Filters[0].Values).To(ConsistOf(groupID))
+					Expect(input.Filters).To(ConsistOf(MatchFields(IgnoreExtras, Fields{
+						"Name":   PointTo(Equal("group-id")),
+						"Values": ConsistOf(groupID),
+					})))
 					return &ec2.DescribeNetworkInterfacesOutput{
 						NetworkInterfaces: []types.NetworkInterface{},
 					}, fmt.Errorf("describe network interfaces error")
 				})
 
-			err := provider.ReconcileFirewallRulesDeletion(ctx, log, nodeName, "")
+			err := p.ReconcileFirewallRulesDeletion(ctx, log, nodeName, "")
 			Expect(err).To(HaveOccurred())
 		})
 
@@ -212,7 +212,7 @@ var _ = Describe("AWSProvider", func() {
 					}
 				}).Times(2)
 
-			err := provider.ReconcileFirewallRulesDeletion(ctx, log, nodeName, "")
+			err := p.ReconcileFirewallRulesDeletion(ctx, log, nodeName, "")
 			Expect(err).To(HaveOccurred())
 		})
 
@@ -306,7 +306,7 @@ var _ = Describe("AWSProvider", func() {
 					return &ec2.DeleteSecurityGroupOutput{}, fmt.Errorf("delete security group error")
 				})
 
-			err := provider.ReconcileFirewallRulesDeletion(ctx, log, nodeName, "")
+			err := p.ReconcileFirewallRulesDeletion(ctx, log, nodeName, "")
 			Expect(err).To(HaveOccurred())
 		})
 
@@ -399,7 +399,7 @@ var _ = Describe("AWSProvider", func() {
 					return &ec2.DeleteSecurityGroupOutput{}, nil
 				})
 
-			err := provider.ReconcileFirewallRulesDeletion(ctx, log, nodeName, "")
+			err := p.ReconcileFirewallRulesDeletion(ctx, log, nodeName, "")
 			Expect(err).ToNot(HaveOccurred())
 		})
 	})
@@ -456,7 +456,7 @@ var _ = Describe("AWSProvider", func() {
 					return &ec2.DescribeAddressesOutput{}, fmt.Errorf("describe addresses error")
 				})
 
-			err := provider.ReconcileExternalIPDeletion(ctx, log, externalIP)
+			err := p.ReconcileExternalIPDeletion(ctx, log, externalIP)
 			Expect(err).To(HaveOccurred())
 		})
 
@@ -470,7 +470,7 @@ var _ = Describe("AWSProvider", func() {
 					}, nil
 				})
 
-			err := provider.ReconcileExternalIPDeletion(ctx, log, externalIP)
+			err := p.ReconcileExternalIPDeletion(ctx, log, externalIP)
 			Expect(err).ToNot(HaveOccurred())
 		})
 
@@ -495,7 +495,7 @@ var _ = Describe("AWSProvider", func() {
 					return &ec2.DisassociateAddressOutput{}, fmt.Errorf("disassociate address error")
 				})
 
-			err := provider.ReconcileExternalIPDeletion(ctx, log, externalIP)
+			err := p.ReconcileExternalIPDeletion(ctx, log, externalIP)
 			Expect(err).To(HaveOccurred())
 		})
 
@@ -526,7 +526,7 @@ var _ = Describe("AWSProvider", func() {
 					return &ec2.ReleaseAddressOutput{}, fmt.Errorf("release address error")
 				})
 
-			err := provider.ReconcileExternalIPDeletion(ctx, log, externalIP)
+			err := p.ReconcileExternalIPDeletion(ctx, log, externalIP)
 			Expect(err).To(HaveOccurred())
 		})
 
@@ -557,7 +557,7 @@ var _ = Describe("AWSProvider", func() {
 					return &ec2.ReleaseAddressOutput{}, nil
 				})
 
-			err := provider.ReconcileExternalIPDeletion(ctx, log, externalIP)
+			err := p.ReconcileExternalIPDeletion(ctx, log, externalIP)
 			Expect(err).ToNot(HaveOccurred())
 		})
 	})
@@ -636,7 +636,7 @@ var _ = Describe("AWSProvider", func() {
 						return &ec2.DescribeAddressesOutput{}, fmt.Errorf("describe addresses error")
 					})
 
-				status, err := provider.ReconcileExternalIP(ctx, log, instanceID, externalIP)
+				status, err := p.ReconcileExternalIP(ctx, log, instanceID, externalIP)
 				Expect(status).To(MatchFields(IgnoreExtras, Fields{
 					"State": Equal(v1alpha1.ExternalIPStatePending),
 					"Conditions": HaveExactElements(matchCondition(
@@ -660,9 +660,10 @@ var _ = Describe("AWSProvider", func() {
 					AllocateAddress(ctx, gomock.AssignableToTypeOf(&ec2.AllocateAddressInput{})).
 					DoAndReturn(func(_ context.Context, input *ec2.AllocateAddressInput, _ ...func(*ec2.Options)) (*ec2.AllocateAddressOutput, error) {
 						Expect(input.Domain).To(Equal(types.DomainTypeVpc))
-						Expect(input.TagSpecifications).To(HaveLen(1))
-						Expect(input.TagSpecifications[0].ResourceType).To(Equal(types.ResourceTypeElasticIp))
-						Expect(input.TagSpecifications[0].Tags).To(ConsistOf(tags))
+						Expect(input.TagSpecifications).To(ConsistOf(MatchFields(IgnoreExtras, Fields{
+							"ResourceType": Equal(types.ResourceTypeElasticIp),
+							"Tags":         ConsistOf(tags),
+						})))
 						return &ec2.AllocateAddressOutput{}, &smithy.GenericAPIError{
 							Code:    "AddressLimitExceeded",
 							Message: "Too many addresses allocated",
@@ -670,7 +671,7 @@ var _ = Describe("AWSProvider", func() {
 						}
 					})
 
-				status, err := provider.ReconcileExternalIP(ctx, log, instanceID, externalIP)
+				status, err := p.ReconcileExternalIP(ctx, log, instanceID, externalIP)
 				Expect(status).To(MatchFields(IgnoreExtras, Fields{
 					"State": Equal(v1alpha1.ExternalIPStatePending),
 					"Conditions": HaveExactElements(matchCondition(
@@ -696,13 +697,14 @@ var _ = Describe("AWSProvider", func() {
 					AllocateAddress(ctx, gomock.AssignableToTypeOf(&ec2.AllocateAddressInput{})).
 					DoAndReturn(func(_ context.Context, input *ec2.AllocateAddressInput, _ ...func(*ec2.Options)) (*ec2.AllocateAddressOutput, error) {
 						Expect(input.Domain).To(Equal(types.DomainTypeVpc))
-						Expect(input.TagSpecifications).To(HaveLen(1))
-						Expect(input.TagSpecifications[0].ResourceType).To(Equal(types.ResourceTypeElasticIp))
-						Expect(input.TagSpecifications[0].Tags).To(ConsistOf(tags))
+						Expect(input.TagSpecifications).To(ConsistOf(MatchFields(IgnoreExtras, Fields{
+							"ResourceType": Equal(types.ResourceTypeElasticIp),
+							"Tags":         ConsistOf(tags),
+						})))
 						return &ec2.AllocateAddressOutput{}, fmt.Errorf("allocate address error")
 					})
 
-				status, err := provider.ReconcileExternalIP(ctx, log, instanceID, externalIP)
+				status, err := p.ReconcileExternalIP(ctx, log, instanceID, externalIP)
 				Expect(status).To(MatchFields(IgnoreExtras, Fields{
 					"State": Equal(v1alpha1.ExternalIPStatePending),
 					"Conditions": HaveExactElements(matchCondition(
@@ -743,16 +745,16 @@ var _ = Describe("AWSProvider", func() {
 					AllocateAddress(ctx, gomock.AssignableToTypeOf(&ec2.AllocateAddressInput{})).
 					DoAndReturn(func(_ context.Context, input *ec2.AllocateAddressInput, _ ...func(*ec2.Options)) (*ec2.AllocateAddressOutput, error) {
 						Expect(input.Domain).To(Equal(types.DomainTypeVpc))
-						Expect(input.TagSpecifications).To(HaveLen(1))
-						Expect(input.TagSpecifications[0].ResourceType).To(Equal(types.ResourceTypeElasticIp))
-						Expect(input.TagSpecifications[0].Tags).To(ConsistOf(tags))
-
+						Expect(input.TagSpecifications).To(ConsistOf(MatchFields(IgnoreExtras, Fields{
+							"ResourceType": Equal(types.ResourceTypeElasticIp),
+							"Tags":         ConsistOf(tags),
+						})))
 						return &ec2.AllocateAddressOutput{
 							AllocationId: aws.String(allocationID),
 						}, nil
 					})
 
-				status, err := provider.ReconcileExternalIP(ctx, log, instanceID, externalIP)
+				status, err := p.ReconcileExternalIP(ctx, log, instanceID, externalIP)
 				Expect(status).To(MatchFields(IgnoreExtras, Fields{
 					"State": Equal(v1alpha1.ExternalIPStatePending),
 					"Conditions": HaveExactElements(matchCondition(kmetav1.Condition{
@@ -798,16 +800,16 @@ var _ = Describe("AWSProvider", func() {
 						AllocateAddress(ctx, gomock.AssignableToTypeOf(&ec2.AllocateAddressInput{})).
 						DoAndReturn(func(_ context.Context, input *ec2.AllocateAddressInput, _ ...func(*ec2.Options)) (*ec2.AllocateAddressOutput, error) {
 							Expect(input.Domain).To(Equal(types.DomainTypeVpc))
-							Expect(input.TagSpecifications).To(HaveLen(1))
-							Expect(input.TagSpecifications[0].ResourceType).To(Equal(types.ResourceTypeElasticIp))
-							Expect(input.TagSpecifications[0].Tags).To(ConsistOf(tags))
-
+							Expect(input.TagSpecifications).To(ConsistOf(MatchFields(IgnoreExtras, Fields{
+								"ResourceType": Equal(types.ResourceTypeElasticIp),
+								"Tags":         ConsistOf(tags),
+							})))
 							return &ec2.AllocateAddressOutput{
 								AllocationId: aws.String(allocationID),
 							}, nil
 						})
 
-					status, err := provider.ReconcileExternalIP(ctx, log, instanceID, externalIP)
+					status, err := p.ReconcileExternalIP(ctx, log, instanceID, externalIP)
 					Expect(status).To(MatchFields(IgnoreExtras, Fields{
 						"State": Equal(v1alpha1.ExternalIPStateReserved),
 						"Conditions": ConsistOf(matchConditions([]kmetav1.Condition{
@@ -881,7 +883,7 @@ var _ = Describe("AWSProvider", func() {
 							return &ec2.DisassociateAddressOutput{}, fmt.Errorf("disassociate address error")
 						})
 
-					status, err := provider.ReconcileExternalIP(ctx, log, instanceID, externalIP)
+					status, err := p.ReconcileExternalIP(ctx, log, instanceID, externalIP)
 					Expect(status).To(MatchFields(IgnoreExtras, Fields{
 						"State": Equal(v1alpha1.ExternalIPStateReserved),
 						"Conditions": ConsistOf(matchConditions([]kmetav1.Condition{
@@ -951,7 +953,7 @@ var _ = Describe("AWSProvider", func() {
 							return &ec2.DisassociateAddressOutput{}, nil
 						})
 
-					status, err := provider.ReconcileExternalIP(ctx, log, instanceID, externalIP)
+					status, err := p.ReconcileExternalIP(ctx, log, instanceID, externalIP)
 					Expect(status).To(MatchFields(IgnoreExtras, Fields{
 						"State":      Equal(v1alpha1.ExternalIPStateReserved),
 						"InstanceID": BeNil(),
@@ -986,7 +988,7 @@ var _ = Describe("AWSProvider", func() {
 						return &ec2.DescribeAddressesOutput{}, fmt.Errorf("describe addresses error")
 					})
 
-				status, err := provider.ReconcileExternalIP(ctx, log, instanceID, externalIP)
+				status, err := p.ReconcileExternalIP(ctx, log, instanceID, externalIP)
 				Expect(status).To(MatchFields(IgnoreExtras, Fields{
 					"State": Equal(v1alpha1.ExternalIPStatePending),
 					"Conditions": HaveExactElements(matchCondition(
@@ -1003,20 +1005,7 @@ var _ = Describe("AWSProvider", func() {
 				mockec2Client.EXPECT().
 					DescribeAddresses(ctx, gomock.AssignableToTypeOf(&ec2.DescribeAddressesInput{})).
 					DoAndReturn(func(_ context.Context, input *ec2.DescribeAddressesInput, _ ...func(*ec2.Options)) (*ec2.DescribeAddressesOutput, error) {
-						Expect(input.Filters).To(ConsistOf([]types.Filter{
-							{
-								Name:   aws.String(fmt.Sprintf("tag:%s", TagKeyManaged)),
-								Values: []string{"true"},
-							},
-							{
-								Name:   aws.String(fmt.Sprintf("tag:%s", TagKeyClusterID)),
-								Values: []string{clusterID},
-							},
-							{
-								Name:   aws.String(fmt.Sprintf("tag:%s", TagKeyExternalIPName)),
-								Values: []string{externalIP.Name},
-							},
-						}))
+						Expect(input.Filters).To(ConsistOf(filters))
 						return &ec2.DescribeAddressesOutput{
 							Addresses: []types.Address{
 								{
@@ -1033,7 +1022,7 @@ var _ = Describe("AWSProvider", func() {
 						return &ec2.DescribeInstancesOutput{}, fmt.Errorf("describe instances error")
 					})
 
-				status, err := provider.ReconcileExternalIP(ctx, log, instanceID, externalIP)
+				status, err := p.ReconcileExternalIP(ctx, log, instanceID, externalIP)
 				Expect(status).To(MatchFields(IgnoreExtras, Fields{
 					"State": Equal(v1alpha1.ExternalIPStateReserved),
 					"Conditions": HaveExactElements(matchCondition(
@@ -1069,7 +1058,7 @@ var _ = Describe("AWSProvider", func() {
 						}, nil
 					})
 
-				status, err := provider.ReconcileExternalIP(ctx, log, instanceID, externalIP)
+				status, err := p.ReconcileExternalIP(ctx, log, instanceID, externalIP)
 				Expect(status).To(MatchFields(IgnoreExtras, Fields{
 					"State": Equal(v1alpha1.ExternalIPStateReserved),
 					"Conditions": HaveExactElements(matchConditions([]kmetav1.Condition{
@@ -1121,7 +1110,7 @@ var _ = Describe("AWSProvider", func() {
 						}, nil
 					})
 
-				status, err := provider.ReconcileExternalIP(ctx, log, instanceID, externalIP)
+				status, err := p.ReconcileExternalIP(ctx, log, instanceID, externalIP)
 				Expect(status).To(MatchFields(IgnoreExtras, Fields{
 					"State": Equal(v1alpha1.ExternalIPStateReserved),
 					"Conditions": HaveExactElements(matchConditions([]kmetav1.Condition{
@@ -1178,7 +1167,7 @@ var _ = Describe("AWSProvider", func() {
 						}, nil
 					})
 
-				status, err := provider.ReconcileExternalIP(ctx, log, instanceID, externalIP)
+				status, err := p.ReconcileExternalIP(ctx, log, instanceID, externalIP)
 				Expect(status).To(MatchFields(IgnoreExtras, Fields{
 					"State": Equal(v1alpha1.ExternalIPStateReserved),
 					"Conditions": HaveExactElements(matchConditions([]kmetav1.Condition{
@@ -1242,7 +1231,7 @@ var _ = Describe("AWSProvider", func() {
 							}, nil
 						})
 
-					status, err := provider.ReconcileExternalIP(ctx, log, instanceID, externalIP)
+					status, err := p.ReconcileExternalIP(ctx, log, instanceID, externalIP)
 					Expect(status).To(MatchFields(IgnoreExtras, Fields{
 						"State": Equal(v1alpha1.ExternalIPStateAssociated),
 						"Conditions": HaveExactElements(matchConditions([]kmetav1.Condition{
@@ -1308,7 +1297,7 @@ var _ = Describe("AWSProvider", func() {
 							return &ec2.DisassociateAddressOutput{}, fmt.Errorf("disassociate address error")
 						})
 
-					status, err := provider.ReconcileExternalIP(ctx, log, instanceID, externalIP)
+					status, err := p.ReconcileExternalIP(ctx, log, instanceID, externalIP)
 					Expect(status).To(MatchFields(IgnoreExtras, Fields{
 						"State": Equal(v1alpha1.ExternalIPStateReserved),
 						"Conditions": HaveExactElements(matchConditions([]kmetav1.Condition{
@@ -1381,7 +1370,7 @@ var _ = Describe("AWSProvider", func() {
 							return &ec2.AssociateAddressOutput{}, nil
 						})
 
-					status, err := provider.ReconcileExternalIP(ctx, log, instanceID, externalIP)
+					status, err := p.ReconcileExternalIP(ctx, log, instanceID, externalIP)
 					Expect(status).To(MatchFields(IgnoreExtras, Fields{
 						"State":      Equal(v1alpha1.ExternalIPStateAssociated),
 						"InstanceID": PointTo(Equal(instanceID)),
@@ -1449,7 +1438,7 @@ var _ = Describe("AWSProvider", func() {
 						return &ec2.AssociateAddressOutput{}, fmt.Errorf("associate address error")
 					})
 
-				status, err := provider.ReconcileExternalIP(ctx, log, instanceID, externalIP)
+				status, err := p.ReconcileExternalIP(ctx, log, instanceID, externalIP)
 				Expect(status).To(MatchFields(IgnoreExtras, Fields{
 					"State": Equal(v1alpha1.ExternalIPStateReserved),
 					"Conditions": HaveExactElements(matchConditions([]kmetav1.Condition{
@@ -1515,7 +1504,7 @@ var _ = Describe("AWSProvider", func() {
 						return &ec2.AssociateAddressOutput{}, nil
 					})
 
-				status, err := provider.ReconcileExternalIP(ctx, log, instanceID, externalIP)
+				status, err := p.ReconcileExternalIP(ctx, log, instanceID, externalIP)
 				Expect(status).To(MatchFields(IgnoreExtras, Fields{
 					"State":      Equal(v1alpha1.ExternalIPStateAssociated),
 					"InstanceID": PointTo(Equal(instanceID)),
@@ -1551,7 +1540,6 @@ var _ = Describe("AWSProvider", func() {
 			eni01ID = "eni-01-" + testID
 			eni02ID = "eni-02-" + testID
 			instanceID = "i-" + testID
-			vpcID = os.Getenv("VPC_ID")
 			securityGroupID = "sg-" + testID
 			securityGroup01ID = "sg-01-" + testID
 			nodeName = "node-" + testID
@@ -1644,7 +1632,7 @@ var _ = Describe("AWSProvider", func() {
 					return &ec2.DescribeInstancesOutput{}, fmt.Errorf("describe instance error")
 				})
 
-			status, err := provider.ReconcileFirewallRule(ctx, log, nodeName, instanceID, firewallRule, firewallrules)
+			status, err := p.ReconcileFirewallRule(ctx, log, nodeName, instanceID, firewallRule, firewallrules)
 			Expect(status).To(MatchFields(IgnoreExtras, Fields{
 				"State":      Equal(v1alpha1.FirewallRuleStatePending),
 				"Conditions": BeNil(),
@@ -1662,7 +1650,7 @@ var _ = Describe("AWSProvider", func() {
 					}, nil
 				})
 
-			status, err := provider.ReconcileFirewallRule(ctx, log, nodeName, instanceID, firewallRule, firewallrules)
+			status, err := p.ReconcileFirewallRule(ctx, log, nodeName, instanceID, firewallRule, firewallrules)
 			Expect(status).To(MatchFields(IgnoreExtras, Fields{
 				"State":      Equal(v1alpha1.FirewallRuleStatePending),
 				"Conditions": BeNil(),
@@ -1704,7 +1692,7 @@ var _ = Describe("AWSProvider", func() {
 					return &ec2.DescribeSecurityGroupsOutput{}, fmt.Errorf("describe addresses error")
 				})
 
-			status, err := provider.ReconcileFirewallRule(ctx, log, nodeName, instanceID, firewallRule, firewallrules)
+			status, err := p.ReconcileFirewallRule(ctx, log, nodeName, instanceID, firewallRule, firewallrules)
 			Expect(status).To(MatchFields(IgnoreExtras, Fields{
 				"State": Equal(v1alpha1.FirewallRuleStatePending),
 				"Conditions": HaveExactElements(matchCondition(
@@ -1753,7 +1741,7 @@ var _ = Describe("AWSProvider", func() {
 						return &ec2.DescribeSecurityGroupsOutput{}, nil
 					})
 
-				status, err := provider.ReconcileFirewallRule(ctx, log, nodeName, instanceID, firewallRule, firewallrules)
+				status, err := p.ReconcileFirewallRule(ctx, log, nodeName, instanceID, firewallRule, firewallrules)
 				Expect(status).To(MatchFields(IgnoreExtras, Fields{
 					"State":      Equal(v1alpha1.FirewallRuleStatePending),
 					"Conditions": BeNil(),
@@ -1803,7 +1791,7 @@ var _ = Describe("AWSProvider", func() {
 						return &ec2.CreateSecurityGroupOutput{}, fmt.Errorf("create security group error")
 					})
 
-				status, err := provider.ReconcileFirewallRule(ctx, log, nodeName, instanceID, firewallRule, firewallrules)
+				status, err := p.ReconcileFirewallRule(ctx, log, nodeName, instanceID, firewallRule, firewallrules)
 				Expect(status).To(MatchFields(IgnoreExtras, Fields{
 					"State": Equal(v1alpha1.FirewallRuleStatePending),
 					"Conditions": HaveExactElements(matchCondition(
@@ -1876,7 +1864,7 @@ var _ = Describe("AWSProvider", func() {
 						}, nil
 					})
 
-				status, err := provider.ReconcileFirewallRule(ctx, log, nodeName, instanceID, firewallRule, firewallrules)
+				status, err := p.ReconcileFirewallRule(ctx, log, nodeName, instanceID, firewallRule, firewallrules)
 				Expect(status).To(MatchFields(IgnoreExtras, Fields{
 					"State": Equal(v1alpha1.FirewallRuleStatePending),
 					"Conditions": HaveExactElements(matchConditions([]kmetav1.Condition{
@@ -1935,7 +1923,7 @@ var _ = Describe("AWSProvider", func() {
 					}, nil
 				})
 
-			status, err := provider.ReconcileFirewallRule(ctx, log, nodeName, instanceID, firewallRule, firewallrules)
+			status, err := p.ReconcileFirewallRule(ctx, log, nodeName, instanceID, firewallRule, firewallrules)
 			Expect(status).To(MatchFields(IgnoreExtras, Fields{
 				"State": Equal(v1alpha1.FirewallRuleStatePending),
 				"Conditions": HaveExactElements(matchConditions([]kmetav1.Condition{
@@ -2005,7 +1993,7 @@ var _ = Describe("AWSProvider", func() {
 					return &ec2.DescribeNetworkInterfacesOutput{}, fmt.Errorf("describe network interfaces error")
 				})
 
-			status, err := provider.ReconcileFirewallRule(ctx, log, nodeName, instanceID, firewallRule, firewallrules)
+			status, err := p.ReconcileFirewallRule(ctx, log, nodeName, instanceID, firewallRule, firewallrules)
 			Expect(status).To(MatchFields(IgnoreExtras, Fields{
 				"State": Equal(v1alpha1.FirewallRuleStatePending),
 				"Conditions": HaveExactElements(matchConditions([]kmetav1.Condition{
@@ -2075,7 +2063,7 @@ var _ = Describe("AWSProvider", func() {
 					return &ec2.DescribeNetworkInterfacesOutput{}, fmt.Errorf("describe network interfaces error")
 				})
 
-			status, err := provider.ReconcileFirewallRule(ctx, log, nodeName, instanceID, firewallRule, firewallrules)
+			status, err := p.ReconcileFirewallRule(ctx, log, nodeName, instanceID, firewallRule, firewallrules)
 			Expect(status).To(MatchFields(IgnoreExtras, Fields{
 				"State": Equal(v1alpha1.FirewallRuleStatePending),
 				"Conditions": HaveExactElements(matchConditions([]kmetav1.Condition{
@@ -2195,7 +2183,7 @@ var _ = Describe("AWSProvider", func() {
 						}
 					}).Times(2)
 
-				status, err := provider.ReconcileFirewallRule(ctx, log, nodeName, instanceID, firewallRule, firewallrules)
+				status, err := p.ReconcileFirewallRule(ctx, log, nodeName, instanceID, firewallRule, firewallrules)
 				Expect(status).To(MatchFields(IgnoreExtras, Fields{
 					"State": Equal(v1alpha1.FirewallRuleStatePending),
 					"Conditions": HaveExactElements(matchConditions([]kmetav1.Condition{
@@ -2282,7 +2270,7 @@ var _ = Describe("AWSProvider", func() {
 						return &ec2.ModifyNetworkInterfaceAttributeOutput{}, fmt.Errorf("modify network interface attribute error")
 					})
 
-				status, err := provider.ReconcileFirewallRule(ctx, log, nodeName, instanceID, firewallRule, firewallrules)
+				status, err := p.ReconcileFirewallRule(ctx, log, nodeName, instanceID, firewallRule, firewallrules)
 				Expect(status).To(MatchFields(IgnoreExtras, Fields{
 					"State": Equal(v1alpha1.FirewallRuleStatePending),
 					"Conditions": HaveExactElements(matchConditions([]kmetav1.Condition{
@@ -2388,7 +2376,7 @@ var _ = Describe("AWSProvider", func() {
 						return &ec2.RevokeSecurityGroupIngressOutput{}, fmt.Errorf("revoke security group ingress error")
 					})
 
-				status, err := provider.ReconcileFirewallRule(ctx, log, nodeName, instanceID, firewallRule, firewallrules)
+				status, err := p.ReconcileFirewallRule(ctx, log, nodeName, instanceID, firewallRule, firewallrules)
 				Expect(status).To(MatchFields(IgnoreExtras, Fields{
 					"State": Equal(v1alpha1.FirewallRuleStatePending),
 					"Conditions": HaveExactElements(matchConditions([]kmetav1.Condition{
@@ -2515,7 +2503,7 @@ var _ = Describe("AWSProvider", func() {
 						return &ec2.RevokeSecurityGroupEgressOutput{}, fmt.Errorf("revoke security group egress error")
 					})
 
-				status, err := provider.ReconcileFirewallRule(ctx, log, nodeName, instanceID, firewallRule, firewallrules)
+				status, err := p.ReconcileFirewallRule(ctx, log, nodeName, instanceID, firewallRule, firewallrules)
 				Expect(status).To(MatchFields(IgnoreExtras, Fields{
 					"State": Equal(v1alpha1.FirewallRuleStatePending),
 					"Conditions": HaveExactElements(matchConditions([]kmetav1.Condition{
@@ -2643,7 +2631,7 @@ var _ = Describe("AWSProvider", func() {
 							}, nil
 						})
 
-					status, err := provider.ReconcileFirewallRule(ctx, log, nodeName, instanceID, firewallRule, firewallrules)
+					status, err := p.ReconcileFirewallRule(ctx, log, nodeName, instanceID, firewallRule, firewallrules)
 					Expect(status).To(MatchFields(IgnoreExtras, Fields{
 						"State": Equal(v1alpha1.FirewallRuleStatePending),
 						"Conditions": HaveExactElements(matchConditions([]kmetav1.Condition{
@@ -2771,7 +2759,7 @@ var _ = Describe("AWSProvider", func() {
 							return &ec2.RevokeSecurityGroupIngressOutput{}, fmt.Errorf("revoke security group ingress error")
 						})
 
-					status, err := provider.ReconcileFirewallRule(ctx, log, nodeName, instanceID, firewallRule, firewallrules)
+					status, err := p.ReconcileFirewallRule(ctx, log, nodeName, instanceID, firewallRule, firewallrules)
 					Expect(status).To(MatchFields(IgnoreExtras, Fields{
 						"State": Equal(v1alpha1.FirewallRuleStatePending),
 						"Conditions": HaveExactElements(matchConditions([]kmetav1.Condition{
@@ -2905,7 +2893,7 @@ var _ = Describe("AWSProvider", func() {
 							return &ec2.RevokeSecurityGroupIngressOutput{}, fmt.Errorf("revoke security group ingress error")
 						})
 
-					status, err := provider.ReconcileFirewallRule(ctx, log, nodeName, instanceID, firewallRule, firewallrules)
+					status, err := p.ReconcileFirewallRule(ctx, log, nodeName, instanceID, firewallRule, firewallrules)
 					Expect(status).To(MatchFields(IgnoreExtras, Fields{
 						"State": Equal(v1alpha1.FirewallRuleStatePending),
 						"Conditions": HaveExactElements(matchConditions([]kmetav1.Condition{
@@ -3032,7 +3020,7 @@ var _ = Describe("AWSProvider", func() {
 							}, nil
 						})
 
-					status, err := provider.ReconcileFirewallRule(ctx, log, nodeName, instanceID, firewallRule, firewallrules)
+					status, err := p.ReconcileFirewallRule(ctx, log, nodeName, instanceID, firewallRule, firewallrules)
 					Expect(status).To(MatchFields(IgnoreExtras, Fields{
 						"State": Equal(v1alpha1.FirewallRuleStatePending),
 						"Conditions": HaveExactElements(matchConditions([]kmetav1.Condition{
@@ -3165,7 +3153,7 @@ var _ = Describe("AWSProvider", func() {
 							return &ec2.RevokeSecurityGroupEgressOutput{}, fmt.Errorf("revoke security group egress error")
 						})
 
-					status, err := provider.ReconcileFirewallRule(ctx, log, nodeName, instanceID, firewallRule, firewallrules)
+					status, err := p.ReconcileFirewallRule(ctx, log, nodeName, instanceID, firewallRule, firewallrules)
 					Expect(status).To(MatchFields(IgnoreExtras, Fields{
 						"State": Equal(v1alpha1.FirewallRuleStatePending),
 						"Conditions": HaveExactElements(matchConditions([]kmetav1.Condition{
@@ -3299,7 +3287,7 @@ var _ = Describe("AWSProvider", func() {
 							return &ec2.RevokeSecurityGroupEgressOutput{}, fmt.Errorf("revoke security group Egress error")
 						})
 
-					status, err := provider.ReconcileFirewallRule(ctx, log, nodeName, instanceID, firewallRule, firewallrules)
+					status, err := p.ReconcileFirewallRule(ctx, log, nodeName, instanceID, firewallRule, firewallrules)
 					Expect(status).To(MatchFields(IgnoreExtras, Fields{
 						"State": Equal(v1alpha1.FirewallRuleStatePending),
 						"Conditions": HaveExactElements(matchConditions([]kmetav1.Condition{
@@ -3426,7 +3414,7 @@ var _ = Describe("AWSProvider", func() {
 						return &ec2.RevokeSecurityGroupIngressOutput{}, nil
 					})
 
-				status, err := provider.ReconcileFirewallRule(ctx, log, nodeName, instanceID, firewallRule, firewallrules)
+				status, err := p.ReconcileFirewallRule(ctx, log, nodeName, instanceID, firewallRule, firewallrules)
 				Expect(status).To(MatchFields(IgnoreExtras, Fields{
 					"State": Equal(v1alpha1.FirewallRuleStatePending),
 					"Conditions": HaveExactElements(matchConditions([]kmetav1.Condition{
@@ -3549,7 +3537,7 @@ var _ = Describe("AWSProvider", func() {
 						}
 					})
 
-				status, err := provider.ReconcileFirewallRule(ctx, log, nodeName, instanceID, firewallRule, firewallrules)
+				status, err := p.ReconcileFirewallRule(ctx, log, nodeName, instanceID, firewallRule, firewallrules)
 				Expect(status).To(MatchFields(IgnoreExtras, Fields{
 					"State": Equal(v1alpha1.FirewallRuleStatePending),
 					"Conditions": HaveExactElements(matchConditions([]kmetav1.Condition{
@@ -3671,7 +3659,7 @@ var _ = Describe("AWSProvider", func() {
 						return &ec2.AuthorizeSecurityGroupIngressOutput{}, fmt.Errorf("authorize security group ingress error")
 					})
 
-				status, err := provider.ReconcileFirewallRule(ctx, log, nodeName, instanceID, firewallRule, firewallrules)
+				status, err := p.ReconcileFirewallRule(ctx, log, nodeName, instanceID, firewallRule, firewallrules)
 				Expect(status).To(MatchFields(IgnoreExtras, Fields{
 					"State": Equal(v1alpha1.FirewallRuleStatePending),
 					"Conditions": HaveExactElements(matchConditions([]kmetav1.Condition{
@@ -3803,7 +3791,7 @@ var _ = Describe("AWSProvider", func() {
 						}
 					})
 
-				status, err := provider.ReconcileFirewallRule(ctx, log, nodeName, instanceID, firewallRule, firewallrules)
+				status, err := p.ReconcileFirewallRule(ctx, log, nodeName, instanceID, firewallRule, firewallrules)
 				Expect(status).To(MatchFields(IgnoreExtras, Fields{
 					"State": Equal(v1alpha1.FirewallRuleStatePending),
 					"Conditions": HaveExactElements(matchConditions([]kmetav1.Condition{
@@ -3925,7 +3913,7 @@ var _ = Describe("AWSProvider", func() {
 						return &ec2.AuthorizeSecurityGroupEgressOutput{}, fmt.Errorf("authorize security group egress error")
 					})
 
-				status, err := provider.ReconcileFirewallRule(ctx, log, nodeName, instanceID, firewallRule, firewallrules)
+				status, err := p.ReconcileFirewallRule(ctx, log, nodeName, instanceID, firewallRule, firewallrules)
 				Expect(status).To(MatchFields(IgnoreExtras, Fields{
 					"State": Equal(v1alpha1.FirewallRuleStatePending),
 					"Conditions": HaveExactElements(matchConditions([]kmetav1.Condition{
@@ -4048,7 +4036,7 @@ var _ = Describe("AWSProvider", func() {
 					return &ec2.AuthorizeSecurityGroupIngressOutput{}, nil
 				})
 
-			status, err := provider.ReconcileFirewallRule(ctx, log, nodeName, instanceID, firewallRule, firewallrules)
+			status, err := p.ReconcileFirewallRule(ctx, log, nodeName, instanceID, firewallRule, firewallrules)
 			Expect(status).To(MatchFields(IgnoreExtras, Fields{
 				"State": Equal(v1alpha1.FirewallRuleStateApplied),
 				"Conditions": HaveExactElements(matchConditions([]kmetav1.Condition{
