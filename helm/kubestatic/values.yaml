@@ -5,6 +5,9 @@
 # -- The desired cloud provider (only AWS at the moment).
 cloudProvider: aws
 
+# -- The cluster ID to be used for the kubestatic deployment.
+clusterID: ""
+
 # -- Prevent EIP deallocation on nodes auto-assigned ExternalIPs.
 preventEIPDeallocation: false
 

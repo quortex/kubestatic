@@ -1,6 +1,6 @@
 # kubestatic
 
-![Version: 0.13.0-rc.6](https://img.shields.io/badge/Version-0.13.0--rc.6-informational?style=flat-square) ![Type: application](https://img.shields.io/badge/Type-application-informational?style=flat-square) ![AppVersion: 0.13.0-rc.6](https://img.shields.io/badge/AppVersion-0.13.0--rc.6-informational?style=flat-square)
+![Version: 0.13.0-rc.7](https://img.shields.io/badge/Version-0.13.0--rc.7-informational?style=flat-square) ![Type: application](https://img.shields.io/badge/Type-application-informational?style=flat-square) ![AppVersion: 0.13.0-rc.7](https://img.shields.io/badge/AppVersion-0.13.0--rc.7-informational?style=flat-square)
 
 An operator to manage the lifecycle of public cloud providers resources needed to expose endpoints on public nodes.
 
@@ -65,6 +65,7 @@ helm install kubestatic kubestatic/kubestatic -n kubestatic-system
 | Key | Type | Default | Description |
 |-----|------|---------|-------------|
 | cloudProvider | string | `"aws"` | The desired cloud provider (only AWS at the moment). |
+| clusterID | string | `""` | The cluster ID to be used for the kubestatic deployment. |
 | preventEIPDeallocation | bool | `false` | Prevent EIP deallocation on nodes auto-assigned ExternalIPs. |
 | nodeMinReconciliationInterval | string | `"10s"` | The minimum duration to wait between two reconciliations for the same node. |
 | nodeReconciliationRequeueInterval | string | `"1m"` | The duration for which nodes are automatically reconciled. |
