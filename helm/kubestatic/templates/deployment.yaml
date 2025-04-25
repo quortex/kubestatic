@@ -45,7 +45,8 @@ spec:
             - --cloud-provider={{ required "A valid .Values.cloudProvider entry required!" $.Values.cloudProvider }}
             - --node-min-reconciliation-interval={{ $.Values.nodeMinReconciliationInterval }}
             - --node-reconciliation-requeue-interval={{ $.Values.nodeReconciliationRequeueInterval }}
-            - --cluster-id={{ required "A valid .Values.clusterID entry required!" $.Values.clusterID }}
+            - --cluster-id={{ $.Values.clusterId }}
+            - --vpc-id={{ $.Values.vpcId }}
             {{- if $.Values.preventEIPDeallocation }}
             - --prevent-eip-deallocation
             {{- end }}

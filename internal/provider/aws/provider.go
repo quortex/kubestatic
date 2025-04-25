@@ -158,6 +158,7 @@ func WithClusterID(clusterID string) ClusterIDFilter {
 // awsProvider is an AWS provider implementation for the provider.Provider interface
 type awsProvider struct {
 	clusterID string
+	vpcID     string
 	ec2       *ec2.Client
 	// These Mutexes ensure that when a cache miss occurs, only one controller makes
 	// the AWS API call while others wait for the result, preventing duplicate
@@ -173,7 +174,7 @@ type awsProvider struct {
 }
 
 // NewProvider instantiate a Provider implementation for AWS
-func NewProvider(defaultTTL, defaultCleanupInterval time.Duration, clusterID string) (provider.Provider, error) {
+func NewProvider(defaultTTL, defaultCleanupInterval time.Duration, clusterID, vpcID string) (provider.Provider, error) {
 	// Load the Shared AWS Configuration (~/.aws/config)
 	cfg, err := config.LoadDefaultConfig(context.TODO())
 	if err != nil {
@@ -187,6 +188,7 @@ func NewProvider(defaultTTL, defaultCleanupInterval time.Duration, clusterID str
 
 	return &awsProvider{
 		clusterID: clusterID,
+		vpcID:     vpcID,
 		ec2: ec2.NewFromConfig(cfg, func(o *ec2.Options) {
 			// https://github.com/aws/aws-sdk-go-v2/discussions/2810
 			o.MeterProvider = smithyotelmetrics.Adapt(meterProvider)
@@ -978,7 +980,7 @@ func (p *awsProvider) ReconcileFirewallRulesDeletion(
 	instanceID string,
 ) error {
 	// Get the security group associated with the instance
-	securityGroup, err := p.getSecurityGroup(ctx, Managed(), WithClusterID(p.clusterID), WithNodeName(nodeName))
+	securityGroup, err := p.getSecurityGroup(ctx, Managed(), WithClusterID(p.clusterID), WithVPCID(p.vpcID), WithNodeName(nodeName))
 	if err != nil {
 		// The security group does not exist, end of reconciliation
 		if err.(*provider.Error).Code == provider.NotFoundError {
