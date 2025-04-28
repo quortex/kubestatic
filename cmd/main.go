@@ -79,6 +79,7 @@ func main() {
 	var cacheTTL time.Duration
 	var cacheCleanupInterval time.Duration
 	var clusterID string
+	var vpcID string
 	flag.StringVar(&metricsAddr, "metrics-bind-address", "0", "The address the metrics endpoint binds to. "+
 		"Use :8443 for HTTPS or :8080 for HTTP, or leave as 0 to disable the metrics service.")
 	flag.StringVar(&probeAddr, "health-probe-bind-address", ":8081", "The address the probe endpoint binds to.")
@@ -102,7 +103,8 @@ func main() {
 	flag.DurationVar(&cacheCleanupInterval, "cache-cleanup-interval", time.Minute,
 		"The interval at which expired cache entries are removed. "+
 			"A shorter interval ensures frequent cleanup but may impact performance.")
-	flag.StringVar(&clusterID, "cluster-id", "", "A required unique identifier used to track ownership of cloud resources.")
+	flag.StringVar(&clusterID, "cluster-id", "unset", "A required unique identifier used to track ownership of cloud resources.")
+	flag.StringVar(&vpcID, "vpc-id", "", "The VPC ID to use. If not set, the VPC ID will be retrieved from the instance metadata.")
 	opts := zap.Options{}
 	opts.BindFlags(flag.CommandLine)
 	flag.Parse()
@@ -165,7 +167,14 @@ func main() {
 	switch cloudProvider {
 	case providerAWS:
 		var err error
-		pvd, err = aws.NewProvider(cacheTTL, cacheCleanupInterval, clusterID)
+		if vpcID == "" {
+			if vpcID, err = aws.RetrieveVPCID(); err != nil {
+				setupLog.Error(err, "Failed to retrieve VPC ID")
+				os.Exit(1)
+			}
+		}
+
+		pvd, err = aws.NewProvider(cacheTTL, cacheCleanupInterval, clusterID, vpcID)
 		if err != nil {
 			setupLog.Error(err, "Failed to initialize provider")
 			os.Exit(1)

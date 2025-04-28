@@ -6,7 +6,10 @@
 cloudProvider: aws
 
 # -- The cluster ID to be used for the kubestatic deployment.
-clusterID: ""
+clusterId: ""
+
+# -- The VPC ID of the instance kubestatic is deployed in.
+vpcId: ""
 
 # -- Prevent EIP deallocation on nodes auto-assigned ExternalIPs.
 preventEIPDeallocation: false

@@ -65,7 +65,8 @@ helm install kubestatic kubestatic/kubestatic -n kubestatic-system
 | Key | Type | Default | Description |
 |-----|------|---------|-------------|
 | cloudProvider | string | `"aws"` | The desired cloud provider (only AWS at the moment). |
-| clusterID | string | `""` | The cluster ID to be used for the kubestatic deployment. |
+| clusterId | string | `""` | The cluster ID to be used for the kubestatic deployment. |
+| vpcId | string | `""` | The VPC ID of the instance kubestatic is deployed in. |
 | preventEIPDeallocation | bool | `false` | Prevent EIP deallocation on nodes auto-assigned ExternalIPs. |
 | nodeMinReconciliationInterval | string | `"10s"` | The minimum duration to wait between two reconciliations for the same node. |
 | nodeReconciliationRequeueInterval | string | `"1m"` | The duration for which nodes are automatically reconciled. |
