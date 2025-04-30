@@ -22,7 +22,7 @@ SHELL = /usr/bin/env bash -o pipefail
 .SHELLFLAGS = -ec
 
 .PHONY: all
-all: build doc charts
+all: build mocks doc charts
 
 ##@ General
 
@@ -59,8 +59,13 @@ fmt: ## Run go fmt against code.
 vet: ## Run go vet against code.
 	go vet ./...
 
+.PHONY: mocks
+mocks: mockgen ## Generate all mocks used for testing
+	@mkdir -p internal/provider/aws/mocks
+	@$(MOCKGEN) -source=internal/provider/aws/ec2_client.go -package=mocks -destination=internal/provider/aws/mocks/zz_generated.ec2_client.go
+
 .PHONY: test
-test: manifests generate fmt vet envtest ## Run tests.
+test: mocks manifests generate fmt vet envtest ## Run tests.
 	KUBEBUILDER_ASSETS="$(shell $(ENVTEST) use $(ENVTEST_K8S_VERSION) --bin-dir $(LOCALBIN) -p path)" go test $$(go list ./... | grep -v /e2e) -coverprofile cover.out
 
 # Utilize Kind or modify the e2e tests to load the image locally, enabling compatibility with other vendors.
@@ -182,6 +187,7 @@ CRD_REF_DOCS ?= $(LOCALBIN)/crd-ref-docs
 GOLANGCI_LINT?= $(LOCALBIN)/golangci-lint
 YQ ?= $(LOCALBIN)/yq
 HELM_DOCS ?= $(LOCALBIN)/helm-docs
+MOCKGEN ?= $(LOCALBIN)/mockgen
 
 ## Tool Versions
 KUSTOMIZE_VERSION ?= v5.4.3
@@ -191,6 +197,7 @@ GOLANGCI_LINT_VERSION ?= v2.0.2
 CRD_REF_DOCS_VERSION ?= v0.1.0
 YQ_VERSION ?= v4.44.3
 HELM_DOCS_VERSION ?= v1.14.2
+MOCKGEN_VERSION ?= v0.5.1
 
 .PHONY: kustomize
 kustomize: $(KUSTOMIZE) ## Download kustomize locally if necessary.
@@ -226,6 +233,11 @@ $(YQ): $(LOCALBIN)
 helm-docs: $(HELM_DOCS) ## Download helm-docs locally if necessary.
 $(HELM_DOCS): $(LOCALBIN)
 	$(call go-install-tool,$(HELM_DOCS),github.com/norwoodj/helm-docs/cmd/helm-docs,${HELM_DOCS_VERSION})
+
+.PHONY: mockgen
+mockgen: $(MOCKGEN) ## Download mockgen if necessary.
+$(MOCKGEN): $(LOCALBIN)
+	$(call go-install-tool,$(MOCKGEN),go.uber.org/mock/mockgen,$(MOCKGEN_VERSION))
 
 # go-install-tool will 'go install' any package with custom target and name of binary, if it doesn't exist
 # $1 - target path with name of binary
