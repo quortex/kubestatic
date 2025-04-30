@@ -83,7 +83,10 @@ var _ = Describe("AWSProvider", func() {
 				})
 
 			err := p.ReconcileFirewallRulesDeletion(ctx, log, nodeName, "")
-			Expect(err).To(HaveOccurred())
+			Expect(err).To(MatchError(&provider.Error{
+				Code: "InternalError",
+				Msg:  "failed to list security groups: describe security groups error",
+			}))
 		})
 
 		It("should return nil when the security group is not found", func() {
@@ -126,7 +129,10 @@ var _ = Describe("AWSProvider", func() {
 				})
 
 			err := p.ReconcileFirewallRulesDeletion(ctx, log, nodeName, "")
-			Expect(err).To(HaveOccurred())
+			Expect(err).To(MatchError(&provider.Error{
+				Code: "InternalError",
+				Msg:  "failed to list network interfaces: describe network interfaces error",
+			}))
 		})
 
 		It("should return an error when an AWS API call (ModifyNetworkInterfaceAttribute) fails", func() {
@@ -213,7 +219,10 @@ var _ = Describe("AWSProvider", func() {
 				}).Times(2)
 
 			err := p.ReconcileFirewallRulesDeletion(ctx, log, nodeName, "")
-			Expect(err).To(HaveOccurred())
+			Expect(err).To(MatchError(&provider.Error{
+				Code: "InternalError",
+				Msg:  "failed to modify network interface attribute: modify network interface attribute error",
+			}))
 		})
 
 		It("should return an error when an AWS API call (DeleteSecurityGroup) fails", func() {
@@ -307,7 +316,10 @@ var _ = Describe("AWSProvider", func() {
 				})
 
 			err := p.ReconcileFirewallRulesDeletion(ctx, log, nodeName, "")
-			Expect(err).To(HaveOccurred())
+			Expect(err).To(MatchError(&provider.Error{
+				Code: "InternalError",
+				Msg:  "failed to delete security group: delete security group error",
+			}))
 		})
 
 		It("should return nil when no aws api call returns an error", func() {
@@ -457,7 +469,10 @@ var _ = Describe("AWSProvider", func() {
 				})
 
 			err := p.ReconcileExternalIPDeletion(ctx, log, externalIP)
-			Expect(err).To(HaveOccurred())
+			Expect(err).To(MatchError(&provider.Error{
+				Code: "InternalError",
+				Msg:  "failed to list addresses: describe addresses error",
+			}))
 		})
 
 		It("should return nil when the address is not found", func() {
@@ -496,7 +511,10 @@ var _ = Describe("AWSProvider", func() {
 				})
 
 			err := p.ReconcileExternalIPDeletion(ctx, log, externalIP)
-			Expect(err).To(HaveOccurred())
+			Expect(err).To(MatchError(&provider.Error{
+				Code: "InternalError",
+				Msg:  "failed to disassociate address: disassociate address error",
+			}))
 		})
 
 		It("should return an error when an AWS API call (ReleaseAddress) fails", func() {
@@ -527,7 +545,10 @@ var _ = Describe("AWSProvider", func() {
 				})
 
 			err := p.ReconcileExternalIPDeletion(ctx, log, externalIP)
-			Expect(err).To(HaveOccurred())
+			Expect(err).To(MatchError(&provider.Error{
+				Code: "InternalError",
+				Msg:  "failed to delete address: release address error",
+			}))
 		})
 
 		It("should return nil when no aws api call returns an error", func() {
@@ -646,7 +667,10 @@ var _ = Describe("AWSProvider", func() {
 							Reason: v1alpha1.FirewallRuleConditionReasonProviderError,
 						}, "LastTransitionTime", "ObservedGeneration", "Message")),
 				}))
-				Expect(err).To(HaveOccurred())
+				Expect(err).To(MatchError(&provider.Error{
+					Code: "InternalError",
+					Msg:  "failed to list addresses: describe addresses error",
+				}))
 			})
 
 			It("should return a pending state, specify in the condition when the maximum address is reached and an error when an AWS API call (AllocateAddress) fails", func() {
@@ -683,7 +707,10 @@ var _ = Describe("AWSProvider", func() {
 						}, "LastTransitionTime", "ObservedGeneration")),
 				}))
 
-				Expect(err).To(HaveOccurred())
+				Expect(err).To(MatchError(&provider.Error{
+					Code: "AddressLimitExceeded",
+					Msg:  "failed to create address: api error AddressLimitExceeded: Too many addresses allocated",
+				}))
 			})
 
 			It("should return a pending state and an error when an AWS API call (AllocateAddress) fails", func() {
@@ -715,7 +742,10 @@ var _ = Describe("AWSProvider", func() {
 						}, "LastTransitionTime", "ObservedGeneration", "Message")),
 				}))
 
-				Expect(err).To(HaveOccurred())
+				Expect(err).To(MatchError(&provider.Error{
+					Code: "InternalError",
+					Msg:  "failed to create address: allocate address error",
+				}))
 			})
 
 			It("should return a pending state and an error when an AWS API call (DescribeAddresses after address creation) fails", func() {
@@ -764,7 +794,10 @@ var _ = Describe("AWSProvider", func() {
 					}, "LastTransitionTime", "ObservedGeneration", "Message")),
 				}))
 
-				Expect(err).To(HaveOccurred())
+				Expect(err).To(MatchError(&provider.Error{
+					Code: "InternalError",
+					Msg:  "failed to list addresses: describe addresses error",
+				}))
 			})
 
 			When("the address is not associated to any instance", func() {
@@ -899,7 +932,10 @@ var _ = Describe("AWSProvider", func() {
 							},
 						}, "LastTransitionTime", "ObservedGeneration", "Message")),
 					}))
-					Expect(err).To(HaveOccurred())
+					Expect(err).To(MatchError(&provider.Error{
+						Code: "InternalError",
+						Msg:  "failed to disassociate address: disassociate address error",
+					}))
 				})
 
 				It("should return a reserved state and specify IPCreation and NetworkInterfaceAssociation condition", func() {
@@ -998,7 +1034,10 @@ var _ = Describe("AWSProvider", func() {
 							Reason: v1alpha1.ExternalIPConditionReasonProviderError,
 						}, "LastTransitionTime", "ObservedGeneration", "Message")),
 				}))
-				Expect(err).To(HaveOccurred())
+				Expect(err).To(MatchError(&provider.Error{
+					Code: "InternalError",
+					Msg:  "failed to list addresses: describe addresses error",
+				}))
 			})
 
 			It("should return a reserved state and an error when an AWS API call (DescribeInstances) fails", func() {
@@ -1032,7 +1071,10 @@ var _ = Describe("AWSProvider", func() {
 							Reason: v1alpha1.ExternalIPConditionReasonIPCreated,
 						}, "LastTransitionTime", "ObservedGeneration", "Message")),
 				}))
-				Expect(err).To(HaveOccurred())
+				Expect(err).To(MatchError(&provider.Error{
+					Code: "InternalError",
+					Msg:  "failed to get instance: describe instances error",
+				}))
 			})
 
 			It("should return a reserved state and an error when no instance is found with API call (DescribeInstances)", func() {
@@ -1069,7 +1111,10 @@ var _ = Describe("AWSProvider", func() {
 						},
 					}, "LastTransitionTime", "ObservedGeneration", "Message")),
 				}))
-				Expect(err).To(HaveOccurred())
+				Expect(err).To(MatchError(&provider.Error{
+					Code: "NotFoundError",
+					Msg:  fmt.Sprintf("failed to get instance: instance with instance-id %s not found", instanceID),
+				}))
 			})
 
 			It("should return a reserved state and an error when the instance has no ENI with public IP", func() {
@@ -1126,7 +1171,7 @@ var _ = Describe("AWSProvider", func() {
 						},
 					}, "LastTransitionTime", "ObservedGeneration", "Message")),
 				}))
-				Expect(err).To(HaveOccurred())
+				Expect(err).To(MatchError(ContainSubstring("no network interface with public IP found")))
 			})
 
 			It("should return a reserved state and an error when the instance has no ENI with public IP", func() {
@@ -1183,7 +1228,7 @@ var _ = Describe("AWSProvider", func() {
 						},
 					}, "LastTransitionTime", "ObservedGeneration", "Message")),
 				}))
-				Expect(err).To(HaveOccurred())
+				Expect(err).To(MatchError(ContainSubstring("no network interface with public IP found")))
 			})
 
 			When("the address has a network interface associated", func() {
@@ -1313,7 +1358,10 @@ var _ = Describe("AWSProvider", func() {
 							},
 						}, "LastTransitionTime", "ObservedGeneration", "Message")),
 					}))
-					Expect(err).To(HaveOccurred())
+					Expect(err).To(MatchError(&provider.Error{
+						Code: "InternalError",
+						Msg:  "failed to disassociate address: disassociate address error",
+					}))
 				})
 
 				It("should return an associate state when no AWS API call fails", func() {
@@ -1454,7 +1502,10 @@ var _ = Describe("AWSProvider", func() {
 						},
 					}, "LastTransitionTime", "ObservedGeneration", "Message")),
 				}))
-				Expect(err).To(HaveOccurred())
+				Expect(err).To(MatchError(&provider.Error{
+					Code: "InternalError",
+					Msg:  "failed to associate address: associate address error",
+				}))
 			})
 
 			It("should return an associate state when no AWS API call fails", func() {
@@ -1637,7 +1688,10 @@ var _ = Describe("AWSProvider", func() {
 				"State":      Equal(v1alpha1.FirewallRuleStatePending),
 				"Conditions": BeNil(),
 			}))
-			Expect(err).To(HaveOccurred())
+			Expect(err).To(MatchError(&provider.Error{
+				Code: "InternalError",
+				Msg:  "failed to get instance: describe instance error",
+			}))
 		})
 
 		It("should return a pending state and an error when the instance is not found", func() {
@@ -1655,7 +1709,10 @@ var _ = Describe("AWSProvider", func() {
 				"State":      Equal(v1alpha1.FirewallRuleStatePending),
 				"Conditions": BeNil(),
 			}))
-			Expect(err).To(HaveOccurred())
+			Expect(err).To(MatchError(&provider.Error{
+				Code: "NotFoundError",
+				Msg:  fmt.Sprintf("failed to get instance: instance with instance-id %s not found", instanceID),
+			}))
 		})
 
 		It("should return a pending state and an error when an AWS API call (DescribeSecurityGroups) fails", func() {
@@ -1689,7 +1746,7 @@ var _ = Describe("AWSProvider", func() {
 				DescribeSecurityGroups(ctx, gomock.AssignableToTypeOf(&ec2.DescribeSecurityGroupsInput{})).
 				DoAndReturn(func(_ context.Context, input *ec2.DescribeSecurityGroupsInput, _ ...func(*ec2.Options)) (*ec2.DescribeSecurityGroupsOutput, error) {
 					Expect(input.Filters).To(ConsistOf(filters))
-					return &ec2.DescribeSecurityGroupsOutput{}, fmt.Errorf("describe addresses error")
+					return &ec2.DescribeSecurityGroupsOutput{}, fmt.Errorf("describe security groups error")
 				})
 
 			status, err := p.ReconcileFirewallRule(ctx, log, nodeName, instanceID, firewallRule, firewallrules)
@@ -1702,7 +1759,10 @@ var _ = Describe("AWSProvider", func() {
 						Reason: v1alpha1.FirewallRuleConditionReasonProviderError,
 					}, "LastTransitionTime", "ObservedGeneration", "Message")),
 			}))
-			Expect(err).To(HaveOccurred())
+			Expect(err).To(MatchError(&provider.Error{
+				Code: "InternalError",
+				Msg:  "failed to list security groups: describe security groups error",
+			}))
 		})
 
 		When("the security group is not found", func() {
@@ -1801,7 +1861,10 @@ var _ = Describe("AWSProvider", func() {
 							Reason: v1alpha1.FirewallRuleConditionReasonProviderError,
 						}, "LastTransitionTime", "ObservedGeneration", "Message")),
 				}))
-				Expect(err).To(HaveOccurred())
+				Expect(err).To(MatchError(&provider.Error{
+					Code: "InternalError",
+					Msg:  "failed to create security group: create security group error",
+				}))
 			})
 
 			It("should return a pending state and an error when an AWS API call (DescribeSecurityGroups after security group creation) fails", func() {
@@ -1838,7 +1901,7 @@ var _ = Describe("AWSProvider", func() {
 						case 4:
 							Expect(input.Filters).To(ConsistOf(filters))
 							return &ec2.DescribeSecurityGroupsOutput{}, nil
-						case 6:
+						case 5:
 							Expect(input.Filters).To(ConsistOf(
 								append(
 									filters,
@@ -1880,7 +1943,10 @@ var _ = Describe("AWSProvider", func() {
 						},
 					}, "LastTransitionTime", "ObservedGeneration", "Message")),
 				}))
-				Expect(err).To(HaveOccurred())
+				Expect(err).To(MatchError(&provider.Error{
+					Code: "InternalError",
+					Msg:  "failed to list security groups: describe security groups error",
+				}))
 			})
 		})
 
@@ -1939,7 +2005,7 @@ var _ = Describe("AWSProvider", func() {
 					},
 				}, "LastTransitionTime", "ObservedGeneration", "Message")),
 			}))
-			Expect(err).To(HaveOccurred())
+			Expect(err).To(MatchError(ContainSubstring("no network interface with public IP found")))
 		})
 
 		It("should return a pending state and an error when an AWS API call (DescribeNetworkInterfaces) fails", func() {
@@ -2009,7 +2075,10 @@ var _ = Describe("AWSProvider", func() {
 					},
 				}, "LastTransitionTime", "ObservedGeneration", "Message")),
 			}))
-			Expect(err).To(HaveOccurred())
+			Expect(err).To(MatchError(&provider.Error{
+				Code: "InternalError",
+				Msg:  "failed to list network interfaces: describe network interfaces error",
+			}))
 		})
 
 		It("should return a pending state and an error when an AWS API call (DescribeNetworkInterfaces) fails", func() {
@@ -2079,7 +2148,10 @@ var _ = Describe("AWSProvider", func() {
 					},
 				}, "LastTransitionTime", "ObservedGeneration", "Message")),
 			}))
-			Expect(err).To(HaveOccurred())
+			Expect(err).To(MatchError(&provider.Error{
+				Code: "InternalError",
+				Msg:  "failed to list network interfaces: describe network interfaces error",
+			}))
 		})
 
 		When("the instance's networkInterfaces is not empty and an ENI is already associated with the security group", func() {
@@ -2199,7 +2271,10 @@ var _ = Describe("AWSProvider", func() {
 						},
 					}, "LastTransitionTime", "ObservedGeneration", "Message")),
 				}))
-				Expect(err).To(HaveOccurred())
+				Expect(err).To(MatchError(&provider.Error{
+					Code: "InternalError",
+					Msg:  "failed to modify network interface attribute: modify network interface attribute error",
+				}))
 			})
 		})
 
@@ -2286,7 +2361,10 @@ var _ = Describe("AWSProvider", func() {
 						},
 					}, "LastTransitionTime", "ObservedGeneration", "Message")),
 				}))
-				Expect(err).To(HaveOccurred())
+				Expect(err).To(MatchError(&provider.Error{
+					Code: "InternalError",
+					Msg:  "failed to modify network interface attribute: modify network interface attribute error",
+				}))
 			})
 
 			It("should return a pending state and an error when an AWS API call (revokeSecurityGroupIngress) fails", func() {
@@ -2392,7 +2470,10 @@ var _ = Describe("AWSProvider", func() {
 						},
 					}, "LastTransitionTime", "ObservedGeneration", "Message")),
 				}))
-				Expect(err).To(HaveOccurred())
+				Expect(err).To(MatchError(&provider.Error{
+					Code: "InternalError",
+					Msg:  "failed to revoke security group ingress permission: revoke security group ingress error",
+				}))
 			})
 
 			It("should return a pending state and an error when an AWS API call (revokeSecurityGroupEgress) fails", func() {
@@ -2519,7 +2600,10 @@ var _ = Describe("AWSProvider", func() {
 						},
 					}, "LastTransitionTime", "ObservedGeneration", "Message")),
 				}))
-				Expect(err).To(HaveOccurred())
+				Expect(err).To(MatchError(&provider.Error{
+					Code: "InternalError",
+					Msg:  "failed to revoke security group egress permission: revoke security group egress error",
+				}))
 			})
 		})
 
@@ -2647,7 +2731,10 @@ var _ = Describe("AWSProvider", func() {
 							},
 						}, "LastTransitionTime", "ObservedGeneration", "Message")),
 					}))
-					Expect(err).To(HaveOccurred())
+					Expect(err).To(MatchError(&provider.Error{
+						Code: "InternalError",
+						Msg:  "failed to list security groups: describe security groups error",
+					}))
 				})
 			})
 
@@ -2775,7 +2862,10 @@ var _ = Describe("AWSProvider", func() {
 							},
 						}, "LastTransitionTime", "ObservedGeneration", "Message")),
 					}))
-					Expect(err).To(HaveOccurred())
+					Expect(err).To(MatchError(&provider.Error{
+						Code: "InternalError",
+						Msg:  "failed to revoke security group ingress permission: revoke security group ingress error",
+					}))
 				})
 			})
 
@@ -2909,7 +2999,10 @@ var _ = Describe("AWSProvider", func() {
 							},
 						}, "LastTransitionTime", "ObservedGeneration", "Message")),
 					}))
-					Expect(err).To(HaveOccurred())
+					Expect(err).To(MatchError(&provider.Error{
+						Code: "InternalError",
+						Msg:  "failed to revoke security group ingress permission: revoke security group ingress error",
+					}))
 				})
 			})
 
@@ -3036,7 +3129,10 @@ var _ = Describe("AWSProvider", func() {
 							},
 						}, "LastTransitionTime", "ObservedGeneration", "Message")),
 					}))
-					Expect(err).To(HaveOccurred())
+					Expect(err).To(MatchError(&provider.Error{
+						Code: "InternalError",
+						Msg:  "failed to list security groups: describe security groups error",
+					}))
 				})
 			})
 
@@ -3169,7 +3265,10 @@ var _ = Describe("AWSProvider", func() {
 							},
 						}, "LastTransitionTime", "ObservedGeneration", "Message")),
 					}))
-					Expect(err).To(HaveOccurred())
+					Expect(err).To(MatchError(&provider.Error{
+						Code: "InternalError",
+						Msg:  "failed to revoke security group egress permission: revoke security group egress error",
+					}))
 				})
 			})
 
@@ -3303,7 +3402,10 @@ var _ = Describe("AWSProvider", func() {
 							},
 						}, "LastTransitionTime", "ObservedGeneration", "Message")),
 					}))
-					Expect(err).To(HaveOccurred())
+					Expect(err).To(MatchError(&provider.Error{
+						Code: "InternalError",
+						Msg:  "failed to revoke security group egress permission: revoke security group Egress error",
+					}))
 				})
 			})
 
@@ -3558,7 +3660,10 @@ var _ = Describe("AWSProvider", func() {
 						},
 					}, "LastTransitionTime", "ObservedGeneration", "Message")),
 				}))
-				Expect(err).To(HaveOccurred())
+				Expect(err).To(MatchError(&provider.Error{
+					Code: "RulesPerSecurityGroupLimitExceeded",
+					Msg:  "failed to authorize security group ingress permission: api error RulesPerSecurityGroupLimitExceeded: Too many rules added to the security group",
+				}))
 			})
 
 			It("should return a pending state and an error when an AWS API call (AuthorizeSecurityGroupIngress) fails", func() {
@@ -3680,7 +3785,10 @@ var _ = Describe("AWSProvider", func() {
 						},
 					}, "LastTransitionTime", "ObservedGeneration", "Message")),
 				}))
-				Expect(err).To(HaveOccurred())
+				Expect(err).To(MatchError(&provider.Error{
+					Code: "InternalError",
+					Msg:  "failed to authorize security group ingress permission: authorize security group ingress error",
+				}))
 			})
 		})
 
@@ -3812,7 +3920,10 @@ var _ = Describe("AWSProvider", func() {
 						},
 					}, "LastTransitionTime", "ObservedGeneration", "Message")),
 				}))
-				Expect(err).To(HaveOccurred())
+				Expect(err).To(MatchError(&provider.Error{
+					Code: "RulesPerSecurityGroupLimitExceeded",
+					Msg:  "failed to authorize security group egress permission: api error RulesPerSecurityGroupLimitExceeded: Too many rules added to the security group",
+				}))
 			})
 
 			It("should return a pending state and an error when an AWS API call (AuthorizeSecurityGroupEgress) fails", func() {
@@ -3934,7 +4045,10 @@ var _ = Describe("AWSProvider", func() {
 						},
 					}, "LastTransitionTime", "ObservedGeneration", "Message")),
 				}))
-				Expect(err).To(HaveOccurred())
+				Expect(err).To(MatchError(&provider.Error{
+					Code: "InternalError",
+					Msg:  "failed to authorize security group egress permission: authorize security group egress error",
+				}))
 			})
 		})
 
