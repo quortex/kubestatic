@@ -821,7 +821,8 @@ var _ = Describe("AWSProvider", func() {
 									types.Filter{
 										Name:   aws.String("allocation-id"),
 										Values: []string{allocationID},
-									}),
+									},
+								),
 							))
 							return &ec2.DescribeAddressesOutput{
 								Addresses: []types.Address{
