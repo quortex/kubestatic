@@ -190,11 +190,11 @@ func NewProvider(defaultTTL, defaultCleanupInterval time.Duration, clusterID, vp
 		o.MeterProvider = smithyotelmetrics.Adapt(meterProvider)
 	})
 
-	return NewProviderWithClient(ec2Client, defaultTTL, defaultCleanupInterval, clusterID, vpcID), nil
+	return newProviderWithClient(ec2Client, defaultTTL, defaultCleanupInterval, clusterID, vpcID), nil
 }
 
 // NewProviderWithClient instantiate a Provider implementation for AWS with a custom EC2 client
-func NewProviderWithClient(ec2Client ec2Client, defaultTTL, defaultCleanupInterval time.Duration, clusterID, vpcID string) provider.Provider {
+func newProviderWithClient(ec2Client ec2Client, defaultTTL, defaultCleanupInterval time.Duration, clusterID, vpcID string) provider.Provider {
 	return &awsProvider{
 		clusterID:              clusterID,
 		vpcID:                  vpcID,

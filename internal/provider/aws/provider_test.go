@@ -35,13 +35,14 @@ var _ = Describe("AWSProvider", func() {
 	ctx := context.Background()
 	log := logf.Log.WithName("aws-provider-test")
 	clusterID = "cluster-id"
+	vpcID := "vpc-id"
 
 	BeforeEach(func() {
 		mockCtrl = gomock.NewController(GinkgoT())
 		mockec2Client = mocks.NewMockec2Client(mockCtrl)
 
 		// Inject the mock EC2 into the provider
-		p = newProviderWithClient(mockec2Client, 5*time.Minute, 10*time.Minute, clusterID)
+		p = newProviderWithClient(mockec2Client, 5*time.Minute, 10*time.Minute, clusterID, vpcID)
 	})
 
 	AfterEach(func() {
@@ -66,6 +67,10 @@ var _ = Describe("AWSProvider", func() {
 				{
 					Name:   aws.String(fmt.Sprintf("tag:%s", TagKeyClusterID)),
 					Values: []string{clusterID},
+				},
+				{
+					Name:   aws.String("vpc-id"),
+					Values: []string{vpcID},
 				},
 				{
 					Name:   aws.String(fmt.Sprintf("tag:%s", TagKeyManaged)),
@@ -152,9 +157,10 @@ var _ = Describe("AWSProvider", func() {
 			mockec2Client.EXPECT().
 				DescribeNetworkInterfaces(ctx, gomock.AssignableToTypeOf(&ec2.DescribeNetworkInterfacesInput{})).
 				DoAndReturn(func(_ context.Context, input *ec2.DescribeNetworkInterfacesInput, _ ...func(*ec2.Options)) (*ec2.DescribeNetworkInterfacesOutput, error) {
-					Expect(input.Filters).To(HaveLen(1))
-					Expect(aws.ToString(input.Filters[0].Name)).To(Equal("group-id"))
-					Expect(input.Filters[0].Values).To(ConsistOf(groupID))
+					Expect(input.Filters).To(ConsistOf(MatchFields(IgnoreExtras, Fields{
+						"Name":   PointTo(Equal("group-id")),
+						"Values": ConsistOf(groupID),
+					})))
 					return &ec2.DescribeNetworkInterfacesOutput{
 						NetworkInterfaces: []types.NetworkInterface{
 							{
@@ -206,17 +212,17 @@ var _ = Describe("AWSProvider", func() {
 			mockec2Client.EXPECT().
 				ModifyNetworkInterfaceAttribute(ctx, gomock.AssignableToTypeOf(&ec2.ModifyNetworkInterfaceAttributeInput{})).
 				DoAndReturn(func(_ context.Context, input *ec2.ModifyNetworkInterfaceAttributeInput, _ ...func(*ec2.Options)) (*ec2.ModifyNetworkInterfaceAttributeOutput, error) {
-					switch aws.ToString(input.NetworkInterfaceId) {
-					case eniID:
-						Expect(input.Groups).To(ConsistOf("sg-01", "sg-02"))
-						return &ec2.ModifyNetworkInterfaceAttributeOutput{}, nil
-					case eni01ID:
-						Expect(input.Groups).To(ConsistOf("sg-01", "sg-02"))
-						return &ec2.ModifyNetworkInterfaceAttributeOutput{}, fmt.Errorf("modify network interface attribute error")
-					default:
-						return nil, fmt.Errorf("unexpected interface ID: %s", aws.ToString(input.NetworkInterfaceId))
-					}
-				}).Times(2)
+					Expect(input.NetworkInterfaceId).To(PointTo(Equal(eniID)))
+					Expect(input.Groups).To(ConsistOf("sg-01", "sg-02"))
+					return &ec2.ModifyNetworkInterfaceAttributeOutput{}, nil
+				})
+			mockec2Client.EXPECT().
+				ModifyNetworkInterfaceAttribute(ctx, gomock.AssignableToTypeOf(&ec2.ModifyNetworkInterfaceAttributeInput{})).
+				DoAndReturn(func(_ context.Context, input *ec2.ModifyNetworkInterfaceAttributeInput, _ ...func(*ec2.Options)) (*ec2.ModifyNetworkInterfaceAttributeOutput, error) {
+					Expect(input.NetworkInterfaceId).To(PointTo(Equal(eni01ID)))
+					Expect(input.Groups).To(ConsistOf("sg-01", "sg-02"))
+					return &ec2.ModifyNetworkInterfaceAttributeOutput{}, fmt.Errorf("modify network interface attribute error")
+				})
 
 			err := p.ReconcileFirewallRulesDeletion(ctx, log, nodeName, "")
 			Expect(err).To(MatchError(&provider.Error{
@@ -242,9 +248,10 @@ var _ = Describe("AWSProvider", func() {
 			mockec2Client.EXPECT().
 				DescribeNetworkInterfaces(ctx, gomock.AssignableToTypeOf(&ec2.DescribeNetworkInterfacesInput{})).
 				DoAndReturn(func(_ context.Context, input *ec2.DescribeNetworkInterfacesInput, _ ...func(*ec2.Options)) (*ec2.DescribeNetworkInterfacesOutput, error) {
-					Expect(input.Filters).To(HaveLen(1))
-					Expect(aws.ToString(input.Filters[0].Name)).To(Equal("group-id"))
-					Expect(input.Filters[0].Values).To(ConsistOf(groupID))
+					Expect(input.Filters).To(ConsistOf(MatchFields(IgnoreExtras, Fields{
+						"Name":   PointTo(Equal("group-id")),
+						"Values": ConsistOf(groupID),
+					})))
 					return &ec2.DescribeNetworkInterfacesOutput{
 						NetworkInterfaces: []types.NetworkInterface{
 							{
@@ -296,22 +303,21 @@ var _ = Describe("AWSProvider", func() {
 			mockec2Client.EXPECT().
 				ModifyNetworkInterfaceAttribute(ctx, gomock.AssignableToTypeOf(&ec2.ModifyNetworkInterfaceAttributeInput{})).
 				DoAndReturn(func(_ context.Context, input *ec2.ModifyNetworkInterfaceAttributeInput, _ ...func(*ec2.Options)) (*ec2.ModifyNetworkInterfaceAttributeOutput, error) {
-					switch aws.ToString(input.NetworkInterfaceId) {
-					case eniID:
-						Expect(input.Groups).To(ConsistOf("sg-01", "sg-02"))
-						return &ec2.ModifyNetworkInterfaceAttributeOutput{}, nil
-					case eni01ID:
-						Expect(input.Groups).To(ConsistOf("sg-01", "sg-02"))
-						return &ec2.ModifyNetworkInterfaceAttributeOutput{}, nil
-					default:
-						return nil, fmt.Errorf("unexpected interface ID: %s", aws.ToString(input.NetworkInterfaceId))
-					}
-				}).
-				Times(2)
+					Expect(input.NetworkInterfaceId).To(PointTo(Equal(eniID)))
+					Expect(input.Groups).To(ConsistOf("sg-01", "sg-02"))
+					return &ec2.ModifyNetworkInterfaceAttributeOutput{}, nil
+				})
+			mockec2Client.EXPECT().
+				ModifyNetworkInterfaceAttribute(ctx, gomock.AssignableToTypeOf(&ec2.ModifyNetworkInterfaceAttributeInput{})).
+				DoAndReturn(func(_ context.Context, input *ec2.ModifyNetworkInterfaceAttributeInput, _ ...func(*ec2.Options)) (*ec2.ModifyNetworkInterfaceAttributeOutput, error) {
+					Expect(input.NetworkInterfaceId).To(PointTo(Equal(eni01ID)))
+					Expect(input.Groups).To(ConsistOf("sg-01", "sg-02"))
+					return &ec2.ModifyNetworkInterfaceAttributeOutput{}, nil
+				})
 			mockec2Client.EXPECT().
 				DeleteSecurityGroup(ctx, gomock.AssignableToTypeOf(&ec2.DeleteSecurityGroupInput{})).
 				DoAndReturn(func(_ context.Context, input *ec2.DeleteSecurityGroupInput, _ ...func(*ec2.Options)) (*ec2.DeleteSecurityGroupOutput, error) {
-					Expect(aws.ToString(input.GroupId)).To(Equal(groupID))
+					Expect(input.GroupId).To(PointTo(Equal(groupID)))
 					return &ec2.DeleteSecurityGroupOutput{}, fmt.Errorf("delete security group error")
 				})
 
@@ -339,9 +345,10 @@ var _ = Describe("AWSProvider", func() {
 			mockec2Client.EXPECT().
 				DescribeNetworkInterfaces(ctx, gomock.AssignableToTypeOf(&ec2.DescribeNetworkInterfacesInput{})).
 				DoAndReturn(func(_ context.Context, input *ec2.DescribeNetworkInterfacesInput, _ ...func(*ec2.Options)) (*ec2.DescribeNetworkInterfacesOutput, error) {
-					Expect(input.Filters).To(HaveLen(1))
-					Expect(aws.ToString(input.Filters[0].Name)).To(Equal("group-id"))
-					Expect(input.Filters[0].Values).To(ConsistOf(groupID))
+					Expect(input.Filters).To(ConsistOf(MatchFields(IgnoreExtras, Fields{
+						"Name":   PointTo(Equal("group-id")),
+						"Values": ConsistOf(groupID),
+					})))
 					return &ec2.DescribeNetworkInterfacesOutput{
 						NetworkInterfaces: []types.NetworkInterface{
 							{
@@ -392,22 +399,21 @@ var _ = Describe("AWSProvider", func() {
 			mockec2Client.EXPECT().
 				ModifyNetworkInterfaceAttribute(ctx, gomock.AssignableToTypeOf(&ec2.ModifyNetworkInterfaceAttributeInput{})).
 				DoAndReturn(func(_ context.Context, input *ec2.ModifyNetworkInterfaceAttributeInput, _ ...func(*ec2.Options)) (*ec2.ModifyNetworkInterfaceAttributeOutput, error) {
-					switch aws.ToString(input.NetworkInterfaceId) {
-					case eniID:
-						Expect(input.Groups).To(ConsistOf("sg-01", "sg-02"))
-						return &ec2.ModifyNetworkInterfaceAttributeOutput{}, nil
-					case eni01ID:
-						Expect(input.Groups).To(ConsistOf("sg-01", "sg-02"))
-						return &ec2.ModifyNetworkInterfaceAttributeOutput{}, nil
-					default:
-						return nil, fmt.Errorf("unexpected interface ID: %s", aws.ToString(input.NetworkInterfaceId))
-					}
-				}).
-				Times(2)
+					Expect(input.NetworkInterfaceId).To(PointTo(Equal(eniID)))
+					Expect(input.Groups).To(ConsistOf("sg-01", "sg-02"))
+					return &ec2.ModifyNetworkInterfaceAttributeOutput{}, nil
+				})
+			mockec2Client.EXPECT().
+				ModifyNetworkInterfaceAttribute(ctx, gomock.AssignableToTypeOf(&ec2.ModifyNetworkInterfaceAttributeInput{})).
+				DoAndReturn(func(_ context.Context, input *ec2.ModifyNetworkInterfaceAttributeInput, _ ...func(*ec2.Options)) (*ec2.ModifyNetworkInterfaceAttributeOutput, error) {
+					Expect(input.NetworkInterfaceId).To(PointTo(Equal(eni01ID)))
+					Expect(input.Groups).To(ConsistOf("sg-01", "sg-02"))
+					return &ec2.ModifyNetworkInterfaceAttributeOutput{}, nil
+				})
 			mockec2Client.EXPECT().
 				DeleteSecurityGroup(ctx, gomock.AssignableToTypeOf(&ec2.DeleteSecurityGroupInput{})).
 				DoAndReturn(func(_ context.Context, input *ec2.DeleteSecurityGroupInput, _ ...func(*ec2.Options)) (*ec2.DeleteSecurityGroupOutput, error) {
-					Expect(aws.ToString(input.GroupId)).To(Equal(groupID))
+					Expect(input.GroupId).To(PointTo(Equal(groupID)))
 					return &ec2.DeleteSecurityGroupOutput{}, nil
 				})
 
@@ -506,7 +512,7 @@ var _ = Describe("AWSProvider", func() {
 			mockec2Client.EXPECT().
 				DisassociateAddress(ctx, gomock.AssignableToTypeOf(&ec2.DisassociateAddressInput{})).
 				DoAndReturn(func(_ context.Context, input *ec2.DisassociateAddressInput, _ ...func(*ec2.Options)) (*ec2.DisassociateAddressOutput, error) {
-					Expect(aws.ToString(input.AssociationId)).To(Equal(associationID))
+					Expect(input.AssociationId).To(PointTo(Equal(associationID)))
 					return &ec2.DisassociateAddressOutput{}, fmt.Errorf("disassociate address error")
 				})
 
@@ -534,13 +540,13 @@ var _ = Describe("AWSProvider", func() {
 			mockec2Client.EXPECT().
 				DisassociateAddress(ctx, gomock.AssignableToTypeOf(&ec2.DisassociateAddressInput{})).
 				DoAndReturn(func(_ context.Context, input *ec2.DisassociateAddressInput, _ ...func(*ec2.Options)) (*ec2.DisassociateAddressOutput, error) {
-					Expect(aws.ToString(input.AssociationId)).To(Equal(associationID))
+					Expect(input.AssociationId).To(PointTo(Equal(associationID)))
 					return &ec2.DisassociateAddressOutput{}, nil
 				})
 			mockec2Client.EXPECT().
 				ReleaseAddress(ctx, gomock.AssignableToTypeOf(&ec2.ReleaseAddressInput{})).
 				DoAndReturn(func(_ context.Context, input *ec2.ReleaseAddressInput, _ ...func(*ec2.Options)) (*ec2.ReleaseAddressOutput, error) {
-					Expect(aws.ToString(input.AllocationId)).To(Equal(allocationID))
+					Expect(input.AllocationId).To(PointTo(Equal(allocationID)))
 					return &ec2.ReleaseAddressOutput{}, fmt.Errorf("release address error")
 				})
 
@@ -568,13 +574,13 @@ var _ = Describe("AWSProvider", func() {
 			mockec2Client.EXPECT().
 				DisassociateAddress(ctx, gomock.AssignableToTypeOf(&ec2.DisassociateAddressInput{})).
 				DoAndReturn(func(_ context.Context, input *ec2.DisassociateAddressInput, _ ...func(*ec2.Options)) (*ec2.DisassociateAddressOutput, error) {
-					Expect(aws.ToString(input.AssociationId)).To(Equal(associationID))
+					Expect(input.AssociationId).To(PointTo(Equal(associationID)))
 					return &ec2.DisassociateAddressOutput{}, nil
 				})
 			mockec2Client.EXPECT().
 				ReleaseAddress(ctx, gomock.AssignableToTypeOf(&ec2.ReleaseAddressInput{})).
 				DoAndReturn(func(_ context.Context, input *ec2.ReleaseAddressInput, _ ...func(*ec2.Options)) (*ec2.ReleaseAddressOutput, error) {
-					Expect(aws.ToString(input.AllocationId)).To(Equal(allocationID))
+					Expect(input.AllocationId).To(PointTo(Equal(allocationID)))
 					return &ec2.ReleaseAddressOutput{}, nil
 				})
 
@@ -752,25 +758,23 @@ var _ = Describe("AWSProvider", func() {
 				mockec2Client.EXPECT().
 					DescribeAddresses(ctx, gomock.AssignableToTypeOf(&ec2.DescribeAddressesInput{})).
 					DoAndReturn(func(_ context.Context, input *ec2.DescribeAddressesInput, _ ...func(*ec2.Options)) (*ec2.DescribeAddressesOutput, error) {
-						switch len(input.Filters) {
-						case 3:
-							Expect(input.Filters).To(ConsistOf(filters))
-							return &ec2.DescribeAddressesOutput{}, nil
-						case 4:
-							Expect(input.Filters).To(ConsistOf(
-								append(
-									filters,
-									types.Filter{
-										Name:   aws.String("allocation-id"),
-										Values: []string{allocationID},
-									},
-								),
-							))
-							return &ec2.DescribeAddressesOutput{}, fmt.Errorf("describe addresses error")
-						default:
-							return nil, fmt.Errorf("unexpected number of filter: %d", len(input.Filters))
-						}
-					}).Times(2)
+						Expect(input.Filters).To(ConsistOf(filters))
+						return &ec2.DescribeAddressesOutput{}, nil
+					})
+				mockec2Client.EXPECT().
+					DescribeAddresses(ctx, gomock.AssignableToTypeOf(&ec2.DescribeAddressesInput{})).
+					DoAndReturn(func(_ context.Context, input *ec2.DescribeAddressesInput, _ ...func(*ec2.Options)) (*ec2.DescribeAddressesOutput, error) {
+						Expect(input.Filters).To(ConsistOf(
+							append(
+								filters,
+								types.Filter{
+									Name:   aws.String("allocation-id"),
+									Values: []string{allocationID},
+								},
+							),
+						))
+						return &ec2.DescribeAddressesOutput{}, fmt.Errorf("describe addresses error")
+					})
 				mockec2Client.EXPECT().
 					AllocateAddress(ctx, gomock.AssignableToTypeOf(&ec2.AllocateAddressInput{})).
 					DoAndReturn(func(_ context.Context, input *ec2.AllocateAddressInput, _ ...func(*ec2.Options)) (*ec2.AllocateAddressOutput, error) {
@@ -805,30 +809,28 @@ var _ = Describe("AWSProvider", func() {
 					mockec2Client.EXPECT().
 						DescribeAddresses(ctx, gomock.AssignableToTypeOf(&ec2.DescribeAddressesInput{})).
 						DoAndReturn(func(_ context.Context, input *ec2.DescribeAddressesInput, _ ...func(*ec2.Options)) (*ec2.DescribeAddressesOutput, error) {
-							switch len(input.Filters) {
-							case 3:
-								Expect(input.Filters).To(ConsistOf(filters))
-								return &ec2.DescribeAddressesOutput{}, nil
-							case 4:
-								Expect(input.Filters).To(ConsistOf(
-									append(
-										filters,
-										types.Filter{
-											Name:   aws.String("allocation-id"),
-											Values: []string{allocationID},
-										}),
-								))
-								return &ec2.DescribeAddressesOutput{
-									Addresses: []types.Address{
-										{
-											AllocationId: aws.String(allocationID),
-										},
+							Expect(input.Filters).To(ConsistOf(filters))
+							return &ec2.DescribeAddressesOutput{}, nil
+						})
+					mockec2Client.EXPECT().
+						DescribeAddresses(ctx, gomock.AssignableToTypeOf(&ec2.DescribeAddressesInput{})).
+						DoAndReturn(func(_ context.Context, input *ec2.DescribeAddressesInput, _ ...func(*ec2.Options)) (*ec2.DescribeAddressesOutput, error) {
+							Expect(input.Filters).To(ConsistOf(
+								append(
+									filters,
+									types.Filter{
+										Name:   aws.String("allocation-id"),
+										Values: []string{allocationID},
+									}),
+							))
+							return &ec2.DescribeAddressesOutput{
+								Addresses: []types.Address{
+									{
+										AllocationId: aws.String(allocationID),
 									},
-								}, nil
-							default:
-								return nil, fmt.Errorf("unexpected number of filter: %d", len(input.Filters))
-							}
-						}).Times(2)
+								},
+							}, nil
+						})
 					mockec2Client.EXPECT().
 						AllocateAddress(ctx, gomock.AssignableToTypeOf(&ec2.AllocateAddressInput{})).
 						DoAndReturn(func(_ context.Context, input *ec2.AllocateAddressInput, _ ...func(*ec2.Options)) (*ec2.AllocateAddressOutput, error) {
@@ -869,42 +871,38 @@ var _ = Describe("AWSProvider", func() {
 					mockec2Client.EXPECT().
 						DescribeAddresses(ctx, gomock.AssignableToTypeOf(&ec2.DescribeAddressesInput{})).
 						DoAndReturn(func(_ context.Context, input *ec2.DescribeAddressesInput, _ ...func(*ec2.Options)) (*ec2.DescribeAddressesOutput, error) {
-							switch len(input.Filters) {
-							case 3:
-								Expect(input.Filters).To(ConsistOf(filters))
-								return &ec2.DescribeAddressesOutput{}, nil
-							case 4:
-								Expect(input.Filters).To(ConsistOf(
-									append(
-										filters,
-										types.Filter{
-											Name:   aws.String("allocation-id"),
-											Values: []string{allocationID},
-										},
-									),
-								))
-								return &ec2.DescribeAddressesOutput{
-									Addresses: []types.Address{
-										{
-											AllocationId:  aws.String(allocationID),
-											AssociationId: aws.String(associationID),
-										},
+							Expect(input.Filters).To(ConsistOf(filters))
+							return &ec2.DescribeAddressesOutput{}, nil
+						})
+					mockec2Client.EXPECT().
+						DescribeAddresses(ctx, gomock.AssignableToTypeOf(&ec2.DescribeAddressesInput{})).
+						DoAndReturn(func(_ context.Context, input *ec2.DescribeAddressesInput, _ ...func(*ec2.Options)) (*ec2.DescribeAddressesOutput, error) {
+							Expect(input.Filters).To(ConsistOf(
+								append(
+									filters,
+									types.Filter{
+										Name:   aws.String("allocation-id"),
+										Values: []string{allocationID},
 									},
-								}, nil
-							default:
-								return nil, fmt.Errorf("unexpected number of filter: %d", len(input.Filters))
-							}
-						}).Times(2)
+								),
+							))
+							return &ec2.DescribeAddressesOutput{
+								Addresses: []types.Address{
+									{
+										AllocationId:  aws.String(allocationID),
+										AssociationId: aws.String(associationID),
+									},
+								},
+							}, nil
+						})
 					mockec2Client.EXPECT().
 						AllocateAddress(ctx, gomock.AssignableToTypeOf(&ec2.AllocateAddressInput{})).
 						DoAndReturn(func(_ context.Context, input *ec2.AllocateAddressInput, _ ...func(*ec2.Options)) (*ec2.AllocateAddressOutput, error) {
 							Expect(input.Domain).To(Equal(types.DomainTypeVpc))
-							Expect(input.TagSpecifications).To(ConsistOf(
-								MatchFields(IgnoreExtras, Fields{
-									"ResourceType": Equal(types.ResourceTypeElasticIp),
-									"Tags":         ConsistOf(tags),
-								}),
-							))
+							Expect(input.TagSpecifications).To(ConsistOf(MatchFields(IgnoreExtras, Fields{
+								"ResourceType": Equal(types.ResourceTypeElasticIp),
+								"Tags":         ConsistOf(tags),
+							})))
 							return &ec2.AllocateAddressOutput{
 								AllocationId: aws.String(allocationID),
 							}, nil
@@ -912,7 +910,7 @@ var _ = Describe("AWSProvider", func() {
 					mockec2Client.EXPECT().
 						DisassociateAddress(ctx, gomock.AssignableToTypeOf(&ec2.DisassociateAddressInput{})).
 						DoAndReturn(func(_ context.Context, input *ec2.DisassociateAddressInput, _ ...func(*ec2.Options)) (*ec2.DisassociateAddressOutput, error) {
-							Expect(aws.ToString(input.AssociationId)).To(Equal(associationID))
+							Expect(input.AssociationId).To(PointTo(Equal(associationID)))
 							return &ec2.DisassociateAddressOutput{}, fmt.Errorf("disassociate address error")
 						})
 
@@ -942,42 +940,38 @@ var _ = Describe("AWSProvider", func() {
 					mockec2Client.EXPECT().
 						DescribeAddresses(ctx, gomock.AssignableToTypeOf(&ec2.DescribeAddressesInput{})).
 						DoAndReturn(func(_ context.Context, input *ec2.DescribeAddressesInput, _ ...func(*ec2.Options)) (*ec2.DescribeAddressesOutput, error) {
-							switch len(input.Filters) {
-							case 3:
-								Expect(input.Filters).To(ConsistOf(filters))
-								return &ec2.DescribeAddressesOutput{}, nil
-							case 4:
-								Expect(input.Filters).To(ConsistOf(
-									append(
-										filters,
-										types.Filter{
-											Name:   aws.String("allocation-id"),
-											Values: []string{allocationID},
-										},
-									),
-								))
-								return &ec2.DescribeAddressesOutput{
-									Addresses: []types.Address{
-										{
-											AllocationId:  aws.String(allocationID),
-											AssociationId: aws.String(associationID),
-										},
+							Expect(input.Filters).To(ConsistOf(filters))
+							return &ec2.DescribeAddressesOutput{}, nil
+						})
+					mockec2Client.EXPECT().
+						DescribeAddresses(ctx, gomock.AssignableToTypeOf(&ec2.DescribeAddressesInput{})).
+						DoAndReturn(func(_ context.Context, input *ec2.DescribeAddressesInput, _ ...func(*ec2.Options)) (*ec2.DescribeAddressesOutput, error) {
+							Expect(input.Filters).To(ConsistOf(
+								append(
+									filters,
+									types.Filter{
+										Name:   aws.String("allocation-id"),
+										Values: []string{allocationID},
 									},
-								}, nil
-							default:
-								return nil, fmt.Errorf("unexpected number of filter: %d", len(input.Filters))
-							}
-						}).Times(2)
+								),
+							))
+							return &ec2.DescribeAddressesOutput{
+								Addresses: []types.Address{
+									{
+										AllocationId:  aws.String(allocationID),
+										AssociationId: aws.String(associationID),
+									},
+								},
+							}, nil
+						})
 					mockec2Client.EXPECT().
 						AllocateAddress(ctx, gomock.AssignableToTypeOf(&ec2.AllocateAddressInput{})).
 						DoAndReturn(func(_ context.Context, input *ec2.AllocateAddressInput, _ ...func(*ec2.Options)) (*ec2.AllocateAddressOutput, error) {
 							Expect(input.Domain).To(Equal(types.DomainTypeVpc))
-							Expect(input.TagSpecifications).To(ConsistOf(
-								MatchFields(IgnoreExtras, Fields{
-									"ResourceType": Equal(types.ResourceTypeElasticIp),
-									"Tags":         ConsistOf(tags),
-								}),
-							))
+							Expect(input.TagSpecifications).To(ConsistOf(MatchFields(IgnoreExtras, Fields{
+								"ResourceType": Equal(types.ResourceTypeElasticIp),
+								"Tags":         ConsistOf(tags),
+							})))
 							return &ec2.AllocateAddressOutput{
 								AllocationId: aws.String(allocationID),
 							}, nil
@@ -985,7 +979,7 @@ var _ = Describe("AWSProvider", func() {
 					mockec2Client.EXPECT().
 						DisassociateAddress(ctx, gomock.AssignableToTypeOf(&ec2.DisassociateAddressInput{})).
 						DoAndReturn(func(_ context.Context, input *ec2.DisassociateAddressInput, _ ...func(*ec2.Options)) (*ec2.DisassociateAddressOutput, error) {
-							Expect(aws.ToString(input.AssociationId)).To(Equal(associationID))
+							Expect(input.AssociationId).To(PointTo(Equal(associationID)))
 							return &ec2.DisassociateAddressOutput{}, nil
 						})
 
@@ -1338,7 +1332,7 @@ var _ = Describe("AWSProvider", func() {
 					mockec2Client.EXPECT().
 						DisassociateAddress(ctx, gomock.AssignableToTypeOf(&ec2.DisassociateAddressInput{})).
 						DoAndReturn(func(_ context.Context, input *ec2.DisassociateAddressInput, _ ...func(*ec2.Options)) (*ec2.DisassociateAddressOutput, error) {
-							Expect(aws.ToString(input.AssociationId)).To(Equal(associationID))
+							Expect(input.AssociationId).To(PointTo(Equal(associationID)))
 							return &ec2.DisassociateAddressOutput{}, fmt.Errorf("disassociate address error")
 						})
 
@@ -1407,14 +1401,14 @@ var _ = Describe("AWSProvider", func() {
 					mockec2Client.EXPECT().
 						DisassociateAddress(ctx, gomock.AssignableToTypeOf(&ec2.DisassociateAddressInput{})).
 						DoAndReturn(func(_ context.Context, input *ec2.DisassociateAddressInput, _ ...func(*ec2.Options)) (*ec2.DisassociateAddressOutput, error) {
-							Expect(aws.ToString(input.AssociationId)).To(Equal(associationID))
+							Expect(input.AssociationId).To(PointTo(Equal(associationID)))
 							return &ec2.DisassociateAddressOutput{}, nil
 						})
 					mockec2Client.EXPECT().
 						AssociateAddress(ctx, gomock.AssignableToTypeOf(&ec2.AssociateAddressInput{})).
 						DoAndReturn(func(_ context.Context, input *ec2.AssociateAddressInput, _ ...func(*ec2.Options)) (*ec2.AssociateAddressOutput, error) {
-							Expect(aws.ToString(input.AllocationId)).To(Equal(allocationID))
-							Expect(aws.ToString(input.NetworkInterfaceId)).To(Equal(eni01ID))
+							Expect(input.AllocationId).To(PointTo(Equal(allocationID)))
+							Expect(input.NetworkInterfaceId).To(PointTo(Equal(eni01ID)))
 							return &ec2.AssociateAddressOutput{}, nil
 						})
 
@@ -1481,8 +1475,8 @@ var _ = Describe("AWSProvider", func() {
 				mockec2Client.EXPECT().
 					AssociateAddress(ctx, gomock.AssignableToTypeOf(&ec2.AssociateAddressInput{})).
 					DoAndReturn(func(_ context.Context, input *ec2.AssociateAddressInput, _ ...func(*ec2.Options)) (*ec2.AssociateAddressOutput, error) {
-						Expect(aws.ToString(input.AllocationId)).To(Equal(allocationID))
-						Expect(aws.ToString(input.NetworkInterfaceId)).To(Equal(eniID))
+						Expect(input.AllocationId).To(PointTo(Equal(allocationID)))
+						Expect(input.NetworkInterfaceId).To(PointTo(Equal(eniID)))
 						return &ec2.AssociateAddressOutput{}, fmt.Errorf("associate address error")
 					})
 
@@ -1550,8 +1544,8 @@ var _ = Describe("AWSProvider", func() {
 				mockec2Client.EXPECT().
 					AssociateAddress(ctx, gomock.AssignableToTypeOf(&ec2.AssociateAddressInput{})).
 					DoAndReturn(func(_ context.Context, input *ec2.AssociateAddressInput, _ ...func(*ec2.Options)) (*ec2.AssociateAddressOutput, error) {
-						Expect(aws.ToString(input.AllocationId)).To(Equal(allocationID))
-						Expect(aws.ToString(input.NetworkInterfaceId)).To(Equal(eniID))
+						Expect(input.AllocationId).To(PointTo(Equal(allocationID)))
+						Expect(input.NetworkInterfaceId).To(PointTo(Equal(eniID)))
 						return &ec2.AssociateAddressOutput{}, nil
 					})
 
@@ -1579,9 +1573,9 @@ var _ = Describe("AWSProvider", func() {
 
 	Context("ReconcileFirewallRule", func() {
 		var (
-			firewallRule, firewallRule01                                                                               *v1alpha1.FirewallRule
-			firewallrules                                                                                              []v1alpha1.FirewallRule
-			testID, instanceID, nodeName, vpcID, securityGroupID, securityGroup01ID, publicIP, eniID, eni01ID, eni02ID string
+			firewallRule, firewallRule01                                                                        *v1alpha1.FirewallRule
+			firewallrules                                                                                       []v1alpha1.FirewallRule
+			testID, instanceID, nodeName, securityGroupID, securityGroup01ID, publicIP, eniID, eni01ID, eni02ID string
 		)
 
 		BeforeEach(func() {
@@ -1845,9 +1839,11 @@ var _ = Describe("AWSProvider", func() {
 				mockec2Client.EXPECT().
 					CreateSecurityGroup(ctx, gomock.AssignableToTypeOf(&ec2.CreateSecurityGroupInput{})).
 					DoAndReturn(func(_ context.Context, input *ec2.CreateSecurityGroupInput, _ ...func(*ec2.Options)) (*ec2.CreateSecurityGroupOutput, error) {
-						Expect(aws.ToString(input.VpcId)).To(Equal(vpcID))
-						Expect(input.TagSpecifications[0].ResourceType).To(Equal(types.ResourceTypeSecurityGroup))
-						Expect(input.TagSpecifications[0].Tags).To(ConsistOf(tags))
+						Expect(input.VpcId).To(PointTo(Equal(vpcID)))
+						Expect(input.TagSpecifications).To(ConsistOf(MatchFields(IgnoreExtras, Fields{
+							"ResourceType": Equal(types.ResourceTypeSecurityGroup),
+							"Tags":         ConsistOf(tags),
+						})))
 						return &ec2.CreateSecurityGroupOutput{}, fmt.Errorf("create security group error")
 					})
 
@@ -1897,31 +1893,31 @@ var _ = Describe("AWSProvider", func() {
 				mockec2Client.EXPECT().
 					DescribeSecurityGroups(ctx, gomock.AssignableToTypeOf(&ec2.DescribeSecurityGroupsInput{})).
 					DoAndReturn(func(_ context.Context, input *ec2.DescribeSecurityGroupsInput, _ ...func(*ec2.Options)) (*ec2.DescribeSecurityGroupsOutput, error) {
-						switch len(input.Filters) {
-						case 4:
-							Expect(input.Filters).To(ConsistOf(filters))
-							return &ec2.DescribeSecurityGroupsOutput{}, nil
-						case 5:
-							Expect(input.Filters).To(ConsistOf(
-								append(
-									filters,
-									types.Filter{
-										Name:   aws.String("group-id"),
-										Values: []string{securityGroupID},
-									},
-								),
-							))
-							return &ec2.DescribeSecurityGroupsOutput{}, fmt.Errorf("describe security groups error")
-						default:
-							return nil, fmt.Errorf("unexpected securitygroups filters length: %d", len(input.Filters))
-						}
-					}).Times(2)
+						Expect(input.Filters).To(ConsistOf(filters))
+						return &ec2.DescribeSecurityGroupsOutput{}, nil
+					})
+				mockec2Client.EXPECT().
+					DescribeSecurityGroups(ctx, gomock.AssignableToTypeOf(&ec2.DescribeSecurityGroupsInput{})).
+					DoAndReturn(func(_ context.Context, input *ec2.DescribeSecurityGroupsInput, _ ...func(*ec2.Options)) (*ec2.DescribeSecurityGroupsOutput, error) {
+						Expect(input.Filters).To(ConsistOf(
+							append(
+								filters,
+								types.Filter{
+									Name:   aws.String("group-id"),
+									Values: []string{securityGroupID},
+								},
+							),
+						))
+						return &ec2.DescribeSecurityGroupsOutput{}, fmt.Errorf("describe security groups error")
+					})
 				mockec2Client.EXPECT().
 					CreateSecurityGroup(ctx, gomock.AssignableToTypeOf(&ec2.CreateSecurityGroupInput{})).
 					DoAndReturn(func(_ context.Context, input *ec2.CreateSecurityGroupInput, _ ...func(*ec2.Options)) (*ec2.CreateSecurityGroupOutput, error) {
-						Expect(aws.ToString(input.VpcId)).To(Equal(vpcID))
-						Expect(input.TagSpecifications[0].ResourceType).To(Equal(types.ResourceTypeSecurityGroup))
-						Expect(input.TagSpecifications[0].Tags).To(ConsistOf(tags))
+						Expect(input.VpcId).To(PointTo(Equal(vpcID)))
+						Expect(input.TagSpecifications).To(ConsistOf(MatchFields(IgnoreExtras, Fields{
+							"ResourceType": Equal(types.ResourceTypeSecurityGroup),
+							"Tags":         ConsistOf(tags),
+						})))
 						return &ec2.CreateSecurityGroupOutput{
 							GroupId: aws.String(securityGroupID),
 						}, nil
@@ -2241,19 +2237,17 @@ var _ = Describe("AWSProvider", func() {
 				mockec2Client.EXPECT().
 					ModifyNetworkInterfaceAttribute(ctx, gomock.AssignableToTypeOf(&ec2.ModifyNetworkInterfaceAttributeInput{})).
 					DoAndReturn(func(_ context.Context, input *ec2.ModifyNetworkInterfaceAttributeInput, _ ...func(*ec2.Options)) (*ec2.ModifyNetworkInterfaceAttributeOutput, error) {
-						switch aws.ToString(input.NetworkInterfaceId) {
-						case eni01ID:
-							Expect(aws.ToString(input.NetworkInterfaceId)).To(Equal(eni01ID))
-							Expect(input.Groups).To(ConsistOf(securityGroup01ID))
-							return &ec2.ModifyNetworkInterfaceAttributeOutput{}, nil
-						case eni02ID:
-							Expect(aws.ToString(input.NetworkInterfaceId)).To(Equal(eni02ID))
-							Expect(input.Groups).To(ConsistOf(securityGroup01ID))
-							return &ec2.ModifyNetworkInterfaceAttributeOutput{}, fmt.Errorf("modify network interface attribute error")
-						default:
-							return nil, fmt.Errorf("unexpected network interface ID: %s", aws.ToString(input.NetworkInterfaceId))
-						}
-					}).Times(2)
+						Expect(input.NetworkInterfaceId).To(PointTo(Equal(eni01ID)))
+						Expect(input.Groups).To(ConsistOf(securityGroup01ID))
+						return &ec2.ModifyNetworkInterfaceAttributeOutput{}, nil
+					})
+				mockec2Client.EXPECT().
+					ModifyNetworkInterfaceAttribute(ctx, gomock.AssignableToTypeOf(&ec2.ModifyNetworkInterfaceAttributeInput{})).
+					DoAndReturn(func(_ context.Context, input *ec2.ModifyNetworkInterfaceAttributeInput, _ ...func(*ec2.Options)) (*ec2.ModifyNetworkInterfaceAttributeOutput, error) {
+						Expect(input.NetworkInterfaceId).To(PointTo(Equal(eni02ID)))
+						Expect(input.Groups).To(ConsistOf(securityGroup01ID))
+						return &ec2.ModifyNetworkInterfaceAttributeOutput{}, fmt.Errorf("modify network interface attribute error")
+					})
 
 				status, err := p.ReconcileFirewallRule(ctx, log, nodeName, instanceID, firewallRule, firewallrules)
 				Expect(status).To(MatchFields(IgnoreExtras, Fields{
@@ -2340,7 +2334,7 @@ var _ = Describe("AWSProvider", func() {
 				mockec2Client.EXPECT().
 					ModifyNetworkInterfaceAttribute(ctx, gomock.AssignableToTypeOf(&ec2.ModifyNetworkInterfaceAttributeInput{})).
 					DoAndReturn(func(_ context.Context, input *ec2.ModifyNetworkInterfaceAttributeInput, _ ...func(*ec2.Options)) (*ec2.ModifyNetworkInterfaceAttributeOutput, error) {
-						Expect(aws.ToString(input.NetworkInterfaceId)).To(Equal(eniID))
+						Expect(input.NetworkInterfaceId).To(PointTo(Equal(eniID)))
 						Expect(input.Groups).To(ConsistOf(securityGroupID, securityGroup01ID))
 						return &ec2.ModifyNetworkInterfaceAttributeOutput{}, fmt.Errorf("modify network interface attribute error")
 					})
@@ -2435,14 +2429,14 @@ var _ = Describe("AWSProvider", func() {
 				mockec2Client.EXPECT().
 					ModifyNetworkInterfaceAttribute(ctx, gomock.AssignableToTypeOf(&ec2.ModifyNetworkInterfaceAttributeInput{})).
 					DoAndReturn(func(_ context.Context, input *ec2.ModifyNetworkInterfaceAttributeInput, _ ...func(*ec2.Options)) (*ec2.ModifyNetworkInterfaceAttributeOutput, error) {
-						Expect(aws.ToString(input.NetworkInterfaceId)).To(Equal(eniID))
+						Expect(input.NetworkInterfaceId).To(PointTo(Equal(eniID)))
 						Expect(input.Groups).To(ConsistOf(securityGroupID, securityGroup01ID))
 						return &ec2.ModifyNetworkInterfaceAttributeOutput{}, nil
 					})
 				mockec2Client.EXPECT().
 					RevokeSecurityGroupIngress(ctx, gomock.AssignableToTypeOf(&ec2.RevokeSecurityGroupIngressInput{})).
 					DoAndReturn(func(_ context.Context, input *ec2.RevokeSecurityGroupIngressInput, _ ...func(*ec2.Options)) (*ec2.RevokeSecurityGroupIngressOutput, error) {
-						Expect(aws.ToString(input.GroupId)).To(Equal(aws.ToString(&securityGroupID)))
+						Expect(input.GroupId).To(PointTo(Equal(aws.ToString(&securityGroupID))))
 						Expect(input.IpPermissions).To(ConsistOf(
 							types.IpPermission{
 								IpProtocol: aws.String("TCP"),
@@ -2551,14 +2545,14 @@ var _ = Describe("AWSProvider", func() {
 				mockec2Client.EXPECT().
 					ModifyNetworkInterfaceAttribute(ctx, gomock.AssignableToTypeOf(&ec2.ModifyNetworkInterfaceAttributeInput{})).
 					DoAndReturn(func(_ context.Context, input *ec2.ModifyNetworkInterfaceAttributeInput, _ ...func(*ec2.Options)) (*ec2.ModifyNetworkInterfaceAttributeOutput, error) {
-						Expect(aws.ToString(input.NetworkInterfaceId)).To(Equal(eniID))
+						Expect(input.NetworkInterfaceId).To(PointTo(Equal(eniID)))
 						Expect(input.Groups).To(ConsistOf(securityGroupID, securityGroup01ID))
 						return &ec2.ModifyNetworkInterfaceAttributeOutput{}, nil
 					})
 				mockec2Client.EXPECT().
 					RevokeSecurityGroupIngress(ctx, gomock.AssignableToTypeOf(&ec2.RevokeSecurityGroupIngressInput{})).
 					DoAndReturn(func(_ context.Context, input *ec2.RevokeSecurityGroupIngressInput, _ ...func(*ec2.Options)) (*ec2.RevokeSecurityGroupIngressOutput, error) {
-						Expect(aws.ToString(input.GroupId)).To(Equal(aws.ToString(&securityGroupID)))
+						Expect(input.GroupId).To(PointTo(Equal(aws.ToString(&securityGroupID))))
 						Expect(input.IpPermissions).To(ConsistOf(
 							types.IpPermission{
 								IpProtocol: aws.String("TCP"),
@@ -2572,7 +2566,7 @@ var _ = Describe("AWSProvider", func() {
 				mockec2Client.EXPECT().
 					RevokeSecurityGroupEgress(ctx, gomock.AssignableToTypeOf(&ec2.RevokeSecurityGroupEgressInput{})).
 					DoAndReturn(func(_ context.Context, input *ec2.RevokeSecurityGroupEgressInput, _ ...func(*ec2.Options)) (*ec2.RevokeSecurityGroupEgressOutput, error) {
-						Expect(aws.ToString(input.GroupId)).To(Equal(aws.ToString(&securityGroupID)))
+						Expect(input.GroupId).To(PointTo(Equal(aws.ToString(&securityGroupID))))
 						Expect(input.IpPermissions).To(ConsistOf(
 							types.IpPermission{
 								IpProtocol: aws.String("TCP"),
@@ -2648,50 +2642,28 @@ var _ = Describe("AWSProvider", func() {
 					mockec2Client.EXPECT().
 						DescribeSecurityGroups(ctx, gomock.AssignableToTypeOf(&ec2.DescribeSecurityGroupsInput{})).
 						DoAndReturn(func(_ context.Context, input *ec2.DescribeSecurityGroupsInput, _ ...func(*ec2.Options)) (*ec2.DescribeSecurityGroupsOutput, error) {
-							switch len(input.Filters) {
-							case 4:
-								Expect(input.Filters).To(ConsistOf(filters))
-								return &ec2.DescribeSecurityGroupsOutput{
-									SecurityGroups: []types.SecurityGroup{
-										{
-											GroupId: aws.String(securityGroupID),
-											IpPermissions: []types.IpPermission{
-												{
-													IpProtocol: aws.String("TCP"),
-													FromPort:   aws.Int32(5969),
-													ToPort:     aws.Int32(5969),
-													IpRanges: []types.IpRange{
-														{
-															CidrIp:      aws.String("0.0.0.0/0"),
-															Description: aws.String(""),
-														},
+							Expect(input.Filters).To(ConsistOf(filters))
+							return &ec2.DescribeSecurityGroupsOutput{
+								SecurityGroups: []types.SecurityGroup{
+									{
+										GroupId: aws.String(securityGroupID),
+										IpPermissions: []types.IpPermission{
+											{
+												IpProtocol: aws.String("TCP"),
+												FromPort:   aws.Int32(5969),
+												ToPort:     aws.Int32(5969),
+												IpRanges: []types.IpRange{
+													{
+														CidrIp:      aws.String("0.0.0.0/0"),
+														Description: aws.String(""),
 													},
 												},
 											},
 										},
 									},
-								}, nil
-							case 3:
-								Expect(input.Filters).To(ConsistOf(
-									types.Filter{
-										Name:   aws.String(fmt.Sprintf("tag:%s", TagKeyManaged)),
-										Values: []string{"true"},
-									},
-									types.Filter{
-										Name:   aws.String(fmt.Sprintf("tag:%s", TagKeyClusterID)),
-										Values: []string{clusterID},
-									},
-									types.Filter{
-										Name:   aws.String(fmt.Sprintf("tag:%s", TagKeyNodeName)),
-										Values: []string{nodeName},
-									},
-								))
-								return &ec2.DescribeSecurityGroupsOutput{}, fmt.Errorf("describe security groups error")
-							default:
-								return nil, fmt.Errorf("unexpected number of filters: %d", len(input.Filters))
-
-							}
-						}).Times(2)
+								},
+							}, nil
+						})
 					mockec2Client.EXPECT().
 						DescribeNetworkInterfaces(ctx, gomock.AssignableToTypeOf(&ec2.DescribeNetworkInterfacesInput{})).
 						DoAndReturn(func(_ context.Context, input *ec2.DescribeNetworkInterfacesInput, _ ...func(*ec2.Options)) (*ec2.DescribeNetworkInterfacesOutput, error) {
@@ -2714,6 +2686,14 @@ var _ = Describe("AWSProvider", func() {
 								},
 							}, nil
 						})
+					mockec2Client.EXPECT().
+						ModifyNetworkInterfaceAttribute(ctx, gomock.AssignableToTypeOf(&ec2.ModifyNetworkInterfaceAttributeInput{})).
+						DoAndReturn(func(_ context.Context, input *ec2.ModifyNetworkInterfaceAttributeInput, _ ...func(*ec2.Options)) (*ec2.ModifyNetworkInterfaceAttributeOutput, error) {
+							Expect(input.NetworkInterfaceId).To(PointTo(Equal(eniID)))
+							Expect(input.Groups).To(BeEmpty())
+							return &ec2.ModifyNetworkInterfaceAttributeOutput{}, fmt.Errorf("modify network interface attribute error")
+
+						})
 
 					status, err := p.ReconcileFirewallRule(ctx, log, nodeName, instanceID, firewallRule, firewallrules)
 					Expect(status).To(MatchFields(IgnoreExtras, Fields{
@@ -2733,7 +2713,7 @@ var _ = Describe("AWSProvider", func() {
 					}))
 					Expect(err).To(MatchError(&provider.Error{
 						Code: "InternalError",
-						Msg:  "failed to list security groups: describe security groups error",
+						Msg:  "failed to modify network interface attribute: modify network interface attribute error",
 					}))
 				})
 			})
@@ -2830,7 +2810,7 @@ var _ = Describe("AWSProvider", func() {
 					mockec2Client.EXPECT().
 						RevokeSecurityGroupIngress(ctx, gomock.AssignableToTypeOf(&ec2.RevokeSecurityGroupIngressInput{})).
 						DoAndReturn(func(_ context.Context, input *ec2.RevokeSecurityGroupIngressInput, _ ...func(*ec2.Options)) (*ec2.RevokeSecurityGroupIngressOutput, error) {
-							Expect(aws.ToString(input.GroupId)).To(Equal(aws.ToString(&securityGroupID)))
+							Expect(input.GroupId).To(PointTo(Equal(aws.ToString(&securityGroupID))))
 							Expect(input.IpPermissions).To(ConsistOf(
 								types.IpPermission{
 									IpProtocol: aws.String("TCP"),
@@ -2967,7 +2947,7 @@ var _ = Describe("AWSProvider", func() {
 					mockec2Client.EXPECT().
 						RevokeSecurityGroupIngress(ctx, gomock.AssignableToTypeOf(&ec2.RevokeSecurityGroupIngressInput{})).
 						DoAndReturn(func(_ context.Context, input *ec2.RevokeSecurityGroupIngressInput, _ ...func(*ec2.Options)) (*ec2.RevokeSecurityGroupIngressOutput, error) {
-							Expect(aws.ToString(input.GroupId)).To(Equal(aws.ToString(&securityGroupID)))
+							Expect(input.GroupId).To(PointTo(Equal(aws.ToString(&securityGroupID))))
 							Expect(input.IpPermissions).To(ConsistOf(
 								types.IpPermission{
 									IpProtocol: aws.String("TCP"),
@@ -3046,50 +3026,28 @@ var _ = Describe("AWSProvider", func() {
 					mockec2Client.EXPECT().
 						DescribeSecurityGroups(ctx, gomock.AssignableToTypeOf(&ec2.DescribeSecurityGroupsInput{})).
 						DoAndReturn(func(_ context.Context, input *ec2.DescribeSecurityGroupsInput, _ ...func(*ec2.Options)) (*ec2.DescribeSecurityGroupsOutput, error) {
-							switch len(input.Filters) {
-							case 4:
-								Expect(input.Filters).To(ConsistOf(filters))
-								return &ec2.DescribeSecurityGroupsOutput{
-									SecurityGroups: []types.SecurityGroup{
-										{
-											GroupId: aws.String(securityGroupID),
-											IpPermissionsEgress: []types.IpPermission{
-												{
-													IpProtocol: aws.String("TCP"),
-													FromPort:   aws.Int32(5969),
-													ToPort:     aws.Int32(5969),
-													IpRanges: []types.IpRange{
-														{
-															CidrIp:      aws.String("0.0.0.0/0"),
-															Description: aws.String(""),
-														},
+							Expect(input.Filters).To(ConsistOf(filters))
+							return &ec2.DescribeSecurityGroupsOutput{
+								SecurityGroups: []types.SecurityGroup{
+									{
+										GroupId: aws.String(securityGroupID),
+										IpPermissionsEgress: []types.IpPermission{
+											{
+												IpProtocol: aws.String("TCP"),
+												FromPort:   aws.Int32(5969),
+												ToPort:     aws.Int32(5969),
+												IpRanges: []types.IpRange{
+													{
+														CidrIp:      aws.String("0.0.0.0/0"),
+														Description: aws.String(""),
 													},
 												},
 											},
 										},
 									},
-								}, nil
-							case 3:
-								Expect(input.Filters).To(ConsistOf(
-									types.Filter{
-										Name:   aws.String(fmt.Sprintf("tag:%s", TagKeyManaged)),
-										Values: []string{"true"},
-									},
-									types.Filter{
-										Name:   aws.String(fmt.Sprintf("tag:%s", TagKeyClusterID)),
-										Values: []string{clusterID},
-									},
-									types.Filter{
-										Name:   aws.String(fmt.Sprintf("tag:%s", TagKeyNodeName)),
-										Values: []string{nodeName},
-									},
-								))
-								return &ec2.DescribeSecurityGroupsOutput{}, fmt.Errorf("describe security groups error")
-							default:
-								return nil, fmt.Errorf("unexpected number of filters: %d", len(input.Filters))
-
-							}
-						}).Times(2)
+								},
+							}, nil
+						})
 					mockec2Client.EXPECT().
 						DescribeNetworkInterfaces(ctx, gomock.AssignableToTypeOf(&ec2.DescribeNetworkInterfacesInput{})).
 						DoAndReturn(func(_ context.Context, input *ec2.DescribeNetworkInterfacesInput, _ ...func(*ec2.Options)) (*ec2.DescribeNetworkInterfacesOutput, error) {
@@ -3112,6 +3070,14 @@ var _ = Describe("AWSProvider", func() {
 								},
 							}, nil
 						})
+					mockec2Client.EXPECT().
+						ModifyNetworkInterfaceAttribute(ctx, gomock.AssignableToTypeOf(&ec2.ModifyNetworkInterfaceAttributeInput{})).
+						DoAndReturn(func(_ context.Context, input *ec2.ModifyNetworkInterfaceAttributeInput, _ ...func(*ec2.Options)) (*ec2.ModifyNetworkInterfaceAttributeOutput, error) {
+							Expect(input.NetworkInterfaceId).To(PointTo(Equal(eniID)))
+							Expect(input.Groups).To(BeEmpty())
+							return &ec2.ModifyNetworkInterfaceAttributeOutput{}, fmt.Errorf("modify network interface attribute error")
+
+						})
 
 					status, err := p.ReconcileFirewallRule(ctx, log, nodeName, instanceID, firewallRule, firewallrules)
 					Expect(status).To(MatchFields(IgnoreExtras, Fields{
@@ -3131,7 +3097,7 @@ var _ = Describe("AWSProvider", func() {
 					}))
 					Expect(err).To(MatchError(&provider.Error{
 						Code: "InternalError",
-						Msg:  "failed to list security groups: describe security groups error",
+						Msg:  "failed to modify network interface attribute: modify network interface attribute error",
 					}))
 				})
 			})
@@ -3233,7 +3199,7 @@ var _ = Describe("AWSProvider", func() {
 					mockec2Client.EXPECT().
 						RevokeSecurityGroupEgress(ctx, gomock.AssignableToTypeOf(&ec2.RevokeSecurityGroupEgressInput{})).
 						DoAndReturn(func(_ context.Context, input *ec2.RevokeSecurityGroupEgressInput, _ ...func(*ec2.Options)) (*ec2.RevokeSecurityGroupEgressOutput, error) {
-							Expect(aws.ToString(input.GroupId)).To(Equal(aws.ToString(&securityGroupID)))
+							Expect(input.GroupId).To(PointTo(Equal(aws.ToString(&securityGroupID))))
 							Expect(input.IpPermissions).To(ConsistOf(
 								types.IpPermission{
 									IpProtocol: aws.String("TCP"),
@@ -3370,7 +3336,7 @@ var _ = Describe("AWSProvider", func() {
 					mockec2Client.EXPECT().
 						RevokeSecurityGroupEgress(ctx, gomock.AssignableToTypeOf(&ec2.RevokeSecurityGroupEgressInput{})).
 						DoAndReturn(func(_ context.Context, input *ec2.RevokeSecurityGroupEgressInput, _ ...func(*ec2.Options)) (*ec2.RevokeSecurityGroupEgressOutput, error) {
-							Expect(aws.ToString(input.GroupId)).To(Equal(aws.ToString(&securityGroupID)))
+							Expect(input.GroupId).To(PointTo(Equal(aws.ToString(&securityGroupID))))
 							Expect(input.IpPermissions).To(ConsistOf(
 								types.IpPermission{
 									IpProtocol: aws.String("TCP"),
@@ -3500,7 +3466,7 @@ var _ = Describe("AWSProvider", func() {
 				mockec2Client.EXPECT().
 					RevokeSecurityGroupIngress(ctx, gomock.AssignableToTypeOf(&ec2.RevokeSecurityGroupIngressInput{})).
 					DoAndReturn(func(_ context.Context, input *ec2.RevokeSecurityGroupIngressInput, _ ...func(*ec2.Options)) (*ec2.RevokeSecurityGroupIngressOutput, error) {
-						Expect(aws.ToString(input.GroupId)).To(Equal(aws.ToString(&securityGroupID)))
+						Expect(input.GroupId).To(PointTo(Equal(aws.ToString(&securityGroupID))))
 						Expect(input.IpPermissions).To(ConsistOf(
 							types.IpPermission{
 								IpProtocol: aws.String("TCP"),
@@ -3619,7 +3585,7 @@ var _ = Describe("AWSProvider", func() {
 				mockec2Client.EXPECT().
 					AuthorizeSecurityGroupIngress(ctx, gomock.AssignableToTypeOf(&ec2.AuthorizeSecurityGroupIngressInput{})).
 					DoAndReturn(func(_ context.Context, input *ec2.AuthorizeSecurityGroupIngressInput, _ ...func(*ec2.Options)) (*ec2.AuthorizeSecurityGroupIngressOutput, error) {
-						Expect(aws.ToString(input.GroupId)).To(Equal(securityGroupID))
+						Expect(input.GroupId).To(PointTo(Equal(securityGroupID)))
 						Expect(input.IpPermissions).To(ConsistOf(
 							types.IpPermission{
 								IpProtocol: aws.String("TCP"),
@@ -3748,7 +3714,7 @@ var _ = Describe("AWSProvider", func() {
 				mockec2Client.EXPECT().
 					AuthorizeSecurityGroupIngress(ctx, gomock.AssignableToTypeOf(&ec2.AuthorizeSecurityGroupIngressInput{})).
 					DoAndReturn(func(_ context.Context, input *ec2.AuthorizeSecurityGroupIngressInput, _ ...func(*ec2.Options)) (*ec2.AuthorizeSecurityGroupIngressOutput, error) {
-						Expect(aws.ToString(input.GroupId)).To(Equal(securityGroupID))
+						Expect(input.GroupId).To(PointTo(Equal(securityGroupID)))
 						Expect(input.IpPermissions).To(ConsistOf(
 							types.IpPermission{
 								IpProtocol: aws.String("TCP"),
@@ -3879,7 +3845,7 @@ var _ = Describe("AWSProvider", func() {
 				mockec2Client.EXPECT().
 					AuthorizeSecurityGroupEgress(ctx, gomock.AssignableToTypeOf(&ec2.AuthorizeSecurityGroupEgressInput{})).
 					DoAndReturn(func(_ context.Context, input *ec2.AuthorizeSecurityGroupEgressInput, _ ...func(*ec2.Options)) (*ec2.AuthorizeSecurityGroupEgressOutput, error) {
-						Expect(aws.ToString(input.GroupId)).To(Equal(securityGroupID))
+						Expect(input.GroupId).To(PointTo(Equal(securityGroupID)))
 						Expect(input.IpPermissions).To(ConsistOf(
 							types.IpPermission{
 								IpProtocol: aws.String("TCP"),
@@ -4008,7 +3974,7 @@ var _ = Describe("AWSProvider", func() {
 				mockec2Client.EXPECT().
 					AuthorizeSecurityGroupEgress(ctx, gomock.AssignableToTypeOf(&ec2.AuthorizeSecurityGroupEgressInput{})).
 					DoAndReturn(func(_ context.Context, input *ec2.AuthorizeSecurityGroupEgressInput, _ ...func(*ec2.Options)) (*ec2.AuthorizeSecurityGroupEgressOutput, error) {
-						Expect(aws.ToString(input.GroupId)).To(Equal(securityGroupID))
+						Expect(input.GroupId).To(PointTo(Equal(securityGroupID)))
 						Expect(input.IpPermissions).To(ConsistOf(
 							types.IpPermission{
 								IpProtocol: aws.String("TCP"),
@@ -4134,7 +4100,7 @@ var _ = Describe("AWSProvider", func() {
 			mockec2Client.EXPECT().
 				AuthorizeSecurityGroupIngress(ctx, gomock.AssignableToTypeOf(&ec2.AuthorizeSecurityGroupIngressInput{})).
 				DoAndReturn(func(_ context.Context, input *ec2.AuthorizeSecurityGroupIngressInput, _ ...func(*ec2.Options)) (*ec2.AuthorizeSecurityGroupIngressOutput, error) {
-					Expect(aws.ToString(input.GroupId)).To(Equal(securityGroupID))
+					Expect(input.GroupId).To(PointTo(Equal(securityGroupID)))
 					Expect(input.IpPermissions).To(ConsistOf(
 						types.IpPermission{
 							IpProtocol: aws.String("TCP"),
