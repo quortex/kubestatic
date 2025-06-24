@@ -604,8 +604,15 @@ func (p *awsProvider) disassociateAddress(ctx context.Context, associationID str
 	_, err := p.ec2.DisassociateAddress(ctx, &ec2.DisassociateAddressInput{
 		AssociationId: &associationID,
 	})
+
 	if err != nil {
-		return converter.DecodeEC2Error("failed to disassociate address", err)
+		convertedErr := converter.DecodeEC2Error("failed to disassociate address", err)
+		if provider.IsErrInvalidAssociationIDNotFound(convertedErr) {
+			p.addressesCache.Flush()
+			return nil
+		}
+
+		return convertedErr
 	}
 
 	p.addressesCache.Flush()
