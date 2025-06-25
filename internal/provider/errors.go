@@ -23,6 +23,8 @@ const (
 	AddressLimitExceededError ErrorCode = "AddressLimitExceeded"
 	// InternalError is when there was an unexpected error in the server
 	InternalError ErrorCode = "InternalError"
+	// InvalidAssociationIDNotFound is when the association ID does not exist
+	InvalidAssociationIDNotFound ErrorCode = "InvalidAssociationIDNotFound"
 )
 
 // Error is the error type used internally by the backend
@@ -79,6 +81,14 @@ func IsErrInternal(err error) bool {
 func IsErrRulesPerSecurityGroupLimitExceeded(err error) bool {
 	if e, ok := err.(*Error); ok {
 		return e.Code == RulesPerSecurityGroupLimitExceededError
+	}
+	return false
+}
+
+// IsErrInvalidAssociationIDNotFound returns if error is kind InvalidAssociationIDNotFound
+func IsErrInvalidAssociationIDNotFound(err error) bool {
+	if e, ok := err.(*Error); ok {
+		return e.Code == InvalidAssociationIDNotFound
 	}
 	return false
 }

@@ -67,6 +67,9 @@ func DecodeCommonError(msg string, err error) error {
 		case
 			"RulesPerSecurityGroupLimitExceeded":
 			return &provider.Error{Code: provider.RulesPerSecurityGroupLimitExceededError, Msg: msg}
+		case
+			"InvalidAssociationID.NotFound":
+			return &provider.Error{Code: provider.InvalidAssociationIDNotFound, Msg: msg}
 		}
 	}
 

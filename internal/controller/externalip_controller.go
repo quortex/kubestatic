@@ -104,9 +104,9 @@ func (r *ExternalIPReconciler) Reconcile(ctx context.Context, req ctrl.Request) 
 			if apierrors.IsNotFound(err) {
 				// Invalid nodeName, remove ExternalIP nodeName attribute.
 				externalIP.Spec.NodeName = ""
-				if err != r.Update(ctx, externalIP) {
-					log.Error(err, "Failed to remove nodeName from ExternalIP spec", "nodeName", externalIP.Spec.NodeName)
-					return ctrl.Result{}, err
+				if removeNodeNameErr := r.Update(ctx, externalIP); removeNodeNameErr != nil {
+					log.Error(errors.Join(removeNodeNameErr, err), "Failed to remove nodename during error handling")
+					return ctrl.Result{}, fmt.Errorf("failed to remove nodename during error handling: %w", errors.Join(removeNodeNameErr, err))
 				}
 				log.Info("Node not found. Removing it from ExternalIP spec", "nodeName", externalIP.Spec.NodeName)
 				return ctrl.Result{}, nil

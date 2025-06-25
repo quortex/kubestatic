@@ -868,6 +868,76 @@ var _ = Describe("AWSProvider", func() {
 			When("the address is associated to an instance", func() {
 				associationID = "eipassoc-" + testID
 
+				It("should return a reserved state and specify IPCreation and NetworkInterfaceAssociation condition when AWS API call (DisassociateAddress) return InvalidAssociationID.NotFound error", func() {
+					mockec2Client.EXPECT().
+						DescribeAddresses(ctx, gomock.AssignableToTypeOf(&ec2.DescribeAddressesInput{})).
+						DoAndReturn(func(_ context.Context, input *ec2.DescribeAddressesInput, _ ...func(*ec2.Options)) (*ec2.DescribeAddressesOutput, error) {
+							Expect(input.Filters).To(ConsistOf(filters))
+							return &ec2.DescribeAddressesOutput{}, nil
+						})
+					mockec2Client.EXPECT().
+						DescribeAddresses(ctx, gomock.AssignableToTypeOf(&ec2.DescribeAddressesInput{})).
+						DoAndReturn(func(_ context.Context, input *ec2.DescribeAddressesInput, _ ...func(*ec2.Options)) (*ec2.DescribeAddressesOutput, error) {
+							Expect(input.Filters).To(ConsistOf(
+								append(
+									filters,
+									types.Filter{
+										Name:   aws.String("allocation-id"),
+										Values: []string{allocationID},
+									},
+								),
+							))
+							return &ec2.DescribeAddressesOutput{
+								Addresses: []types.Address{
+									{
+										AllocationId:  aws.String(allocationID),
+										AssociationId: aws.String(associationID),
+									},
+								},
+							}, nil
+						})
+					mockec2Client.EXPECT().
+						AllocateAddress(ctx, gomock.AssignableToTypeOf(&ec2.AllocateAddressInput{})).
+						DoAndReturn(func(_ context.Context, input *ec2.AllocateAddressInput, _ ...func(*ec2.Options)) (*ec2.AllocateAddressOutput, error) {
+							Expect(input.Domain).To(Equal(types.DomainTypeVpc))
+							Expect(input.TagSpecifications).To(ConsistOf(MatchFields(IgnoreExtras, Fields{
+								"ResourceType": Equal(types.ResourceTypeElasticIp),
+								"Tags":         ConsistOf(tags),
+							})))
+							return &ec2.AllocateAddressOutput{
+								AllocationId: aws.String(allocationID),
+							}, nil
+						})
+					mockec2Client.EXPECT().
+						DisassociateAddress(ctx, gomock.AssignableToTypeOf(&ec2.DisassociateAddressInput{})).
+						DoAndReturn(func(_ context.Context, input *ec2.DisassociateAddressInput, _ ...func(*ec2.Options)) (*ec2.DisassociateAddressOutput, error) {
+							Expect(input.AssociationId).To(PointTo(Equal(associationID)))
+							return &ec2.DisassociateAddressOutput{}, &smithy.GenericAPIError{
+								Code:    "InvalidAssociationID.NotFound",
+								Message: "The association ID 'eipassoc-" + testID + "' does not exist",
+								Fault:   smithy.FaultClient,
+							}
+						})
+
+					status, err := p.ReconcileExternalIP(ctx, log, instanceID, externalIP)
+					Expect(status).To(MatchFields(IgnoreExtras, Fields{
+						"State": Equal(v1alpha1.ExternalIPStateReserved),
+						"Conditions": ConsistOf(matchConditions([]kmetav1.Condition{
+							{
+								Type:   v1alpha1.ExternalIPConditionReasonIPCreated,
+								Status: kmetav1.ConditionTrue,
+								Reason: v1alpha1.ExternalIPConditionReasonIPCreated,
+							},
+							{
+								Type:   v1alpha1.ExternalIPConditionTypeNetworkInterfaceAssociated,
+								Status: kmetav1.ConditionFalse,
+								Reason: v1alpha1.ExternalIPConditionReasonProviderError,
+							},
+						}, "LastTransitionTime", "ObservedGeneration", "Message")),
+					}))
+					Expect(err).ToNot(HaveOccurred())
+				})
+
 				It("should return a reserved state and specify IPCreation and NetworkInterfaceAssociation condition and an error when an AWS API call (DisassociateAddress) fails", func() {
 					mockec2Client.EXPECT().
 						DescribeAddresses(ctx, gomock.AssignableToTypeOf(&ec2.DescribeAddressesInput{})).
