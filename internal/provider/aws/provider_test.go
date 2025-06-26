@@ -2677,6 +2677,109 @@ var _ = Describe("AWSProvider", func() {
 				firewallRule.DeletionTimestamp = &kmetav1.Time{Time: time.Now()}
 			})
 
+			When("the firewallrule is duplicate of another rule", func() {
+				BeforeEach(func() {
+					firewallRule01.Spec = firewallRule.DeepCopy().Spec
+					firewallrules = []v1alpha1.FirewallRule{*firewallRule, *firewallRule01}
+				})
+				It("should return a status", func() {
+					mockec2Client.EXPECT().
+						DescribeInstances(ctx, gomock.AssignableToTypeOf(&ec2.DescribeInstancesInput{})).
+						DoAndReturn(func(_ context.Context, input *ec2.DescribeInstancesInput, _ ...func(*ec2.Options)) (*ec2.DescribeInstancesOutput, error) {
+							Expect(input.InstanceIds).To(ConsistOf(instanceID))
+							return &ec2.DescribeInstancesOutput{
+								Reservations: []types.Reservation{
+									{
+										Instances: []types.Instance{
+											{
+												InstanceId: aws.String(instanceID),
+												VpcId:      aws.String(vpcID),
+												NetworkInterfaces: []types.InstanceNetworkInterface{
+													{
+														Association: &types.InstanceNetworkInterfaceAssociation{
+															IpOwnerId: aws.String("aws"),
+															PublicIp:  aws.String(publicIP),
+														},
+														NetworkInterfaceId: aws.String(eniID),
+														Groups: []types.GroupIdentifier{
+															{
+																GroupId: aws.String(securityGroupID),
+															},
+														},
+													},
+												},
+											},
+										},
+									},
+								},
+							}, nil
+						})
+					mockec2Client.EXPECT().
+						DescribeSecurityGroups(ctx, gomock.AssignableToTypeOf(&ec2.DescribeSecurityGroupsInput{})).
+						DoAndReturn(func(_ context.Context, input *ec2.DescribeSecurityGroupsInput, _ ...func(*ec2.Options)) (*ec2.DescribeSecurityGroupsOutput, error) {
+							Expect(input.Filters).To(ConsistOf(filters))
+							return &ec2.DescribeSecurityGroupsOutput{
+								SecurityGroups: []types.SecurityGroup{
+									{
+										GroupId: aws.String(securityGroupID),
+										IpPermissions: []types.IpPermission{
+											{
+												IpProtocol: aws.String("TCP"),
+												FromPort:   aws.Int32(5969),
+												ToPort:     aws.Int32(5969),
+												IpRanges: []types.IpRange{
+													{
+														CidrIp: aws.String("0.0.0.0/0"),
+													},
+												},
+											},
+										},
+									},
+								},
+							}, nil
+						})
+					mockec2Client.EXPECT().
+						DescribeNetworkInterfaces(ctx, gomock.AssignableToTypeOf(&ec2.DescribeNetworkInterfacesInput{})).
+						DoAndReturn(func(_ context.Context, input *ec2.DescribeNetworkInterfacesInput, _ ...func(*ec2.Options)) (*ec2.DescribeNetworkInterfacesOutput, error) {
+							Expect(input.Filters).To(ConsistOf(
+								types.Filter{
+									Name:   aws.String("group-id"),
+									Values: []string{securityGroupID},
+								},
+							))
+							return &ec2.DescribeNetworkInterfacesOutput{
+								NetworkInterfaces: []types.NetworkInterface{
+									{
+										NetworkInterfaceId: aws.String(eniID),
+										Groups: []types.GroupIdentifier{
+											{
+												GroupId: aws.String(securityGroupID),
+											},
+										},
+									},
+								},
+							}, nil
+						})
+
+					status, _ := p.ReconcileFirewallRule(ctx, log, nodeName, instanceID, firewallRule, firewallrules)
+					Expect(status).To(MatchFields(IgnoreExtras, Fields{
+						"State": Equal(v1alpha1.FirewallRuleStatePending),
+						"Conditions": HaveExactElements(matchConditions([]kmetav1.Condition{
+							{
+								Type:   v1alpha1.FirewallRuleConditionTypeSecurityGroupCreated,
+								Status: kmetav1.ConditionTrue,
+								Reason: v1alpha1.FirewallRuleConditionReasonSecurityGroupCreated,
+							},
+							{
+								Type:   v1alpha1.FirewallRuleConditionTypeNetworkInterfaceAssociated,
+								Status: kmetav1.ConditionTrue,
+								Reason: v1alpha1.FirewallRuleConditionReasonNetworkInterfaceAssociated,
+							},
+						}, "LastTransitionTime", "ObservedGeneration", "Message")),
+					}))
+				})
+			})
+
 			When("the firewallrule is an ingress rule and the last rule", func() {
 				It("should return an error when ReconcileFirewallRulesDeletion fails", func() {
 					mockec2Client.EXPECT().
