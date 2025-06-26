@@ -41,7 +41,6 @@ import (
 	"github.com/quortex/kubestatic/internal/controller"
 	"github.com/quortex/kubestatic/internal/provider"
 	"github.com/quortex/kubestatic/internal/provider/aws"
-	webhookkubestaticquortexiov1alpha1 "github.com/quortex/kubestatic/internal/webhook/v1alpha1"
 	// +kubebuilder:scaffold:imports
 )
 
@@ -235,13 +234,7 @@ func main() {
 		setupLog.Error(err, "unable to create controller", "controller", "FirewallRule")
 		os.Exit(1)
 	}
-	// nolint:goconst
-	if os.Getenv("ENABLE_WEBHOOKS") != "false" {
-		if err = webhookkubestaticquortexiov1alpha1.SetupFirewallRuleWebhookWithManager(mgr); err != nil {
-			setupLog.Error(err, "unable to create webhook", "webhook", "FirewallRule")
-			os.Exit(1)
-		}
-	}
+
 	// +kubebuilder:scaffold:builder
 
 	if err := mgr.AddHealthzCheck("healthz", healthz.Ping); err != nil {
