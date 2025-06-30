@@ -91,6 +91,9 @@ func WithNodeName(nodeName string) NodeNameFilter {
 	return NodeNameFilter{NodeName: nodeName}
 }
 
+// isFirewallRuleDuplicate checks if a firewall rule is a duplicate of another rule in the given list.
+// It compares the IPPermission of the firewall rule with those of the same direction in the list.
+// Returns true if the rule is a duplicate, false otherwise.
 func isFirewallRuleDuplicate(
 	firewallRules []v1alpha1.FirewallRule,
 	firewallRule *v1alpha1.FirewallRule,
