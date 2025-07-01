@@ -3,12 +3,14 @@ package aws
 import (
 	"context"
 	"fmt"
+	"testing"
 	"time"
 
 	"github.com/aws/aws-sdk-go-v2/aws"
 	"github.com/aws/aws-sdk-go-v2/service/ec2"
 	"github.com/aws/aws-sdk-go-v2/service/ec2/types"
 	"github.com/aws/smithy-go"
+	"github.com/aws/smithy-go/ptr"
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
 	. "github.com/onsi/gomega/gstruct"
@@ -2677,6 +2679,109 @@ var _ = Describe("AWSProvider", func() {
 				firewallRule.DeletionTimestamp = &kmetav1.Time{Time: time.Now()}
 			})
 
+			When("the firewallrule is duplicate of another rule", func() {
+				BeforeEach(func() {
+					firewallRule01.Spec = firewallRule.DeepCopy().Spec
+					firewallrules = []v1alpha1.FirewallRule{*firewallRule, *firewallRule01}
+				})
+				It("should return a status", func() {
+					mockec2Client.EXPECT().
+						DescribeInstances(ctx, gomock.AssignableToTypeOf(&ec2.DescribeInstancesInput{})).
+						DoAndReturn(func(_ context.Context, input *ec2.DescribeInstancesInput, _ ...func(*ec2.Options)) (*ec2.DescribeInstancesOutput, error) {
+							Expect(input.InstanceIds).To(ConsistOf(instanceID))
+							return &ec2.DescribeInstancesOutput{
+								Reservations: []types.Reservation{
+									{
+										Instances: []types.Instance{
+											{
+												InstanceId: aws.String(instanceID),
+												VpcId:      aws.String(vpcID),
+												NetworkInterfaces: []types.InstanceNetworkInterface{
+													{
+														Association: &types.InstanceNetworkInterfaceAssociation{
+															IpOwnerId: aws.String("aws"),
+															PublicIp:  aws.String(publicIP),
+														},
+														NetworkInterfaceId: aws.String(eniID),
+														Groups: []types.GroupIdentifier{
+															{
+																GroupId: aws.String(securityGroupID),
+															},
+														},
+													},
+												},
+											},
+										},
+									},
+								},
+							}, nil
+						})
+					mockec2Client.EXPECT().
+						DescribeSecurityGroups(ctx, gomock.AssignableToTypeOf(&ec2.DescribeSecurityGroupsInput{})).
+						DoAndReturn(func(_ context.Context, input *ec2.DescribeSecurityGroupsInput, _ ...func(*ec2.Options)) (*ec2.DescribeSecurityGroupsOutput, error) {
+							Expect(input.Filters).To(ConsistOf(filters))
+							return &ec2.DescribeSecurityGroupsOutput{
+								SecurityGroups: []types.SecurityGroup{
+									{
+										GroupId: aws.String(securityGroupID),
+										IpPermissions: []types.IpPermission{
+											{
+												IpProtocol: aws.String("TCP"),
+												FromPort:   aws.Int32(5969),
+												ToPort:     aws.Int32(5969),
+												IpRanges: []types.IpRange{
+													{
+														CidrIp: aws.String("0.0.0.0/0"),
+													},
+												},
+											},
+										},
+									},
+								},
+							}, nil
+						})
+					mockec2Client.EXPECT().
+						DescribeNetworkInterfaces(ctx, gomock.AssignableToTypeOf(&ec2.DescribeNetworkInterfacesInput{})).
+						DoAndReturn(func(_ context.Context, input *ec2.DescribeNetworkInterfacesInput, _ ...func(*ec2.Options)) (*ec2.DescribeNetworkInterfacesOutput, error) {
+							Expect(input.Filters).To(ConsistOf(
+								types.Filter{
+									Name:   aws.String("group-id"),
+									Values: []string{securityGroupID},
+								},
+							))
+							return &ec2.DescribeNetworkInterfacesOutput{
+								NetworkInterfaces: []types.NetworkInterface{
+									{
+										NetworkInterfaceId: aws.String(eniID),
+										Groups: []types.GroupIdentifier{
+											{
+												GroupId: aws.String(securityGroupID),
+											},
+										},
+									},
+								},
+							}, nil
+						})
+
+					status, _ := p.ReconcileFirewallRule(ctx, log, nodeName, instanceID, firewallRule, firewallrules)
+					Expect(status).To(MatchFields(IgnoreExtras, Fields{
+						"State": Equal(v1alpha1.FirewallRuleStatePending),
+						"Conditions": HaveExactElements(matchConditions([]kmetav1.Condition{
+							{
+								Type:   v1alpha1.FirewallRuleConditionTypeSecurityGroupCreated,
+								Status: kmetav1.ConditionTrue,
+								Reason: v1alpha1.FirewallRuleConditionReasonSecurityGroupCreated,
+							},
+							{
+								Type:   v1alpha1.FirewallRuleConditionTypeNetworkInterfaceAssociated,
+								Status: kmetav1.ConditionTrue,
+								Reason: v1alpha1.FirewallRuleConditionReasonNetworkInterfaceAssociated,
+							},
+						}, "LastTransitionTime", "ObservedGeneration", "Message")),
+					}))
+				})
+			})
+
 			When("the firewallrule is an ingress rule and the last rule", func() {
 				It("should return an error when ReconcileFirewallRulesDeletion fails", func() {
 					mockec2Client.EXPECT().
@@ -4212,3 +4317,204 @@ var _ = Describe("AWSProvider", func() {
 		})
 	})
 })
+
+func TestIsFirewallRuleDuplicate(t *testing.T) {
+	// Use Ginkgo's RegisterFailHandler with Gomega
+	RegisterFailHandler(Fail)
+
+	// Define test cases
+	var _ = Describe("isFirewallRuleDuplicate", func() {
+		var firewallRules []v1alpha1.FirewallRule
+
+		BeforeEach(func() {
+			// Setup common firewall rules for testing
+			firewallRules = []v1alpha1.FirewallRule{
+				{
+					ObjectMeta: kmetav1.ObjectMeta{
+						Name: "rule1",
+					},
+					Spec: v1alpha1.FirewallRuleSpec{
+						Direction: v1alpha1.Direction(provider.DirectionIngress),
+						FromPort:  80,
+						Protocol:  "TCP",
+						IPRanges: []*v1alpha1.IPRange{
+							{
+								CIDR: "192.168.1.0/24",
+							},
+						},
+						ToPort: ptr.Int64(80),
+					},
+				},
+				{
+					ObjectMeta: kmetav1.ObjectMeta{
+						Name: "rule2",
+					},
+					Spec: v1alpha1.FirewallRuleSpec{
+						Direction: v1alpha1.Direction(provider.DirectionEgress),
+						FromPort:  443,
+						Protocol:  "TCP",
+						IPRanges: []*v1alpha1.IPRange{
+							{
+								CIDR: "10.0.0.0/16",
+							},
+						},
+						ToPort: ptr.Int64(443),
+					},
+				},
+			}
+		})
+
+		It("should return true when an ingress rule is a duplicate", func() {
+			// Create a duplicate of rule1 with a different name
+			duplicateRule := &v1alpha1.FirewallRule{
+				ObjectMeta: kmetav1.ObjectMeta{
+					Name: "rule3",
+				},
+				Spec: v1alpha1.FirewallRuleSpec{
+					Direction: v1alpha1.Direction(provider.DirectionEgress),
+					FromPort:  443,
+					Protocol:  "TCP",
+					IPRanges: []*v1alpha1.IPRange{
+						{
+							CIDR: "10.0.0.0/16",
+						},
+					},
+					ToPort: ptr.Int64(443),
+				},
+			}
+
+			// Test if the rule is identified as a duplicate
+			result := isFirewallRuleDuplicate(firewallRules, duplicateRule)
+			Expect(result).To(BeTrue())
+		})
+
+		It("should return true when an egress rule is a duplicate", func() {
+			// Create a duplicate of rule2 with a different name
+			duplicateRule := &v1alpha1.FirewallRule{
+				ObjectMeta: kmetav1.ObjectMeta{
+					Name: "rule4",
+				},
+				Spec: v1alpha1.FirewallRuleSpec{
+					Direction: v1alpha1.Direction(provider.DirectionEgress),
+					FromPort:  443,
+					Protocol:  "TCP",
+					IPRanges: []*v1alpha1.IPRange{
+						{
+							CIDR: "10.0.0.0/16",
+						},
+					},
+					ToPort: ptr.Int64(443),
+				},
+			}
+
+			// Test if the rule is identified as a duplicate
+			result := isFirewallRuleDuplicate(firewallRules, duplicateRule)
+			Expect(result).To(BeTrue())
+		})
+
+		It("should return false for a rule with same direction but different protocol", func() {
+			// Create a rule with same direction as rule1 but different protocol
+			nonDuplicateRule := &v1alpha1.FirewallRule{
+				ObjectMeta: kmetav1.ObjectMeta{
+					Name: "rule5",
+				},
+				Spec: v1alpha1.FirewallRuleSpec{
+					Direction: v1alpha1.Direction(provider.DirectionIngress),
+					FromPort:  80,
+					Protocol:  "UDP",
+					IPRanges: []*v1alpha1.IPRange{
+						{
+							CIDR: "192.168.1.0/24",
+						},
+					},
+					ToPort: ptr.Int64(80),
+				},
+			}
+
+			// Test if the rule is identified as not a duplicate
+			result := isFirewallRuleDuplicate(firewallRules, nonDuplicateRule)
+			Expect(result).To(BeFalse())
+		})
+
+		It("should return false for a rule with same direction but different port", func() {
+			// Create a rule with same direction as rule1 but different port
+			nonDuplicateRule := &v1alpha1.FirewallRule{
+				ObjectMeta: kmetav1.ObjectMeta{
+					Name: "rule6",
+				},
+				Spec: v1alpha1.FirewallRuleSpec{
+					Direction: v1alpha1.Direction(provider.DirectionIngress),
+					FromPort:  8080,
+					Protocol:  "TCP",
+					IPRanges: []*v1alpha1.IPRange{
+						{
+							CIDR: "192.168.1.0/24",
+						},
+					},
+					ToPort: ptr.Int64(80),
+				},
+			}
+
+			// Test if the rule is identified as not a duplicate
+			result := isFirewallRuleDuplicate(firewallRules, nonDuplicateRule)
+			Expect(result).To(BeFalse())
+		})
+
+		It("should return false for a rule with same direction but different CIDR", func() {
+			// Create a rule with same direction as rule1 but different CIDR
+			nonDuplicateRule := &v1alpha1.FirewallRule{
+				ObjectMeta: kmetav1.ObjectMeta{
+					Name: "rule7",
+				},
+				Spec: v1alpha1.FirewallRuleSpec{
+					Direction: v1alpha1.Direction(provider.DirectionIngress),
+					FromPort:  80,
+					Protocol:  "TCP",
+					IPRanges: []*v1alpha1.IPRange{
+						{
+							CIDR: "172.16.1.0/24",
+						},
+					},
+					ToPort: ptr.Int64(80),
+				},
+			}
+
+			// Test if the rule is identified as not a duplicate
+			result := isFirewallRuleDuplicate(firewallRules, nonDuplicateRule)
+			Expect(result).To(BeFalse())
+		})
+
+		It("should return false for a rule with different direction", func() {
+			// Create a rule with different direction compared to rule1
+			nonDuplicateRule := &v1alpha1.FirewallRule{
+				ObjectMeta: kmetav1.ObjectMeta{
+					Name: "rule8",
+				},
+				Spec: v1alpha1.FirewallRuleSpec{
+					Direction: v1alpha1.Direction(provider.DirectionEgress),
+					FromPort:  80,
+					Protocol:  "TCP",
+					IPRanges: []*v1alpha1.IPRange{
+						{
+							CIDR: "192.168.1.0/24",
+						},
+					},
+					ToPort: ptr.Int64(80),
+				},
+			}
+
+			// Test if the rule is identified as not a duplicate
+			result := isFirewallRuleDuplicate(firewallRules, nonDuplicateRule)
+			Expect(result).To(BeFalse())
+		})
+
+		It("should handle the case when checking for duplication of a rule that's already in the list", func() {
+			// Get a rule that's already in the list
+			existingRule := &firewallRules[0]
+
+			// Test if the function correctly handles this case
+			result := isFirewallRuleDuplicate(firewallRules, existingRule)
+			Expect(result).To(BeFalse(), "Should return false as the rule is removed from comparison")
+		})
+	})
+}

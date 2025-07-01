@@ -91,6 +91,30 @@ func WithNodeName(nodeName string) NodeNameFilter {
 	return NodeNameFilter{NodeName: nodeName}
 }
 
+// isFirewallRuleDuplicate checks if a firewall rule is a duplicate of another rule in the given list.
+// It compares the IPPermission of the firewall rule with those of the same direction in the list.
+// Returns true if the rule is a duplicate, false otherwise.
+func isFirewallRuleDuplicate(
+	firewallRules []v1alpha1.FirewallRule,
+	firewallRule *v1alpha1.FirewallRule,
+) bool {
+	frSpec := provider.EncodeFirewallRuleSpec(firewallRule)
+	frSpecs := slices.DeleteFunc(
+		provider.EncodeFirewallRuleSpecs(firewallRules),
+		func(e provider.FirewallRuleSpec) bool { return e.Name == frSpec.Name },
+	)
+
+	var permissions []*provider.IPPermission
+	switch frSpec.Direction {
+	case provider.DirectionIngress:
+		permissions = provider.GetIngressIPPermissions(frSpecs)
+	case provider.DirectionEgress:
+		permissions = provider.GetEgressIPPermissions(frSpecs)
+	}
+
+	return provider.ContainsPermission(permissions, frSpec.IPPermission)
+}
+
 // SecurityGroupIDFilter is a filter option to filter by security group ID.
 type SecurityGroupIDFilter struct {
 	SecurityGroupID string
@@ -660,7 +684,7 @@ func (p *awsProvider) ReconcileFirewallRule(
 	log logr.Logger,
 	nodeName, instanceID string,
 	firewallRule *v1alpha1.FirewallRule,
-	firewallrules []v1alpha1.FirewallRule,
+	firewallRules []v1alpha1.FirewallRule,
 ) (v1alpha1.FirewallRuleStatus, error) {
 	status := v1alpha1.FirewallRuleStatus{
 		State:      v1alpha1.FirewallRuleStatePending,
@@ -861,7 +885,7 @@ func (p *awsProvider) ReconcileFirewallRule(
 	status.NetworkInterfaceID = networkInterface.NetworkInterfaceId
 
 	frSpec := provider.EncodeFirewallRuleSpec(firewallRule)
-	frSpecs := provider.EncodeFirewallRuleSpecs(firewallrules)
+	frSpecs := provider.EncodeFirewallRuleSpecs(firewallRules)
 
 	if err := p.revokeUselessPermission(
 		ctx,
@@ -875,6 +899,12 @@ func (p *awsProvider) ReconcileFirewallRule(
 	}
 
 	if !firewallRule.DeletionTimestamp.IsZero() {
+		if isFirewallRuleDuplicate(firewallRules, firewallRule) {
+			// If the firewall rule is a duplicate, we do not do anything
+			log.V(1).Info("FirewallRule is a duplicate, skipping deletion of rule", "firewallRuleID", securityGroupID)
+			return status, nil
+		}
+
 		if frSpec.Direction == provider.DirectionIngress &&
 			provider.ContainsPermission(converter.DecodeIpPermissions(securityGroup.IpPermissions), frSpec.IPPermission) {
 			if len(securityGroup.IpPermissions) == 1 && len(securityGroup.IpPermissionsEgress) == 0 {
