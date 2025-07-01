@@ -17,8 +17,14 @@ const (
 	NotFoundError ErrorCode = "NotFoundError"
 	// ConflictError indicates that the request could not be processed because of conflict in the current state of the resource
 	ConflictError ErrorCode = "ConflictError"
+	// RulesPerSecurityGroupLimitExceededError is when the request could not be processed because of a limit exceeded
+	RulesPerSecurityGroupLimitExceededError ErrorCode = "RulesPerSecurityGroupLimitExceeded"
+	// AddressLimitExceededError is when the request could not be processed because of a limit exceeded
+	AddressLimitExceededError ErrorCode = "AddressLimitExceeded"
 	// InternalError is when there was an unexpected error in the server
 	InternalError ErrorCode = "InternalError"
+	// InvalidAssociationIDNotFound is when the association ID does not exist
+	InvalidAssociationIDNotFound ErrorCode = "InvalidAssociationIDNotFound"
 )
 
 // Error is the error type used internally by the backend
@@ -67,6 +73,30 @@ func IsErrConflict(err error) bool {
 func IsErrInternal(err error) bool {
 	if e, ok := err.(*Error); ok {
 		return e.Code == InternalError
+	}
+	return false
+}
+
+// IsErrRulesPerSecurityGroupLimitExceeded returns if error is kind InternalError
+func IsErrRulesPerSecurityGroupLimitExceeded(err error) bool {
+	if e, ok := err.(*Error); ok {
+		return e.Code == RulesPerSecurityGroupLimitExceededError
+	}
+	return false
+}
+
+// IsErrInvalidAssociationIDNotFound returns if error is kind InvalidAssociationIDNotFound
+func IsErrInvalidAssociationIDNotFound(err error) bool {
+	if e, ok := err.(*Error); ok {
+		return e.Code == InvalidAssociationIDNotFound
+	}
+	return false
+}
+
+// IsErrAddressLimitExceeded returns if error is kind AddressLimitExceededError
+func IsErrAddressLimitExceeded(err error) bool {
+	if e, ok := err.(*Error); ok {
+		return e.Code == AddressLimitExceededError
 	}
 	return false
 }

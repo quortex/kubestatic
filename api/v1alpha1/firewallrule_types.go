@@ -80,9 +80,24 @@ type FirewallRuleState string
 
 // All defined FirewallRuleStates
 const (
-	FirewallRuleStateNone       FirewallRuleState = ""
-	FirewallRuleStateReserved   FirewallRuleState = "Reserved"
-	FirewallRuleStateAssociated FirewallRuleState = "Associated"
+	FirewallRuleStateApplied FirewallRuleState = "Applied"
+	FirewallRuleStatePending FirewallRuleState = "Pending"
+)
+
+// The list of condition types.
+const (
+	FirewallRuleConditionTypeSecurityGroupCreated        = "SecurityGroupCreated"
+	FirewallRuleConditionTypeNetworkInterfaceAssociated  = "NetworkInterfaceAssociated"
+	FirewallRuleConditionTypeSecurityGroupRuleAuthorized = "SecurityGroupRuleAuthorized"
+)
+
+// The list of condition reasons.
+const (
+	FirewallRuleConditionReasonProviderError               = "ProviderError"
+	FirewallRuleConditionReasonSecurityGroupCreated        = "SecurityGroupCreated"
+	FirewallRuleConditionReasonNetworkInterfaceAssociated  = "NetworkInterfaceAssociated"
+	FirewallRuleConditionReasonSecurityGroupRuleAuthorized = "SecurityGroupRuleAuthorized"
+	FirewallRuleConditionReasonNodeRetrievalError          = "NodeRetrievalError"
 )
 
 // FirewallRuleStatus defines the observed state of FirewallRule
@@ -108,6 +123,10 @@ type FirewallRuleStatus struct {
 
 	// The network interface identifier
 	NetworkInterfaceID *string `json:"networkInterfaceID,omitempty"`
+
+	// Current conditions of the firewallrule.
+	// +kubebuilder:validation:Optional
+	Conditions []metav1.Condition `json:"conditions,omitempty"`
 }
 
 // +kubebuilder:object:root=true
@@ -124,16 +143,6 @@ type FirewallRule struct {
 
 	Spec   FirewallRuleSpec   `json:"spec,omitempty"`
 	Status FirewallRuleStatus `json:"status,omitempty"`
-}
-
-// IsReserved returns if firewallRule is reserved
-func (f *FirewallRule) IsReserved() bool {
-	return f.Status.State == FirewallRuleStateReserved
-}
-
-// IsAssociated returns if firewallRule is associated
-func (f *FirewallRule) IsAssociated() bool {
-	return f.Status.State == FirewallRuleStateAssociated
 }
 
 // +kubebuilder:object:root=true

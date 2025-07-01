@@ -131,12 +131,14 @@ The kubestatic container takes as argument the parameters below.
 | Key | Description | Default |
 | ------------------------------------ | --------------------------------------------------------------------------------------------------------------------- | ------- |
 | cloud-provider | Which cloud provider to deploy to. Available values: aws | "" |
+| cluster-id | A required unique identifier used to track ownership of cloud resources. | `unset` |
 | metrics-bind-address | The address the metric endpoint binds to. | :8080 |
 | health-probe-bind-address | The address the probe endpoint binds to. | :8081 |
 | leader-elect | Enable leader election for controller manager. Enabling this will ensure there is only one active controller manager. | `false` |
 | prevent-eip-deallocation | Prevent EIP deallocation on nodes auto-assigned ExternalIPs. | `false` |
 | node-min-reconciliation-interval | The minimum duration to wait between two reconciliations for the same node. | 10s |
 | node-reconciliation-requeue-interval | The duration for which nodes are automatically reconciled. | 1m |
+| vpc-id | The VPC ID to use. If not set, the VPC ID will be retrieved from the instance metadata. | "" |
 
 ## License
 
@@ -152,3 +154,33 @@ Got a question?
 File a GitHub [issue](https://github.com/quortex/kubestatic/issues).
 
 [logo]: https://storage.googleapis.com/quortex-assets/logo.webp
+
+## ⚠️ Breaking Change in Tagging Behavior (v0.13.0)
+
+Starting from version **v0.13.0**, `kubestatic` introduces a **breaking change** in the way cloud resources (External IPs and Security Groups) are tagged.
+
+To ensure proper tracking and resource ownership, the following tags are now applied to AWS resources:
+
+- `kubestatic.quortex.io/managed`
+- `kubestatic.quortex.io/instance-id`
+- `kubestatic.quortex.io/node-name` (for Security Groups)
+- `kubestatic.quortex.io/external-ip-name` (for External IPs)
+- `kubestatic.quortex.io/cluster-id` *(new requirement)*
+
+This change may affect existing resources created by earlier versions of `kubestatic`, as they may be missing the required tags. Without proper tagging, the controller will **not** manage these resources, and even try to recreate them.
+
+### 🛠 Migration Guide
+
+To help you transition smoothly, two migration scripts are provided in the [`migration-scripts/`](./migration-scripts) directory. These scripts need to be run before upgrading:
+
+- [`tag_externalips_from_k8s.sh`](./migration-scripts/tag_externalips_from_k8s.sh):  
+  Tags existing **Elastic IPs (EIPs)** by resolving the node names and their corresponding EC2 instance IDs.
+  
+- [`tag_firewallrules_from_k8s.sh`](./migration-scripts/tag_firewallrules_from_k8s.sh):  
+  Tags existing **Security Groups (SGs)** based on the status fields of `FirewallRule` CRDs.
+
+Both scripts require a `cluster-id` as a parameter, which must match the cluster-id specified in your Helm values:
+
+```bash
+./migration-scripts/tag_externalips_from_k8s.sh <cluster-id>
+./migration-scripts/tag_firewallrules_from_k8s.sh <cluster-id>

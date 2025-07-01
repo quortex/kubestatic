@@ -43,7 +43,7 @@ import (
 	"github.com/quortex/kubestatic/api/v1alpha1"
 	"github.com/quortex/kubestatic/internal/provider"
 	"github.com/quortex/kubestatic/internal/provider/aws"
-	//+kubebuilder:scaffold:imports
+	// +kubebuilder:scaffold:imports
 )
 
 // These tests use Ginkgo (BDD-style Go testing framework). Refer to
@@ -79,7 +79,7 @@ var _ = BeforeSuite(func(done Done) {
 	err = v1alpha1.AddToScheme(scheme.Scheme)
 	Expect(err).NotTo(HaveOccurred())
 
-	//+kubebuilder:scaffold:scheme
+	// +kubebuilder:scaffold:scheme
 
 	k8sManager, err = ctrl.NewManager(cfg, ctrl.Options{
 		Scheme: scheme.Scheme,
@@ -91,7 +91,6 @@ var _ = BeforeSuite(func(done Done) {
 
 	err = (&ExternalIPReconciler{
 		Client:   k8sManager.GetClient(),
-		Log:      ctrl.Log.WithName("controllers").WithName("ExternalIP"),
 		Scheme:   k8sManager.GetScheme(),
 		Provider: pvd,
 	}).SetupWithManager(k8sManager)
@@ -99,14 +98,12 @@ var _ = BeforeSuite(func(done Done) {
 
 	err = (&NodeReconciler{
 		Client: k8sManager.GetClient(),
-		Log:    ctrl.Log.WithName("controllers").WithName("Node"),
 		Scheme: k8sManager.GetScheme(),
 	}).SetupWithManager(k8sManager)
 	Expect(err).ToNot(HaveOccurred())
 
 	err = (&FirewallRuleReconciler{
 		Client:   k8sManager.GetClient(),
-		Log:      ctrl.Log.WithName("controllers").WithName("FirewallRule"),
 		Scheme:   k8sManager.GetScheme(),
 		Provider: pvd,
 	}).SetupWithManager(k8sManager)
@@ -129,12 +126,9 @@ var _ = BeforeSuite(func(done Done) {
 			context.Background(),
 			nodeList,
 		)
-		// log.Printf("%v", err)
 		return err == nil
 	}, 60, 4).Should(BeTrue())
 	nodes = nodeList.Items
-
-	// log.Printf("%v", nodeList)
 
 	close(done)
 })
