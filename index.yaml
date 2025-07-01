@@ -2,6 +2,17 @@ apiVersion: v1
 entries:
   kubestatic:
   - apiVersion: v2
+    appVersion: 0.13.0-rc.8
+    created: "2025-07-01T12:38:39.502212097Z"
+    description: An operator to manage the lifecycle of public cloud providers resources
+      needed to expose endpoints on public nodes.
+    digest: 3c4ecf682e35c321c57e6ebc6237bd65f18a0092a7ff951fab3704b4679ff2af
+    name: kubestatic
+    type: application
+    urls:
+    - https://github.com/quortex/kubestatic/releases/download/kubestatic-chart-0.13.0-rc.8/kubestatic-0.13.0-rc.8.tgz
+    version: 0.13.0-rc.8
+  - apiVersion: v2
     appVersion: 0.13.0-rc.7
     created: "2025-04-30T13:30:43.454243831Z"
     description: An operator to manage the lifecycle of public cloud providers resources
@@ -58,10 +69,10 @@ entries:
     version: 0.13.0-rc.4
   - apiVersion: v2
     appVersion: 0.13.0-rc.3
-    created: "2025-03-06T11:11:45.333404254Z"
+    created: "2025-03-27T10:07:03.88261189Z"
     description: An operator to manage the lifecycle of public cloud providers resources
       needed to expose endpoints on public nodes.
-    digest: 890600a6478bf0643511ce9a4177f53e1113f957a6e7bac1d3f631fb1bc8d2bb
+    digest: 866ed5f64159c0961b08150c3b2e074c3cf033efbea70a69b9d9ba1fa5d1ea7f
     name: kubestatic
     type: application
     urls:
@@ -69,10 +80,10 @@ entries:
     version: 0.13.0-rc.3
   - apiVersion: v2
     appVersion: 0.13.0-rc.3
-    created: "2025-03-27T10:07:03.88261189Z"
+    created: "2025-03-06T11:11:45.333404254Z"
     description: An operator to manage the lifecycle of public cloud providers resources
       needed to expose endpoints on public nodes.
-    digest: 866ed5f64159c0961b08150c3b2e074c3cf033efbea70a69b9d9ba1fa5d1ea7f
+    digest: 890600a6478bf0643511ce9a4177f53e1113f957a6e7bac1d3f631fb1bc8d2bb
     name: kubestatic
     type: application
     urls:
@@ -309,4 +320,4 @@ entries:
     urls:
     - https://github.com/quortex/kubestatic/releases/download/kubestatic-chart-0.1.0/kubestatic-0.1.0.tgz
     version: 0.1.0
-generated: "2025-04-30T13:30:43.454536459Z"
+generated: "2025-07-01T12:38:39.502538035Z"
