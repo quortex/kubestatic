@@ -15,7 +15,7 @@ require (
 	github.com/patrickmn/go-cache v2.1.0+incompatible
 	go.opentelemetry.io/otel/exporters/prometheus v0.54.0
 	go.opentelemetry.io/otel/sdk/metric v1.32.0
-	go.uber.org/mock v0.5.0
+	go.uber.org/mock v0.5.2
 	k8s.io/api v0.32.3
 	k8s.io/apimachinery v0.32.3
 	k8s.io/client-go v0.32.3
