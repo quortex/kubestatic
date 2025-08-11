@@ -18,7 +18,7 @@ jobs:
       - name: Lint with golangci-lint
         uses: golangci/golangci-lint-action@v8
         with:
-          version: v2.0.2
+          version: v2.3.1
           args: --timeout 5m
 
   check-uncommitted-changes:
