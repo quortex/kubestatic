@@ -2,9 +2,10 @@
 package converter
 
 import (
+	"errors"
 	"fmt"
 
-	"github.com/aws/aws-sdk-go/aws/awserr"
+	"github.com/aws/smithy-go"
 
 	"github.com/quortex/kubestatic/internal/provider"
 )
@@ -15,8 +16,9 @@ func DecodeEC2Error(msg string, err error) error {
 		return nil
 	}
 
-	if aerr, ok := err.(awserr.Error); ok {
-		switch aerr.Code() {
+	var genErr *smithy.GenericAPIError
+	if errors.As(err, &genErr) {
+		switch genErr.ErrorCode() {
 		case
 			"InvalidAddress.NotFound",
 			"InvalidAddressID.NotFound",
@@ -40,8 +42,9 @@ func DecodeCommonError(msg string, err error) error {
 
 	msg = fmt.Sprintf("%s: %s", msg, err.Error())
 
-	if aerr, ok := err.(awserr.Error); ok {
-		switch aerr.Code() {
+	var genErr *smithy.GenericAPIError
+	if errors.As(err, &genErr) {
+		switch genErr.ErrorCode() {
 		case
 			"AuthFailure",
 			"UnauthorizedOperation",
@@ -58,7 +61,17 @@ func DecodeCommonError(msg string, err error) error {
 			"MalformedQueryString",
 			"ValidationError":
 			return &provider.Error{Code: provider.BadRequestError, Msg: msg}
+		case
+			"AddressLimitExceeded":
+			return &provider.Error{Code: provider.AddressLimitExceededError, Msg: msg}
+		case
+			"RulesPerSecurityGroupLimitExceeded":
+			return &provider.Error{Code: provider.RulesPerSecurityGroupLimitExceededError, Msg: msg}
+		case
+			"InvalidAssociationID.NotFound":
+			return &provider.Error{Code: provider.InvalidAssociationIDNotFound, Msg: msg}
 		}
 	}
+
 	return &provider.Error{Code: provider.InternalError, Msg: msg}
 }

@@ -19,7 +19,6 @@ package main
 import (
 	"crypto/tls"
 	"flag"
-	"fmt"
 	"os"
 	"strings"
 	"time"
@@ -76,6 +75,10 @@ func main() {
 	var preventEIPDeallocation bool
 	var nodeMinReconciliationInterval time.Duration
 	var nodeReconciliationRequeueInterval time.Duration
+	var cacheTTL time.Duration
+	var cacheCleanupInterval time.Duration
+	var clusterID string
+	var vpcID string
 	flag.StringVar(&metricsAddr, "metrics-bind-address", "0", "The address the metrics endpoint binds to. "+
 		"Use :8443 for HTTPS or :8080 for HTTP, or leave as 0 to disable the metrics service.")
 	flag.StringVar(&probeAddr, "health-probe-bind-address", ":8081", "The address the probe endpoint binds to.")
@@ -94,9 +97,14 @@ func main() {
 		"The minimum duration to wait between two reconciliations for the same node.")
 	flag.DurationVar(&nodeReconciliationRequeueInterval, "node-reconciliation-requeue-interval", 1*time.Minute,
 		"The duration for which nodes are automatically reconciled.")
-	opts := zap.Options{
-		Development: true,
-	}
+	flag.DurationVar(&cacheTTL, "cache-ttl", 15*time.Minute,
+		"The time-to-live (TTL) duration for all cache entries. After this period, cached items expire and are removed.")
+	flag.DurationVar(&cacheCleanupInterval, "cache-cleanup-interval", time.Minute,
+		"The interval at which expired cache entries are removed. "+
+			"A shorter interval ensures frequent cleanup but may impact performance.")
+	flag.StringVar(&clusterID, "cluster-id", "unset", "A required unique identifier used to track ownership of cloud resources.")
+	flag.StringVar(&vpcID, "vpc-id", "", "The VPC ID to use. If not set, the VPC ID will be retrieved from the instance metadata.")
+	opts := zap.Options{}
 	opts.BindFlags(flag.CommandLine)
 	flag.Parse()
 
@@ -111,6 +119,14 @@ func main() {
 	disableHTTP2 := func(c *tls.Config) {
 		setupLog.Info("disabling http/2")
 		c.NextProtos = []string{"http/1.1"}
+	}
+
+	// clusterID is used to tag resources on AWS. It is used to identify
+	// resources created by kubestatic. It is to safely manage resources created
+	// by kubestatic.
+	if clusterID == "" {
+		setupLog.Error(nil, "cluster-id is required")
+		os.Exit(1)
 	}
 
 	if !enableHTTP2 {
@@ -150,14 +166,21 @@ func main() {
 	switch cloudProvider {
 	case providerAWS:
 		var err error
-		pvd, err = aws.NewProvider()
+		if vpcID == "" {
+			if vpcID, err = aws.RetrieveVPCID(); err != nil {
+				setupLog.Error(err, "Failed to retrieve VPC ID")
+				os.Exit(1)
+			}
+		}
+
+		pvd, err = aws.NewProvider(cacheTTL, cacheCleanupInterval, clusterID, vpcID)
 		if err != nil {
 			setupLog.Error(err, "Failed to initialize provider")
 			os.Exit(1)
 		}
 
 	default:
-		setupLog.Error(fmt.Errorf("Invalid cloud-provider: %s", cloudProvider), "unable to init cloud provider implementation")
+		setupLog.Error(nil, "unable to init cloud provider implementation: invalid cloud-provider", "cloud-provider", cloudProvider)
 		os.Exit(1)
 	}
 
@@ -187,7 +210,6 @@ func main() {
 
 	if err = (&controller.ExternalIPReconciler{
 		Client:   mgr.GetClient(),
-		Log:      ctrl.Log.WithName("controllers").WithName("ExternalIP"),
 		Scheme:   mgr.GetScheme(),
 		Provider: pvd,
 	}).SetupWithManager(mgr); err != nil {
@@ -196,7 +218,6 @@ func main() {
 	}
 	if err = (&controller.NodeReconciler{
 		Client:                        mgr.GetClient(),
-		Log:                           ctrl.Log.WithName("controllers").WithName("Node"),
 		Scheme:                        mgr.GetScheme(),
 		PreventEIPDeallocation:        preventEIPDeallocation,
 		MinReconciliationInterval:     nodeMinReconciliationInterval,
@@ -207,14 +228,13 @@ func main() {
 	}
 	if err = (&controller.FirewallRuleReconciler{
 		Client:   mgr.GetClient(),
-		Log:      ctrl.Log.WithName("controllers").WithName("FirewallRule"),
 		Scheme:   mgr.GetScheme(),
 		Provider: pvd,
 	}).SetupWithManager(mgr); err != nil {
 		setupLog.Error(err, "unable to create controller", "controller", "FirewallRule")
 		os.Exit(1)
 	}
-	//+kubebuilder:scaffold:builder
+	// +kubebuilder:scaffold:builder
 
 	if err := mgr.AddHealthzCheck("healthz", healthz.Ping); err != nil {
 		setupLog.Error(err, "Unable to set up health check")

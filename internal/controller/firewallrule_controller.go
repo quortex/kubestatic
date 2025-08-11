@@ -18,28 +18,30 @@ package controller
 
 import (
 	"context"
-	"encoding/json"
+	"errors"
 	"fmt"
-	"reflect"
-	"time"
 
 	"github.com/go-logr/logr"
-	"github.com/google/uuid"
 	corev1 "k8s.io/api/core/v1"
-	"k8s.io/apimachinery/pkg/api/errors"
-	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/api/equality"
+	apierrors "k8s.io/apimachinery/pkg/api/errors"
+	"k8s.io/apimachinery/pkg/api/meta"
+	kmetav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/utils/ptr"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
+	"sigs.k8s.io/controller-runtime/pkg/log"
 
 	"github.com/quortex/kubestatic/api/v1alpha1"
 	"github.com/quortex/kubestatic/internal/provider"
 )
 
 const (
+	annNodeName = "kubestatic.quortex.io/node-name"
+
 	// firewallRuleFinalizer is a finalizer for FirewallRule
 	firewallRuleFinalizer   = "firewallrule.finalizers.kubestatic.quortex.io"
 	firewallRuleNodeNameKey = ".spec.nodeName"
@@ -48,27 +50,24 @@ const (
 // FirewallRuleReconciler reconciles a FirewallRule object
 type FirewallRuleReconciler struct {
 	client.Client
-	Log                  logr.Logger
-	Scheme               *runtime.Scheme
-	Provider             provider.Provider
-	frLastTransitionTime map[string]metav1.Time
+	Scheme   *runtime.Scheme
+	Provider provider.Provider
 }
 
-//+kubebuilder:rbac:groups=kubestatic.quortex.io,resources=firewallrules,verbs=get;list;watch;create;update;patch;delete
-//+kubebuilder:rbac:groups=kubestatic.quortex.io,resources=firewallrules/status,verbs=get;update;patch
-//+kubebuilder:rbac:groups=kubestatic.quortex.io,resources=firewallrules/finalizers,verbs=update
+// +kubebuilder:rbac:groups=kubestatic.quortex.io,resources=firewallrules,verbs=get;list;watch;create;update;patch;delete
+// +kubebuilder:rbac:groups=kubestatic.quortex.io,resources=firewallrules/status,verbs=get;update;patch
+// +kubebuilder:rbac:groups=kubestatic.quortex.io,resources=firewallrules/finalizers,verbs=update
 
 // Reconcile is part of the main kubernetes reconciliation loop which aims to
 // move the current state of the cluster closer to the desired state.
 func (r *FirewallRuleReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Result, error) {
-	log := r.Log.WithValues("firewallrule", req.NamespacedName, "reconciliationID", uuid.New().String())
+	log := log.FromContext(ctx)
 
-	log.V(1).Info("FirewallRule reconciliation started")
-	defer log.V(1).Info("FirewallRule reconciliation done")
+	log.Info("FirewallRule reconciliation started")
 
 	firewallRule := &v1alpha1.FirewallRule{}
 	if err := r.Get(ctx, req.NamespacedName, firewallRule); err != nil {
-		if errors.IsNotFound(err) {
+		if apierrors.IsNotFound(err) {
 			// Request object not found, could have been deleted after reconcile request.
 			// Return and don't requeue
 			log.Info("FirewallRule resource not found. Ignoring since object must be deleted")
@@ -79,449 +78,240 @@ func (r *FirewallRuleReconciler) Reconcile(ctx context.Context, req ctrl.Request
 		return ctrl.Result{}, err
 	}
 
+	if !firewallRule.DeletionTimestamp.IsZero() && len(firewallRule.Finalizers) == 0 {
+		// Object is in process of being deleted and no finalizers left – likely going to disappear
+		log.Info("FirewallRule found with deletion timestamp and no finalizers. Ignoring since object must be deleted")
+		return ctrl.Result{}, nil
+	}
+
 	if firewallRule.Spec.DisableReconciliation {
 		log.Info("Reconciliation disabled")
 		return ctrl.Result{}, nil
 	}
 
-	// LastTransitionTime is not set. This should happen when kubestatic is
-	// upgraded from a version that does not support this field, we set it with
-	// the current time.
-	if firewallRule.Status.LastTransitionTime.IsZero() {
-		firewallRule.Status.LastTransitionTime = metav1.Now()
-		if err := r.Status().Update(ctx, firewallRule); err != nil {
-			log.Error(err, "Failed to update FirewallRule state", "firewallRule", firewallRule.Name)
+	if firewallRule.Spec.NodeName == nil {
+		log.V(1).Info("No nodename found on the FirewallRule")
+		// Remove finalizer if deletion is requested
+		if !firewallRule.DeletionTimestamp.IsZero() && controllerutil.RemoveFinalizer(firewallRule, firewallRuleFinalizer) {
+			if err := r.Update(ctx, firewallRule); err != nil {
+				log.Error(err, "Failed to remove finalizer")
+				return ctrl.Result{}, err
+			}
+			log.V(1).Info("Successfully removed finalizer")
+			return ctrl.Result{}, nil
+		}
+
+		status := v1alpha1.FirewallRuleStatus{
+			State: v1alpha1.FirewallRuleStatePending,
+		}
+
+		meta.SetStatusCondition(&status.Conditions, kmetav1.Condition{
+			Type:               v1alpha1.FirewallRuleConditionTypeSecurityGroupRuleAuthorized,
+			Status:             kmetav1.ConditionFalse,
+			ObservedGeneration: firewallRule.Generation,
+			Reason:             v1alpha1.FirewallRuleConditionReasonNodeRetrievalError,
+			Message:            "The node name is empty",
+		})
+		if err := patchFirewallRuleStatus(ctx, r, firewallRule, status); err != nil {
+			log.Error(err, "Failed to patch FirewallRule status")
+			return ctrl.Result{}, fmt.Errorf("failed to patch FirewallRule status: %w", err)
+		}
+		return ctrl.Result{}, nil
+	}
+
+	// Add finalizer
+	if controllerutil.AddFinalizer(firewallRule, firewallRuleFinalizer) {
+		if err := r.Update(ctx, firewallRule); err != nil {
+			log.Error(err, "Failed to add finalizer")
 			return ctrl.Result{}, err
 		}
-		r.frLastTransitionTime[firewallRule.Name] = firewallRule.Status.LastTransitionTime
+		log.V(1).Info("Successfully added finalizer")
+		return ctrl.Result{}, nil
 	}
 
-	// Check for LastTransitionTime consistency, if not, requeueing.
-	knownLastTransitionTime := r.frLastTransitionTime[firewallRule.Name]
-	if firewallRule.Status.LastTransitionTime.Before(&knownLastTransitionTime) {
-		log.V(1).Info("FirewallRule LastTransitionTime inconsistency, requeuing in 1 second")
-		return ctrl.Result{RequeueAfter: time.Second}, nil
-	}
-	r.frLastTransitionTime[firewallRule.Name] = firewallRule.Status.LastTransitionTime
+	previousNodeName := firewallRule.Annotations[annNodeName]
+	currentNodeName := ptr.Deref(firewallRule.Spec.NodeName, "")
 
-	// Lifecycle reconciliation
-	if firewallRule.ObjectMeta.DeletionTimestamp.IsZero() {
-		return r.reconcileFirewallRule(ctx, log, firewallRule)
+	// Initial creation or previous node name has been reconciled,
+	// reconcile FirewallRules for the current node and update the
+	// FirewallRule with the node annotation
+	if previousNodeName == "" && currentNodeName != "" {
+		if err := r.reconcileFirewallRule(ctx, log, currentNodeName, firewallRule); err != nil {
+			log.Error(err, "Failed to reconcile FirewallRule")
+			return ctrl.Result{}, err
+		}
+
+		existingFR := client.MergeFrom(firewallRule.DeepCopy())
+		if firewallRule.Annotations == nil {
+			firewallRule.Annotations = make(map[string]string, 1)
+		}
+		firewallRule.Annotations[annNodeName] = currentNodeName
+
+		if err := r.Patch(ctx, firewallRule, existingFR); err != nil {
+			log.Error(err, "Failed to add annotation node name")
+			return ctrl.Result{}, err
+		}
+		log.V(1).Info("Successfully added annotation node name")
+		return ctrl.Result{}, nil
 	}
 
-	// Deletion reconciliation
-	return r.reconcileFirewallRuleDeletion(ctx, log, firewallRule)
+	// Node name has changed, reconcile FirewallRules for the previous node,
+	// then update the FirewallRule to remove the node annotation
+	if previousNodeName != "" && currentNodeName != previousNodeName {
+		if err := r.reconcileFirewallRule(ctx, log, previousNodeName, firewallRule); err != nil {
+			log.Error(err, "Failed to reconcile FirewallRule")
+			return ctrl.Result{}, err
+		}
+
+		existingFR := client.MergeFrom(firewallRule.DeepCopy())
+		delete(firewallRule.Annotations, annNodeName)
+		if err := r.Patch(ctx, firewallRule, existingFR); err != nil {
+			log.Error(err, "Failed to remove annotation node name")
+			return ctrl.Result{}, err
+		}
+		log.V(1).Info("Successfully removed annotation node name")
+		return ctrl.Result{}, nil
+	}
+
+	// Node name has not changed, reconcile FirewallRules for the current node
+	if previousNodeName != "" && currentNodeName == previousNodeName {
+		if err := r.reconcileFirewallRule(ctx, log, currentNodeName, firewallRule); err != nil {
+			log.Error(err, "Failed to reconcile FirewallRule")
+			return ctrl.Result{}, err
+		}
+	}
+
+	// Remove finalizer
+	if !firewallRule.DeletionTimestamp.IsZero() && controllerutil.RemoveFinalizer(firewallRule, firewallRuleFinalizer) {
+		if err := r.Update(ctx, firewallRule); err != nil {
+			log.Error(err, "Failed to remove finalizer")
+			return ctrl.Result{}, err
+		}
+		log.V(1).Info("Successfully removed finalizer")
+	}
+
+	log.Info("FirewallRule successfully reconciled")
+
+	return ctrl.Result{}, nil
 }
 
-//nolint:gocyclo
+// patchFirewallRuleStatus updates the status of a FirewallRule resource if there are any changes.
+// It patches the status with the new status provided and updates the LastTransitionTime if there are differences.
+//
+// Parameters:
+//
+//	ctx - The context for the request.
+//	r - The FirewallRuleReconciler responsible for reconciling the FirewallRule resource.
+//	firewallRule - The FirewallRule resource to be updated.
+//	newStatus - The new status to be applied to the FirewallRule resource.
+//
+// Returns:
+//
+//	error - An error if the patch operation fails, otherwise nil.
+func patchFirewallRuleStatus(
+	ctx context.Context,
+	r *FirewallRuleReconciler,
+	firewallRule *v1alpha1.FirewallRule,
+	newStatus v1alpha1.FirewallRuleStatus,
+) error {
+	existingFR := firewallRule.DeepCopy()
+	firewallRule.Status = newStatus
+	firewallRule.Status.LastTransitionTime = existingFR.Status.LastTransitionTime
+
+	if !equality.Semantic.DeepEqual(firewallRule.Status, existingFR.Status) {
+		firewallRule.Status.LastTransitionTime = kmetav1.Now()
+		if err := r.Status().Patch(ctx, firewallRule, client.MergeFrom(existingFR)); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// reconcileFirewallRules reconciles the firewall rules for a specific node.
+// It retrieves the node information and updates the firewall rules accordingly.
+// If the node is not found, it triggers the deletion of firewall rules on the provider side.
+// Otherwise, it reconciles the existing firewall rules and updates their status.
+//
+// Parameters:
+//   - ctx: The context for the reconciliation process.
+//   - log: The logger used for logging messages.
+//   - nodeName: The name of the node for which firewall rules are being reconciled.
+//   - firewallRules: A list of FirewallRule resources to be reconciled.
+//
+// Returns:
+//   - error: An error if the reconciliation process fails, otherwise nil.
 func (r *FirewallRuleReconciler) reconcileFirewallRule(
 	ctx context.Context,
 	log logr.Logger,
-	rule *v1alpha1.FirewallRule,
-) (ctrl.Result, error) {
-	// 1st STEP
-	//
-	// Add finalizer
-	if !controllerutil.ContainsFinalizer(rule, firewallRuleFinalizer) {
-		rule.ObjectMeta.Finalizers = append(rule.ObjectMeta.Finalizers, firewallRuleFinalizer)
-		log.V(1).Info("Updating FirewallRule", "finalizer", firewallRuleFinalizer)
-		return ctrl.Result{}, r.Update(ctx, rule)
+	nodeName string,
+	firewallRule *v1alpha1.FirewallRule,
+) error {
+	var node corev1.Node
+	if err := r.Get(ctx, types.NamespacedName{Name: nodeName}, &node); err != nil {
+		if apierrors.IsNotFound(err) {
+			if err := r.Provider.ReconcileFirewallRulesDeletion(ctx, log, nodeName, ""); err != nil {
+				log.Error(err, "Failed to reconcile FirewallRule deletion")
+				return err
+			}
+		}
+
+		// Remove finalizer if deletion is requested
+		if !firewallRule.DeletionTimestamp.IsZero() && controllerutil.RemoveFinalizer(firewallRule, firewallRuleFinalizer) {
+			if removeFinalizerErr := r.Update(ctx, firewallRule); removeFinalizerErr != nil {
+				log.Error(errors.Join(removeFinalizerErr, err), "Failed to remove finalizer during error handling")
+				return fmt.Errorf("failed to remove finalizer during error handling: %w", errors.Join(removeFinalizerErr, err))
+			}
+			log.V(1).Info("Successfully removed finalizer")
+			return err
+		}
+
+		status := v1alpha1.FirewallRuleStatus{
+			State: v1alpha1.FirewallRuleStatePending,
+		}
+
+		meta.SetStatusCondition(&status.Conditions, kmetav1.Condition{
+			Type:               v1alpha1.FirewallRuleConditionTypeSecurityGroupRuleAuthorized,
+			Status:             kmetav1.ConditionFalse,
+			ObservedGeneration: firewallRule.Generation,
+			Reason:             v1alpha1.FirewallRuleConditionReasonNodeRetrievalError,
+			Message:            fmt.Sprintf("Failed to get Node: %s", err),
+		})
+		if patchErr := patchFirewallRuleStatus(ctx, r, firewallRule, status); patchErr != nil {
+			log.Error(errors.Join(patchErr, err), "Failed to patch FirewallRule status during error handling")
+			return fmt.Errorf("failed to patch FirewallRule status during error handling: %w", errors.Join(patchErr, err))
+		}
+
+		log.Error(err, "Failed to get Node")
+		return err
 	}
 
-	// 2nd STEP
-	//
-	// Reserve firewall
-	if rule.Status.State == v1alpha1.FirewallRuleStateNone && rule.Spec.NodeName != nil {
-		// Create firewall rule
-		// In the case of standalone firewall rules, we create it,
-		// otherwise, we update the group dedicated to the node.
-		var id string
-		var err error
-		if r.Provider.HasGroupedFirewallRules() {
-			// List FirewallRules with identical nodeName
-			frs := &v1alpha1.FirewallRuleList{}
-			if err := r.List(ctx, frs, client.MatchingFields{firewallRuleNodeNameKey: *rule.Spec.NodeName}); err != nil {
-				log.Error(err, "Unable to list FirewallRules")
-				return ctrl.Result{}, err
-			}
-
-			// Check for other rules associated to the node.
-			// If there is already one, we update the group of rules, if not, we create a new group.
-			rulesAssociated := []v1alpha1.FirewallRule{}
-			for _, fr := range frs.Items {
-				knownLastTransitionTime := r.frLastTransitionTime[fr.Name]
-				if !fr.Status.LastTransitionTime.Equal(&knownLastTransitionTime) {
-					log.V(1).Info("FirewallRule LastTransitionTime inconsistency, requeuing in 1 second", "firewallRuleName", fr.Name)
-					return ctrl.Result{RequeueAfter: time.Second}, nil
-				}
-				if fr.Name != rule.Name && fr.Status.State != v1alpha1.FirewallRuleStateNone {
-					rulesAssociated = append(rulesAssociated, fr)
-				}
-			}
-
-			if len(rulesAssociated) > 0 {
-				firewallRuleID := ptr.Deref(rulesAssociated[0].Status.FirewallRuleID, "")
-				log.V(1).Info("Updating FirewallRule group", "firewallRuleID", firewallRuleID)
-				id, err = r.Provider.UpdateFirewallRuleGroup(ctx, encodeUpdateFirewallRuleGroupRequest(firewallRuleID, frs.Items))
-				if err != nil {
-					log.Error(err, "Unable to update FirewallRules")
-					return ctrl.Result{}, err
-				}
-			} else {
-				// No existing group, we create a new one.
-				log.V(1).Info("Creating FirewallRule group")
-				id, err = r.Provider.CreateFirewallRuleGroup(
-					ctx,
-					encodeCreateFirewallRuleGroupRequest(
-						fmt.Sprintf("kubestatic-%s", randomString(10)),
-						fmt.Sprintf("Kubestatic managed group for node %s", *rule.Spec.NodeName),
-						frs.Items,
-					),
-				)
-			}
-		} else {
-			// Standalone rules, we simply create a rule.
-			log.V(1).Info("Creating FirewallRule")
-			id, err = r.Provider.CreateFirewallRule(ctx, encodeCreateFirewallRuleRequest(rule))
-		}
-
-		if err != nil {
-			log.Error(err, "Failed to create firewall rule")
-			return ctrl.Result{}, err
-		}
-		log.Info("Created firewall rule", "id", id)
-
-		// Update status
-		rule.Status.LastTransitionTime = metav1.Now()
-		rule.Status.State = v1alpha1.FirewallRuleStateReserved
-		rule.Status.FirewallRuleID = &id
-		lastApplied, err := json.Marshal(rule.Spec)
-		if err != nil {
-			return ctrl.Result{}, fmt.Errorf("Failed to marshal last applied firewallrule: %w", err)
-		}
-		rule.Status.LastApplied = nil
-		if len(lastApplied) > 0 {
-			rule.Status.LastApplied = ptr.To(string(lastApplied))
-		}
-		log.V(1).Info("Updating FirewallRule", "state", rule.Status.State, "firewallRuleID", rule.Status.FirewallRuleID)
-		if err = r.Status().Update(ctx, rule); err != nil {
-			log.Error(err, "Failed to update FirewallRule status", "firewallRule", rule.Name, "status", rule.Status.State)
-			return ctrl.Result{}, err
-		}
-		r.frLastTransitionTime[rule.Name] = rule.Status.LastTransitionTime
-		return ctrl.Result{RequeueAfter: time.Second * 5}, nil
-
-	} else if rule.Spec.NodeName != nil {
-		lastApplied := &v1alpha1.FirewallRuleSpec{}
-		if err := json.Unmarshal([]byte(ptr.Deref(rule.Status.LastApplied, "")), lastApplied); err != nil {
-			return ctrl.Result{}, fmt.Errorf("Failed to unmarshal last applied firewallrule: %w", err)
-		}
-
-		// Update firewall rule.
-		// In the case of standalone firewall rules, we update it,
-		// otherwise, we update the group dedicated to the node.
-		if !reflect.DeepEqual(rule.Spec, *lastApplied) {
-			// Update firewall rule
-			firewallRuleID := ptr.Deref(rule.Status.FirewallRuleID, "")
-			var err error
-			if r.Provider.HasGroupedFirewallRules() {
-				// List FirewallRules with identical nodeName
-				frs := &v1alpha1.FirewallRuleList{}
-				if err := r.List(ctx, frs, client.MatchingFields{firewallRuleNodeNameKey: *rule.Spec.NodeName}); err != nil {
-					log.Error(err, "Unable to list FirewallRules")
-					return ctrl.Result{}, err
-				}
-				rules := []v1alpha1.FirewallRule{}
-				for _, fr := range frs.Items {
-					knownLastTransitionTime := r.frLastTransitionTime[fr.Name]
-					if !fr.Status.LastTransitionTime.Equal(&knownLastTransitionTime) {
-						log.V(1).Info("FirewallRule LastTransitionTime inconsistency, requeuing in 1 second", "firewallRuleName", fr.Name)
-						return ctrl.Result{RequeueAfter: time.Second}, nil
-					}
-					rules = append(rules, fr)
-				}
-				log.V(1).Info("Updating FirewallRule group", "firewallRuleID", firewallRuleID)
-				_, err = r.Provider.UpdateFirewallRuleGroup(ctx, encodeUpdateFirewallRuleGroupRequest(firewallRuleID, rules))
-			} else {
-				log.V(1).Info("Updating FirewallRule", "firewallRuleID", firewallRuleID)
-				_, err = r.Provider.UpdateFirewallRule(ctx, encodeUpdateFirewallRuleRequest(firewallRuleID, rule))
-			}
-
-			if err != nil {
-				log.Error(err, "Failed to update firewall rule", "id", firewallRuleID)
-				return ctrl.Result{}, err
-			}
-			log.Info("Updated firewall rule", "id", firewallRuleID)
-
-			// Update status
-			lastApplied, err := json.Marshal(rule.Spec)
-			if err != nil {
-				return ctrl.Result{}, fmt.Errorf("Failed to marshal last applied firewallrule: %w", err)
-			}
-			rule.Status.LastTransitionTime = metav1.Now()
-			rule.Status.LastApplied = nil
-			if len(lastApplied) > 0 {
-				rule.Status.LastApplied = ptr.To(string(lastApplied))
-			}
-			log.V(1).Info("Updating FirewallRule", "state", rule.Status.State, "firewallRuleID", rule.Status.FirewallRuleID)
-			if err = r.Status().Update(ctx, rule); err != nil {
-				log.Error(err, "Failed to update FirewallRule status", "firewallRule", rule.Name, "status", rule.Status.State)
-				return ctrl.Result{}, err
-			}
-			r.frLastTransitionTime[rule.Name] = rule.Status.LastTransitionTime
-			return ctrl.Result{RequeueAfter: time.Second * 5}, nil
-		}
+	var firewallRules v1alpha1.FirewallRuleList
+	if err := r.List(ctx, &firewallRules, client.MatchingFields{firewallRuleNodeNameKey: nodeName}); err != nil {
+		log.Error(err, "Unable to list FirewallRules")
+		return err
 	}
 
-	// 3rd STEP
-	//
-	// Finally associate firewall rule to instance network interface.
-	if rule.IsReserved() && rule.Spec.NodeName != nil {
-		// Get node from FirewallRule spec
-		var node corev1.Node
-		if err := r.Get(ctx, types.NamespacedName{Name: *rule.Spec.NodeName}, &node); err != nil {
-			if errors.IsNotFound(err) {
-				// Invalid nodeName, remove FirewallRule nodeName attribute.
-				log.Info("Node not found. Removing it from FirewallRule spec", "nodeName", rule.Spec.NodeName)
-				rule.Spec.NodeName = nil
-				return ctrl.Result{}, r.Update(ctx, rule)
-			}
-			// Error reading the object - requeue the request.
-			log.Error(err, "Failed to get Node")
-			return ctrl.Result{}, err
+	status, err := r.Provider.ReconcileFirewallRule(ctx, log, nodeName, r.Provider.GetInstanceID(node), firewallRule, firewallRules.Items)
+	if err != nil {
+		if patchErr := patchFirewallRuleStatus(ctx, r, firewallRule, status); patchErr != nil {
+			log.Error(errors.Join(patchErr, err), "Failed to patch FirewallRule status during error handling")
+			return fmt.Errorf("failed to patch FirewallRule status during error handling: %w", errors.Join(patchErr, err))
 		}
 
-		// Retrieve node instance
-		instanceID := r.Provider.GetInstanceID(node)
-		res, err := r.Provider.GetInstance(ctx, instanceID)
-		if err != nil {
-			log.Error(err, "Failed to get instance", "id", instanceID)
-			return ctrl.Result{}, err
-		}
-
-		// Get the first network interface with a public IP address
-		// This is needed because we could have multiple network interfaces,
-		// for example on EKS we have the public one, as well as one or more created by the EKS CNI.
-		var networkInterface *provider.NetworkInterface
-		for _, elem := range res.NetworkInterfaces {
-			if elem != nil && elem.PublicIP != nil {
-				networkInterface = elem
-				break
-			}
-		}
-		if networkInterface == nil {
-			err := fmt.Errorf("no network interface with public IP found for instance %s", instanceID)
-			log.Error(err, "Cannot associate a firewall rule with this instance", "instanceID", instanceID)
-			return ctrl.Result{}, err
-		}
-
-		// Finally, associate firewall rule to instance network interface, then update status.
-		if err := r.Provider.AssociateFirewallRule(ctx, provider.AssociateFirewallRuleRequest{
-			FirewallRuleID:     *rule.Status.FirewallRuleID,
-			NetworkInterfaceID: networkInterface.NetworkInterfaceID,
-		}); err != nil {
-			log.Error(
-				err,
-				"Failed to associate firewall rule",
-				"firewallRuleID", *rule.Status.FirewallRuleID,
-				"instanceID", instanceID,
-				"networkInterfaceID", networkInterface.NetworkInterfaceID,
-			)
-			return ctrl.Result{}, err
-		}
-		log.Info(
-			"Associated firewall rule",
-			"firewallRuleID", *rule.Status.FirewallRuleID,
-			"instanceID", instanceID,
-			"networkInterfaceID", networkInterface.NetworkInterfaceID,
-		)
-
-		// Update status
-		rule.Status.LastTransitionTime = metav1.Now()
-		rule.Status.State = v1alpha1.FirewallRuleStateAssociated
-		rule.Status.InstanceID = &instanceID
-		rule.Status.NetworkInterfaceID = &networkInterface.NetworkInterfaceID
-		log.V(1).Info(
-			"Updating FirewallRule",
-			"state", rule.Status.State,
-			"instanceID", rule.Status.InstanceID,
-			"networkInterfaceID", rule.Status.NetworkInterfaceID,
-		)
-		if err = r.Status().Update(ctx, rule); err != nil {
-			log.Error(err, "Failed to update FirewallRule status", "firewallRule", rule.Name, "status", rule.Status.State)
-			return ctrl.Result{}, err
-		}
-		r.frLastTransitionTime[rule.Name] = rule.Status.LastTransitionTime
-		return ctrl.Result{RequeueAfter: time.Second * 5}, nil
+		log.Error(err, "Failed to reconcile FirewallRule")
+		return err
 	}
 
-	// FirewallRule reliability check
-	//
-	// Check if the associated node still exists and disassociate it if it does not.
-	// No nodeName or no living node, set state back to "Reserved"
-	if rule.Status.State != v1alpha1.FirewallRuleStateNone {
-		if rule.Spec.NodeName != nil {
-			// Get node from FirewallRule spec
-			var node corev1.Node
-			if err := r.Get(ctx, types.NamespacedName{Name: *rule.Spec.NodeName}, &node); err != nil {
-				if errors.IsNotFound(err) {
-					// Invalid nodeName, remove FirewallRule nodeName attribute.
-					log.Info("Node not found. Set state back to Reserved", "nodeName", rule.Spec.NodeName)
-
-					// Set status back to Reserved
-					rule.Status.LastTransitionTime = metav1.Now()
-					rule.Status.State = v1alpha1.FirewallRuleStateReserved
-					log.V(1).Info("Updating FirewallRule", "state", rule.Status.State, "InstanceID", rule.Status.InstanceID)
-					if err = r.Status().Update(ctx, rule); err != nil {
-						log.Error(err, "Failed to update FirewallRule status", "firewallRule", rule.Name, "status", rule.Status.State)
-						return ctrl.Result{}, err
-					}
-					r.frLastTransitionTime[rule.Name] = rule.Status.LastTransitionTime
-
-					rule.Spec.NodeName = nil
-					return ctrl.Result{}, r.Update(ctx, rule)
-				}
-				// Error reading the object - requeue the request.
-				log.Error(err, "Failed to get Node")
-				return ctrl.Result{}, err
-			}
-
-			// If the node is not being deleted and has an instance corresponding to its node name, the reconciliation is done
-			// This check exist to disassociate the rule of the old instance if the node name change
-			if node.ObjectMeta.DeletionTimestamp.IsZero() && ptr.Deref(rule.Status.InstanceID, "") == r.Provider.GetInstanceID(node) {
-				return ctrl.Result{}, nil
-			}
-		}
-
-		// If the rule has no node name, has an node name not matching its instance ID, or its node is being deleted
-		// clear firewall rule from provider and set state back to "None"
-		return r.clearFirewallRule(ctx, log, rule)
+	if err := patchFirewallRuleStatus(ctx, r, firewallRule, status); err != nil {
+		log.Error(err, "Failed to patch FirewallRule status")
+		return fmt.Errorf("failed to patch FirewallRule status: %w", err)
 	}
 
-	return ctrl.Result{}, nil
-}
-
-func (r *FirewallRuleReconciler) reconcileFirewallRuleDeletion(
-	ctx context.Context,
-	log logr.Logger,
-	rule *v1alpha1.FirewallRule,
-) (ctrl.Result, error) {
-	// 1st STEP
-	//
-	// Reconciliation of a possible firewall rule associated with the instance.
-	// If a rule is associated with an instance or reserved, clear it.
-	if rule.Status.State != v1alpha1.FirewallRuleStateNone {
-		return r.clearFirewallRule(ctx, log, rule)
-	}
-
-	// 2nd STEP
-	//
-	// Remove finalizer to release FirewallRule
-	if controllerutil.ContainsFinalizer(rule, firewallRuleFinalizer) {
-		controllerutil.RemoveFinalizer(rule, firewallRuleFinalizer)
-		return ctrl.Result{}, r.Update(ctx, rule)
-	}
-
-	return ctrl.Result{}, nil
-}
-
-// clearFirewallRule remove the rule from the provider rule
-// In the case of grouped rules, the provider rule is updated and deleted if needed
-// In the case of standalone rules the provider rule is deleted
-func (r *FirewallRuleReconciler) clearFirewallRule(ctx context.Context, log logr.Logger, rule *v1alpha1.FirewallRule) (ctrl.Result, error) {
-	log = log.WithValues("ruleName", rule.Name)
-
-	if rule.Status.FirewallRuleID != nil {
-		firewallRuleID := ptr.Deref(rule.Status.FirewallRuleID, "")
-
-		toDelete := false
-		if r.Provider.HasGroupedFirewallRules() {
-			// List FirewallRules
-			frs := &v1alpha1.FirewallRuleList{}
-			if err := r.List(ctx, frs); err != nil {
-				log.Error(err, "Unable to list FirewallRules")
-				return ctrl.Result{}, err
-			}
-
-			// Check for other rules associated to the node.
-			// If there is other ones, we only update the group of rules, if not, we also disassociate the group.
-			rules := []v1alpha1.FirewallRule{}
-			for _, fr := range frs.Items {
-				knownLastTransitionTime := r.frLastTransitionTime[fr.Name]
-				if !fr.Status.LastTransitionTime.Equal(&knownLastTransitionTime) {
-					log.V(1).Info("FirewallRule LastTransitionTime inconsistency, requeuing in 1 second", "firewallRuleName", fr.Name)
-					return ctrl.Result{RequeueAfter: time.Second}, nil
-				}
-				if fr.Name != rule.Name && ptr.Deref(fr.Status.FirewallRuleID, "") == ptr.Deref(rule.Status.FirewallRuleID, "") {
-					rules = append(rules, fr)
-				}
-			}
-			if len(rules) > 0 {
-				log.V(1).Info("Updating FirewallRule", "firewallRuleID", firewallRuleID)
-				if _, err := r.Provider.UpdateFirewallRuleGroup(ctx, encodeUpdateFirewallRuleGroupRequest(firewallRuleID, rules)); err != nil {
-					log.Error(err, "Unable to update FirewallRules")
-					return ctrl.Result{}, err
-				}
-			} else {
-				toDelete = true
-			}
-		} else {
-			toDelete = true
-		}
-
-		// Perform firewallrule deletion if needed
-		if toDelete {
-			if rule.Status.NetworkInterfaceID != nil {
-				log.V(1).Info("Disassociating firewall rule on provider", "firewallRuleID", firewallRuleID)
-				err := r.Provider.DisassociateFirewallRule(ctx, provider.AssociateFirewallRuleRequest{
-					FirewallRuleID:     *rule.Status.FirewallRuleID,
-					NetworkInterfaceID: *rule.Status.NetworkInterfaceID,
-				})
-				if err != nil {
-					if !provider.IsErrNotFound(err) {
-						log.Error(
-							err,
-							"Failed to disassociate firewall rule",
-							"firewallRuleID", *rule.Status.FirewallRuleID,
-							"networkInterfaceID", *rule.Status.NetworkInterfaceID,
-						)
-						return ctrl.Result{}, err
-					}
-					log.V(1).Info("Firewall rule already disassociated", "firewallRuleID", *rule.Status.FirewallRuleID)
-				} else {
-					log.Info("Disassociated firewall rule", "firewallRuleID", *rule.Status.FirewallRuleID, "networkInterfaceID", *rule.Status.NetworkInterfaceID)
-				}
-			}
-
-			log.V(1).Info("Deleting firewall rule on provider", "firewallRuleID", firewallRuleID)
-			err := r.Provider.DeleteFirewallRule(ctx, *rule.Status.FirewallRuleID)
-			if err != nil {
-				if !provider.IsErrNotFound(err) {
-					log.Error(err, "Failed to delete firewall rule", "firewallRuleID", *rule.Status.FirewallRuleID)
-					return ctrl.Result{}, err
-				}
-				log.V(1).Info("Firewall rule already deleted", "firewallRuleID", *rule.Status.FirewallRuleID)
-			} else {
-				log.Info("Deleted firewall rule", "firewallRuleID", *rule.Status.FirewallRuleID)
-			}
-		}
-	}
-
-	// Update status
-	rule.Status = v1alpha1.FirewallRuleStatus{State: v1alpha1.FirewallRuleStateNone, LastTransitionTime: metav1.Now()}
-	log.V(1).Info("Updating FirewallRule", "state", rule.Status.State)
-	if err := r.Status().Update(ctx, rule); err != nil {
-		log.Error(err, "Failed to update FirewallRule state", "firewallRule", rule.Name)
-		return ctrl.Result{}, err
-	}
-	r.frLastTransitionTime[rule.Name] = rule.Status.LastTransitionTime
-
-	return ctrl.Result{RequeueAfter: time.Second * 5}, nil
+	return nil
 }
 
 // SetupWithManager sets up the controller with the Manager.
 func (r *FirewallRuleReconciler) SetupWithManager(mgr ctrl.Manager) error {
-	// Index FirewallRule NodeName to list FirewallRules by node.
 	if err := mgr.GetFieldIndexer().IndexField(context.Background(), &v1alpha1.FirewallRule{}, firewallRuleNodeNameKey, func(o client.Object) []string {
 		fr := o.(*v1alpha1.FirewallRule)
 		return []string{ptr.Deref(fr.Spec.NodeName, "")}
@@ -529,105 +319,7 @@ func (r *FirewallRuleReconciler) SetupWithManager(mgr ctrl.Manager) error {
 		return err
 	}
 
-	r.frLastTransitionTime = make(map[string]metav1.Time)
-
 	return ctrl.NewControllerManagedBy(mgr).
 		For(&v1alpha1.FirewallRule{}).
 		Complete(r)
-}
-
-// encodeCreateFirewallRuleGroupRequest converts an api FirewallRule slice to a CreateFirewallRuleGroupRequest slice.
-func encodeCreateFirewallRuleGroupRequest(name, description string, data []v1alpha1.FirewallRule) provider.CreateFirewallRuleGroupRequest {
-	return provider.CreateFirewallRuleGroupRequest{
-		Name:          name,
-		Description:   description,
-		FirewallRules: encodeFirewallRuleSpecs(data),
-	}
-}
-
-// encodeCreateFirewallRuleRequest converts an api FirewallRule to a CreateFirewallRuleRequest.
-func encodeCreateFirewallRuleRequest(data *v1alpha1.FirewallRule) provider.CreateFirewallRuleRequest {
-	return provider.CreateFirewallRuleRequest{
-		FirewallRuleSpec: encodeFirewallRuleSpec(data),
-	}
-}
-
-// encodeUpdateFirewallRuleGroupRequest converts an api FirewallRule slice to a UpdateFirewallRuleGroupRequest slice.
-func encodeUpdateFirewallRuleGroupRequest(id string, data []v1alpha1.FirewallRule) provider.UpdateFirewallRuleGroupRequest {
-	return provider.UpdateFirewallRuleGroupRequest{
-		FirewallRuleGroupID: id,
-		FirewallRules:       encodeFirewallRuleSpecs(data),
-	}
-}
-
-// encodeUpdateFirewallRuleRequest converts an api FirewallRule to a UpdateFirewallRuleRequest.
-func encodeUpdateFirewallRuleRequest(id string, data *v1alpha1.FirewallRule) provider.UpdateFirewallRuleRequest {
-	return provider.UpdateFirewallRuleRequest{
-		FirewallRuleID:   id,
-		FirewallRuleSpec: encodeFirewallRuleSpec(data),
-	}
-}
-
-// encodeFirewallRuleSpecs converts an api FirewallRule slice to a FirewallRuleSpec slice.
-func encodeFirewallRuleSpecs(data []v1alpha1.FirewallRule) []provider.FirewallRuleSpec {
-	if data == nil {
-		return make([]provider.FirewallRuleSpec, 0)
-	}
-
-	res := make([]provider.FirewallRuleSpec, len(data))
-	for i, e := range data {
-		res[i] = encodeFirewallRuleSpec(&e)
-	}
-	return res
-}
-
-// encodeFirewallRuleSpec converts an api FirewallRule to a FirewallRuleSpec.
-func encodeFirewallRuleSpec(data *v1alpha1.FirewallRule) provider.FirewallRuleSpec {
-	return provider.FirewallRuleSpec{
-		Name:        data.Name,
-		Description: data.Spec.Description,
-		Direction:   encodeDirection(data.Spec.Direction),
-		IPPermission: &provider.IPPermission{
-			FromPort: data.Spec.FromPort,
-			Protocol: data.Spec.Protocol,
-			IPRanges: encodeIPRanges(data.Spec.IPRanges),
-			ToPort:   data.Spec.ToPort,
-		},
-	}
-}
-
-// encodeIPRange converts an api IPRange to an IPRange.
-func encodeIPRange(data *v1alpha1.IPRange) *provider.IPRange {
-	if data == nil {
-		return nil
-	}
-
-	return &provider.IPRange{
-		CIDR:        data.CIDR,
-		Description: data.Description,
-	}
-}
-
-// encodeIPRange converts an api IPRange slice to an IPRange slice.
-func encodeIPRanges(data []*v1alpha1.IPRange) []*provider.IPRange {
-	if data == nil {
-		return make([]*provider.IPRange, 0)
-	}
-
-	res := make([]*provider.IPRange, len(data))
-	for i, e := range data {
-		res[i] = encodeIPRange(e)
-	}
-	return res
-}
-
-// encodeDirection converts an api Direction to a Direction.
-func encodeDirection(data v1alpha1.Direction) provider.Direction {
-	switch data {
-	case v1alpha1.DirectionEgress:
-		return provider.DirectionEgress
-	case v1alpha1.DirectionIngress:
-		return provider.DirectionIngress
-	}
-	return provider.Direction("")
 }

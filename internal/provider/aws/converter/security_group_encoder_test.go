@@ -5,8 +5,8 @@ import (
 	"reflect"
 	"testing"
 
-	"github.com/aws/aws-sdk-go/aws"
-	"github.com/aws/aws-sdk-go/service/ec2"
+	"github.com/aws/aws-sdk-go-v2/aws"
+	"github.com/aws/aws-sdk-go-v2/service/ec2/types"
 
 	"github.com/quortex/kubestatic/internal/provider"
 )
@@ -18,7 +18,7 @@ func TestEncodeIPPermission(t *testing.T) {
 	tests := []struct {
 		name string
 		args args
-		want *ec2.IpPermission
+		want types.IpPermission
 	}{
 		{
 			name: "empty IPPermissions should be decoded to empty ec2 IPPermission",
@@ -30,9 +30,9 @@ func TestEncodeIPPermission(t *testing.T) {
 					ToPort:   nil,
 				},
 			},
-			want: &ec2.IpPermission{
+			want: types.IpPermission{
 				IpProtocol: aws.String(""),
-				IpRanges:   []*ec2.IpRange{},
+				IpRanges:   []types.IpRange{},
 			},
 		},
 		{
@@ -54,10 +54,10 @@ func TestEncodeIPPermission(t *testing.T) {
 					ToPort: aws.Int64(44),
 				},
 			},
-			want: &ec2.IpPermission{
-				FromPort:   aws.Int64(22),
+			want: types.IpPermission{
+				FromPort:   aws.Int32(22),
 				IpProtocol: aws.String("udp"),
-				IpRanges: []*ec2.IpRange{
+				IpRanges: []types.IpRange{
 					{
 						CidrIp:      aws.String("FooCIDR"),
 						Description: aws.String("FooDescription"),
@@ -67,7 +67,7 @@ func TestEncodeIPPermission(t *testing.T) {
 						Description: aws.String("BarDescription"),
 					},
 				},
-				ToPort: aws.Int64(44),
+				ToPort: aws.Int32(44),
 			},
 		},
 	}
