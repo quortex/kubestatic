@@ -30,8 +30,8 @@ github.com/aws/aws-sdk-go-v2/service/sts v1.33.17 h1:PZV5W8yk4OtH1JAuhV2PXwwO9v5
 github.com/aws/aws-sdk-go-v2/service/sts v1.33.17/go.mod h1:cQnB8CUnxbMU82JvlqjKR2HBOm3fe9pWorWBza6MBJ4=
 github.com/aws/smithy-go v1.22.5 h1:P9ATCXPMb2mPjYBgueqJNCA5S9UfktsW0tTxi+a7eqw=
 github.com/aws/smithy-go v1.22.5/go.mod h1:t1ufH5HMublsJYulve2RKmHDC15xu1f26kHCp/HgceI=
-github.com/aws/smithy-go/metrics/smithyotelmetrics v1.0.4 h1:gFEFmVnAOKc0YS90WpnCGi3I1VwMo4bIef1SXUw6jfo=
-github.com/aws/smithy-go/metrics/smithyotelmetrics v1.0.4/go.mod h1:sbv4uTbl4nq+3W6NP4KLA9VFcWc7DuuJBLIT6qWm5sk=
+github.com/aws/smithy-go/metrics/smithyotelmetrics v1.0.6 h1:6TUQCkMucmJ9+0vu8Vd8peytZT/h2Z6jwochURpQ78U=
+github.com/aws/smithy-go/metrics/smithyotelmetrics v1.0.6/go.mod h1:pTitKdPXGeouRwCxxTB/Cucl3+MnD6QdOn7XlcdhBGc=
 github.com/beorn7/perks v1.0.1 h1:VlbKKnNfV8bJzeqoa4cOKqO6bYr3WgKZxO8Z16+hsOM=
 github.com/beorn7/perks v1.0.1/go.mod h1:G2ZrVWU2WbWT9wwq4/hrbKbnv/1ERSJQ0ibhJ6rlkpw=
 github.com/blang/semver/v4 v4.0.0 h1:1PFHFE6yCCTv8C1TeyNNarDzntLi7wMI5i/pzqYIsAM=
