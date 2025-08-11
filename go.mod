@@ -6,7 +6,7 @@ require (
 	github.com/aws/aws-sdk-go-v2 v1.36.3
 	github.com/aws/aws-sdk-go-v2/config v1.29.12
 	github.com/aws/aws-sdk-go-v2/service/ec2 v1.210.1
-	github.com/aws/smithy-go v1.22.3
+	github.com/aws/smithy-go v1.22.5
 	github.com/aws/smithy-go/metrics/smithyotelmetrics v1.0.4
 	github.com/go-logr/logr v1.4.2
 	github.com/mitchellh/hashstructure/v2 v2.0.2
