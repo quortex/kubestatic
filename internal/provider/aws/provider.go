@@ -1315,6 +1315,11 @@ func (p *awsProvider) ReconcileExternalIPDeletion(
 		log.Info("Address disassociated", "addressID", address.AllocationId, "associationID", *address.AssociationId)
 	}
 
+	if externalIP.Spec.PreventEIPDeallocation {
+		log.Info("Skipping address deletion as PreventEIPDeallocation is set to true", "addressID", address.AllocationId)
+		return nil
+	}
+
 	if err := p.deleteAddress(ctx, aws.ToString(address.AllocationId)); err != nil {
 		return fmt.Errorf("failed to delete address: %w", err)
 	}
