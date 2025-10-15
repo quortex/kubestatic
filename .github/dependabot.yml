@@ -5,8 +5,6 @@ updates:
     directory: "/"
     schedule:
       interval: "monthly"
-    reviewers:
-      - "vincentmrg"
     rebase-strategy: "disabled"
 
   # Maintain dependencies for go modules
@@ -14,15 +12,25 @@ updates:
     directory: "/"
     schedule:
       interval: "monthly"
-    reviewers:
-      - "vincentmrg"
     rebase-strategy: "disabled"
+    groups:
+      # Onsi dependencies
+      onsi-go:
+        patterns:
+          - github.com/onsi/*
+      # Kubernetes and controller-runtime dependencies
+      kubernetes-go:
+        patterns:
+          - k8s.io/*
+          - sigs.k8s.io/controller-runtime
+      # AWS dependencies
+      aws:
+        patterns:
+          - github.com/aws/*
 
   # Enable version updates for Docker
   - package-ecosystem: "docker"
     directory: "/"
     schedule:
       interval: "monthly"
-    reviewers:
-      - "vincentmrg"
     rebase-strategy: "disabled"
