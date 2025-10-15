@@ -20,6 +20,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"time"
 
 	"github.com/go-logr/logr"
 	corev1 "k8s.io/api/core/v1"
@@ -47,11 +48,14 @@ const (
 	firewallRuleNodeNameKey = ".spec.nodeName"
 )
 
+var errGetPreviousNodeName = errors.New("failed to get previous node name from annotation")
+
 // FirewallRuleReconciler reconciles a FirewallRule object
 type FirewallRuleReconciler struct {
 	client.Client
-	Scheme   *runtime.Scheme
-	Provider provider.Provider
+	Scheme                        *runtime.Scheme
+	Provider                      provider.Provider
+	ReconciliationRequeueInterval time.Duration
 }
 
 // +kubebuilder:rbac:groups=kubestatic.quortex.io,resources=firewallrules,verbs=get;list;watch;create;update;patch;delete
@@ -159,8 +163,23 @@ func (r *FirewallRuleReconciler) Reconcile(ctx context.Context, req ctrl.Request
 	// then update the FirewallRule to remove the node annotation
 	if previousNodeName != "" && currentNodeName != previousNodeName {
 		if err := r.reconcileFirewallRule(ctx, log, previousNodeName, firewallRule); err != nil {
-			log.Error(err, "Failed to reconcile FirewallRule")
-			return ctrl.Result{}, err
+			if errors.Is(err, errGetPreviousNodeName) {
+				// Previous node name cannot be retrieved, likely because the node
+				// has been deleted. We skip the reconciliation for the previous node
+				// and proceed to update the FirewallRule to remove the node annotation.
+				log.Info("Previous node name cannot be retrieved, skipping reconciliation for the previous node")
+				existingFR := client.MergeFrom(firewallRule.DeepCopy())
+				delete(firewallRule.Annotations, annNodeName)
+				if err := r.Patch(ctx, firewallRule, existingFR); err != nil {
+					log.Error(err, "Failed to remove annotation node name")
+					return ctrl.Result{}, err
+				}
+				log.V(1).Info("Successfully removed annotation node name")
+				return ctrl.Result{RequeueAfter: r.ReconciliationRequeueInterval}, nil
+			} else {
+				log.Error(err, "Failed to reconcile FirewallRule")
+				return ctrl.Result{}, err
+			}
 		}
 
 		existingFR := client.MergeFrom(firewallRule.DeepCopy())
@@ -265,24 +284,35 @@ func (r *FirewallRuleReconciler) reconcileFirewallRule(
 			return err
 		}
 
-		status := v1alpha1.FirewallRuleStatus{
-			State: v1alpha1.FirewallRuleStatePending,
-		}
+		if nodeName == ptr.Deref(firewallRule.Spec.NodeName, "") {
+			// If the node is the one currently set on the FirewallRule,
+			// we cannot proceed with the reconciliation.
+			// We set the status to pending and wait for the user to change
+			// the node name or delete the FirewallRule.
+			log.Info("The node associated with the FirewallRule does not exist anymore. " +
+				"Please change the node name or delete the FirewallRule to continue.")
 
-		meta.SetStatusCondition(&status.Conditions, kmetav1.Condition{
-			Type:               v1alpha1.FirewallRuleConditionTypeSecurityGroupRuleAuthorized,
-			Status:             kmetav1.ConditionFalse,
-			ObservedGeneration: firewallRule.Generation,
-			Reason:             v1alpha1.FirewallRuleConditionReasonNodeRetrievalError,
-			Message:            fmt.Sprintf("Failed to get Node: %s", err),
-		})
-		if patchErr := patchFirewallRuleStatus(ctx, r, firewallRule, status); patchErr != nil {
-			log.Error(errors.Join(patchErr, err), "Failed to patch FirewallRule status during error handling")
-			return fmt.Errorf("failed to patch FirewallRule status during error handling: %w", errors.Join(patchErr, err))
-		}
+			status := v1alpha1.FirewallRuleStatus{
+				State: v1alpha1.FirewallRuleStatePending,
+			}
 
-		log.Error(err, "Failed to get Node")
-		return err
+			meta.SetStatusCondition(&status.Conditions, kmetav1.Condition{
+				Type:               v1alpha1.FirewallRuleConditionTypeSecurityGroupRuleAuthorized,
+				Status:             kmetav1.ConditionFalse,
+				ObservedGeneration: firewallRule.Generation,
+				Reason:             v1alpha1.FirewallRuleConditionReasonNodeRetrievalError,
+				Message:            fmt.Sprintf("Failed to get Node: %s", err),
+			})
+			if patchErr := patchFirewallRuleStatus(ctx, r, firewallRule, status); patchErr != nil {
+				log.Error(errors.Join(patchErr, err), "Failed to patch FirewallRule status during error handling")
+				return fmt.Errorf("failed to patch FirewallRule status during error handling: %w", errors.Join(patchErr, err))
+			}
+
+			log.Error(err, "Failed to get Node")
+			return err
+		} else {
+			return errGetPreviousNodeName
+		}
 	}
 
 	var firewallRules v1alpha1.FirewallRuleList
