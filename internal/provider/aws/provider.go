@@ -159,6 +159,10 @@ func (f AddressIDFilter) Filter() types.Filter {
 	}
 }
 
+func WithAddressID(addressID string) AddressIDFilter {
+	return AddressIDFilter{AddressID: addressID}
+}
+
 // ClusterIDFilter is a filter option to filter by environment ID.
 type ClusterIDFilter struct {
 	ClusterID string
@@ -1146,7 +1150,7 @@ func (p *awsProvider) ReconcileExternalIP(
 		}
 		log.Info("Address created", "addressID", addressID)
 
-		address, err = p.getAddress(ctx, Managed(), WithClusterID(p.clusterID), WithExternalIPName(externalIP.Name))
+		address, err = p.getAddress(ctx, Managed(), WithClusterID(p.clusterID), WithExternalIPName(externalIP.Name), WithAddressID(addressID))
 		if err != nil {
 			meta.SetStatusCondition(&status.Conditions, kmetav1.Condition{
 				Type:               v1alpha1.ExternalIPConditionReasonIPCreated,
