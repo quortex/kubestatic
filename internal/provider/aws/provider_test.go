@@ -766,15 +766,7 @@ var _ = Describe("AWSProvider", func() {
 				mockec2Client.EXPECT().
 					DescribeAddresses(ctx, gomock.AssignableToTypeOf(&ec2.DescribeAddressesInput{})).
 					DoAndReturn(func(_ context.Context, input *ec2.DescribeAddressesInput, _ ...func(*ec2.Options)) (*ec2.DescribeAddressesOutput, error) {
-						Expect(input.Filters).To(ConsistOf(
-							append(
-								filters,
-								types.Filter{
-									Name:   aws.String("allocation-id"),
-									Values: []string{allocationID},
-								},
-							),
-						))
+						Expect(input.Filters).To(ConsistOf(filters))
 						return &ec2.DescribeAddressesOutput{}, fmt.Errorf("describe addresses error")
 					})
 				mockec2Client.EXPECT().
@@ -817,15 +809,7 @@ var _ = Describe("AWSProvider", func() {
 					mockec2Client.EXPECT().
 						DescribeAddresses(ctx, gomock.AssignableToTypeOf(&ec2.DescribeAddressesInput{})).
 						DoAndReturn(func(_ context.Context, input *ec2.DescribeAddressesInput, _ ...func(*ec2.Options)) (*ec2.DescribeAddressesOutput, error) {
-							Expect(input.Filters).To(ConsistOf(
-								append(
-									filters,
-									types.Filter{
-										Name:   aws.String("allocation-id"),
-										Values: []string{allocationID},
-									},
-								),
-							))
+							Expect(input.Filters).To(ConsistOf(filters))
 							return &ec2.DescribeAddressesOutput{
 								Addresses: []types.Address{
 									{
@@ -880,15 +864,7 @@ var _ = Describe("AWSProvider", func() {
 					mockec2Client.EXPECT().
 						DescribeAddresses(ctx, gomock.AssignableToTypeOf(&ec2.DescribeAddressesInput{})).
 						DoAndReturn(func(_ context.Context, input *ec2.DescribeAddressesInput, _ ...func(*ec2.Options)) (*ec2.DescribeAddressesOutput, error) {
-							Expect(input.Filters).To(ConsistOf(
-								append(
-									filters,
-									types.Filter{
-										Name:   aws.String("allocation-id"),
-										Values: []string{allocationID},
-									},
-								),
-							))
+							Expect(input.Filters).To(ConsistOf(filters))
 							return &ec2.DescribeAddressesOutput{
 								Addresses: []types.Address{
 									{
@@ -950,15 +926,7 @@ var _ = Describe("AWSProvider", func() {
 					mockec2Client.EXPECT().
 						DescribeAddresses(ctx, gomock.AssignableToTypeOf(&ec2.DescribeAddressesInput{})).
 						DoAndReturn(func(_ context.Context, input *ec2.DescribeAddressesInput, _ ...func(*ec2.Options)) (*ec2.DescribeAddressesOutput, error) {
-							Expect(input.Filters).To(ConsistOf(
-								append(
-									filters,
-									types.Filter{
-										Name:   aws.String("allocation-id"),
-										Values: []string{allocationID},
-									},
-								),
-							))
+							Expect(input.Filters).To(ConsistOf(filters))
 							return &ec2.DescribeAddressesOutput{
 								Addresses: []types.Address{
 									{
@@ -1019,15 +987,7 @@ var _ = Describe("AWSProvider", func() {
 					mockec2Client.EXPECT().
 						DescribeAddresses(ctx, gomock.AssignableToTypeOf(&ec2.DescribeAddressesInput{})).
 						DoAndReturn(func(_ context.Context, input *ec2.DescribeAddressesInput, _ ...func(*ec2.Options)) (*ec2.DescribeAddressesOutput, error) {
-							Expect(input.Filters).To(ConsistOf(
-								append(
-									filters,
-									types.Filter{
-										Name:   aws.String("allocation-id"),
-										Values: []string{allocationID},
-									},
-								),
-							))
+							Expect(input.Filters).To(ConsistOf(filters))
 							return &ec2.DescribeAddressesOutput{
 								Addresses: []types.Address{
 									{
