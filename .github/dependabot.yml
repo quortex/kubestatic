@@ -14,6 +14,10 @@ updates:
       interval: "monthly"
     rebase-strategy: "disabled"
     groups:
+      # AWS dependencies
+      aws:
+        patterns:
+          - github.com/aws/*
       # Onsi dependencies
       onsi-go:
         patterns:
@@ -23,10 +27,6 @@ updates:
         patterns:
           - k8s.io/*
           - sigs.k8s.io/controller-runtime
-      # AWS dependencies
-      aws:
-        patterns:
-          - github.com/aws/*
 
   # Enable version updates for Docker
   - package-ecosystem: "docker"
