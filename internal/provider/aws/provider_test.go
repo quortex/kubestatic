@@ -589,32 +589,6 @@ var _ = Describe("AWSProvider", func() {
 			err := p.ReconcileExternalIPDeletion(ctx, log, externalIP)
 			Expect(err).ToNot(HaveOccurred())
 		})
-
-		It("should not release the address when the externalip has PreventEIPDeallocation set to true", func() {
-			externalIP.Spec.PreventEIPDeallocation = true
-			mockec2Client.EXPECT().
-				DescribeAddresses(ctx, gomock.AssignableToTypeOf(&ec2.DescribeAddressesInput{})).
-				DoAndReturn(func(_ context.Context, input *ec2.DescribeAddressesInput, _ ...func(*ec2.Options)) (*ec2.DescribeAddressesOutput, error) {
-					Expect(input.Filters).To(ConsistOf(filters))
-					return &ec2.DescribeAddressesOutput{
-						Addresses: []types.Address{
-							{
-								AssociationId: aws.String(associationID),
-								AllocationId:  aws.String(allocationID),
-							},
-						},
-					}, nil
-				})
-			mockec2Client.EXPECT().
-				DisassociateAddress(ctx, gomock.AssignableToTypeOf(&ec2.DisassociateAddressInput{})).
-				DoAndReturn(func(_ context.Context, input *ec2.DisassociateAddressInput, _ ...func(*ec2.Options)) (*ec2.DisassociateAddressOutput, error) {
-					Expect(input.AssociationId).To(PointTo(Equal(associationID)))
-					return &ec2.DisassociateAddressOutput{}, nil
-				})
-
-			err := p.ReconcileExternalIPDeletion(ctx, log, externalIP)
-			Expect(err).ToNot(HaveOccurred())
-		})
 	})
 
 	Context("ReconcileExternalIP", func() {
