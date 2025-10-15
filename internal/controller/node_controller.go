@@ -102,13 +102,13 @@ func (r *NodeReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.
 	// Check for existing eip and filter orphaned ones
 	orphanedEIPs := []v1alpha1.ExternalIP{}
 	for _, eip := range externalIPs.Items {
-		if eip.Labels[externalIPAutoAssignLabel] != "true" {
-			continue
-		}
 		// Already existing ExternalIPs for this node, end reconciliation
 		if eip.Spec.NodeName == req.Name {
 			log.V(1).Info("Already associated ExternalIP, aborting")
 			return ctrl.Result{RequeueAfter: r.ReconciliationRequeueInterval}, nil
+		}
+		if eip.Labels[externalIPAutoAssignLabel] != "true" {
+			continue
 		}
 		if eip.Spec.NodeName == "" {
 			orphanedEIPs = append(orphanedEIPs, eip)

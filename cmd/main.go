@@ -227,9 +227,10 @@ func main() {
 		os.Exit(1)
 	}
 	if err = (&controller.FirewallRuleReconciler{
-		Client:   mgr.GetClient(),
-		Scheme:   mgr.GetScheme(),
-		Provider: pvd,
+		Client:                        mgr.GetClient(),
+		Scheme:                        mgr.GetScheme(),
+		Provider:                      pvd,
+		ReconciliationRequeueInterval: nodeReconciliationRequeueInterval,
 	}).SetupWithManager(mgr); err != nil {
 		setupLog.Error(err, "unable to create controller", "controller", "FirewallRule")
 		os.Exit(1)
