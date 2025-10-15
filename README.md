@@ -162,7 +162,7 @@ Starting from version **v0.13.0**, `kubestatic` introduces a **breaking change**
 To ensure proper tracking and resource ownership, the following tags are now applied to AWS resources:
 
 - `kubestatic.quortex.io/managed`
-- `kubestatic.quortex.io/instance-id` (for Security Groups)
+- `kubestatic.quortex.io/instance-id`
 - `kubestatic.quortex.io/node-name` (for Security Groups)
 - `kubestatic.quortex.io/external-ip-name` (for External IPs)
 - `kubestatic.quortex.io/cluster-id` *(new requirement)*
