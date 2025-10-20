@@ -159,6 +159,21 @@ func (r *FirewallRuleReconciler) Reconcile(ctx context.Context, req ctrl.Request
 	// then update the FirewallRule to remove the node annotation
 	if previousNodeName != "" && currentNodeName != previousNodeName {
 		if err := r.reconcileFirewallRule(ctx, log, previousNodeName, firewallRule); err != nil {
+			if apierrors.IsNotFound(err) {
+				// Previous node name cannot be retrieved, likely because the node
+				// has been deleted. We skip the reconciliation for the previous node
+				// and proceed to update the FirewallRule to remove the node annotation.
+				log.Info("Previous node name cannot be retrieved, skipping reconciliation for the previous node")
+				existingFR := client.MergeFrom(firewallRule.DeepCopy())
+				delete(firewallRule.Annotations, annNodeName)
+				if patchErr := r.Patch(ctx, firewallRule, existingFR); patchErr != nil {
+					log.Error(errors.Join(patchErr, err), "Failed to remove annotation node name during error handling")
+					return ctrl.Result{}, errors.Join(patchErr, err)
+				}
+				log.V(1).Info("Successfully removed annotation node name")
+				return ctrl.Result{Requeue: true}, nil
+			}
+
 			log.Error(err, "Failed to reconcile FirewallRule")
 			return ctrl.Result{}, err
 		}
