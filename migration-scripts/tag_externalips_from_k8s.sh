@@ -29,12 +29,23 @@ for row in $(echo "${externalips}" | jq -r '.items[] | @base64'); do
 
     name=$(_jq '.metadata.name')
     allocation_id=$(_jq '.status.addressID')
+     existing_auto_assign=$(_jq '.metadata.labels["kubestatic.quortex.io/externalip-auto-assign"]')
 
     if [[ -z "$allocation_id" ]]; then
         echo "Could not find addresse ID for externalIP $name"
         continue
     fi
 
+ # Add label auto-assign only if missing
+    if [[ -z "$existing_auto_assign" || "$existing_auto_assign" == "null" ]]; then
+        echo "Adding label kubestatic.quortex.io/externalip-auto-assign=true to $name"
+        kubectl label externalips.kubestatic.quortex.io "$name" \
+        'kubestatic.quortex.io/externalip-auto-assign=true' \
+        --overwrite=false
+    else
+        echo "Label present on $name: kubestatic.quortex.io/externalip-auto-assign=$existing_auto_assign"
+    fi
+    
     echo "Tagging $allocation_id (EIP) with:"
     echo "    kubestatic.quortex.io/managed: true"
     echo "    kubestatic.quortex.io/external-ip-name: $name"
