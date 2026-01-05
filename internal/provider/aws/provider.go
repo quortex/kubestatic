@@ -565,7 +565,7 @@ func (p *awsProvider) revokeUselessPermission(
 	return nil
 }
 
-func (p *awsProvider) createAddress(ctx context.Context, externalIPName, instanceID string) (string, error) {
+func (p *awsProvider) createAddress(ctx context.Context, externalIPName string) (string, error) {
 	p.addressesMutex.Lock()
 	defer p.addressesMutex.Unlock()
 
@@ -582,10 +582,6 @@ func (p *awsProvider) createAddress(ctx context.Context, externalIPName, instanc
 					{
 						Key:   aws.String(string(TagKeyExternalIPName)),
 						Value: aws.String(externalIPName),
-					},
-					{
-						Key:   aws.String(string(TagKeyInstanceID)),
-						Value: aws.String(instanceID),
 					},
 					{
 						Key:   aws.String(string(TagKeyClusterID)),
@@ -1126,7 +1122,7 @@ func (p *awsProvider) ReconcileExternalIP(
 	}
 
 	if address == nil {
-		addressID, err := p.createAddress(ctx, externalIP.Name, instanceID)
+		addressID, err := p.createAddress(ctx, externalIP.Name)
 		if err != nil {
 			if provider.IsErrAddressLimitExceeded(err) {
 				meta.SetStatusCondition(&status.Conditions, kmetav1.Condition{
