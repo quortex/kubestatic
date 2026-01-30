@@ -645,10 +645,6 @@ var _ = Describe("AWSProvider", func() {
 					Key:   aws.String(string(TagKeyExternalIPName)),
 					Value: aws.String(externalIP.Name),
 				},
-				{
-					Key:   aws.String(string(TagKeyInstanceID)),
-					Value: aws.String(instanceID),
-				},
 			}
 		})
 
