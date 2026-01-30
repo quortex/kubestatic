@@ -15,13 +15,17 @@ updates:
     rebase-strategy: "disabled"
     groups:
       # AWS dependencies
-      aws:
+      aws-go:
         patterns:
           - github.com/aws/*
       # Onsi dependencies
       onsi-go:
         patterns:
           - github.com/onsi/*
+      # Otel dependencies
+      otel-go:
+        patterns:
+          - go.opentelemetry.io/otel/*
       # Kubernetes and controller-runtime dependencies
       kubernetes-go:
         patterns:
