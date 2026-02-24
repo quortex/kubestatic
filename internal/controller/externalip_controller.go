@@ -18,16 +18,15 @@ package controller
 
 import (
 	"context"
-	"encoding/json"
 	"errors"
 	"fmt"
+	"slices"
 
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/equality"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/types"
-	"k8s.io/apimachinery/pkg/util/strategicpatch"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
@@ -133,32 +132,33 @@ func (r *ExternalIPReconciler) Reconcile(ctx context.Context, req ctrl.Request) 
 		}
 		// Node not being deleted, reconcile externalip label
 		if externalIP.Spec.NodeName != "" && node.DeletionTimestamp.IsZero() {
-			// Marshal node, ...
-			old, err := json.Marshal(node)
-			if err != nil {
-				log.Error(err, "Failed to marshal node")
-				return ctrl.Result{}, err
-			}
+			// Keep original state for diff-based patch
+			stored := node.DeepCopy()
 
-			// ... then compute new node to marshal it...
+			// compute new node state with wanted labels and taints
+			if node.Labels == nil {
+				node.Labels = map[string]string{}
+			}
 			node.Labels[externalIPLabel] = *status.PublicIPAddress
-			new, err := json.Marshal(node)
-			if err != nil {
-				log.Error(err, "Failed to marshal new node")
-				return ctrl.Result{}, err
-			}
+			node.Spec.Taints = slices.DeleteFunc(node.Spec.Taints, func(t corev1.Taint) bool {
+				return t.Key == startupTaint
+			})
 
-			// ... and create a patch.
-			patch, err := strategicpatch.CreateTwoWayMergePatch(old, new, node)
-			if err != nil {
-				log.Error(err, "Failed to create patch for node")
-				return ctrl.Result{}, err
-			}
-
-			// Apply patch to set node's wanted labels.
-			if err = r.Patch(ctx, &node, client.RawPatch(types.MergePatchType, patch)); err != nil {
-				log.Error(err, "Failed to patch node")
-				return ctrl.Result{}, err
+			// Apply patch to set node's wanted labels and taints if there are any changes
+			if !equality.Semantic.DeepEqual(stored, node) {
+				// We use client.MergeFromWithOptimisticLock because patching a list with a JSON merge patch
+				// can cause races due to the fact that it fully replaces the list on a change.
+				if err := r.Patch(
+					ctx,
+					&node,
+					client.MergeFromWithOptions(
+						stored,
+						client.MergeFromWithOptimisticLock{},
+					),
+				); err != nil {
+					log.Error(err, "Failed to patch node")
+					return ctrl.Result{}, err
+				}
 			}
 		}
 	} else {

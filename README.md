@@ -123,6 +123,12 @@ sequenceDiagram
     deactivate ExternalIPController
 ```
 
+### Startup Taint
+
+Nodes should be created with the `node.kubestatic.quortex.io/externalip-not-attached` taint.
+This taint prevents pods from being scheduled on the node until the external IP is successfully attached.
+Once the external IP is associated, Kubestatic automatically removes this taint.
+
 ## Configuration
 
 ### Optional args
@@ -165,7 +171,7 @@ To ensure proper tracking and resource ownership, the following tags are now app
 - `kubestatic.quortex.io/instance-id`
 - `kubestatic.quortex.io/node-name` (for Security Groups)
 - `kubestatic.quortex.io/external-ip-name` (for External IPs)
-- `kubestatic.quortex.io/cluster-id` *(new requirement)*
+- `kubestatic.quortex.io/cluster-id` _(new requirement)_
 
 This change may affect existing resources created by earlier versions of `kubestatic`, as they may be missing the required tags. Without proper tagging, the controller will **not** manage these resources, and even try to recreate them.
 
@@ -175,7 +181,6 @@ To help you transition smoothly, two migration scripts are provided in the [`mig
 
 - [`tag_externalips_from_k8s.sh`](./migration-scripts/tag_externalips_from_k8s.sh):  
   Tags existing **Elastic IPs (EIPs)** by resolving the node names and their corresponding EC2 instance IDs.
-  
 - [`tag_firewallrules_from_k8s.sh`](./migration-scripts/tag_firewallrules_from_k8s.sh):  
   Tags existing **Security Groups (SGs)** based on the status fields of `FirewallRule` CRDs.
 
@@ -184,3 +189,4 @@ Both scripts require a `cluster-id` as a parameter, which must match the cluster
 ```bash
 ./migration-scripts/tag_externalips_from_k8s.sh <cluster-id>
 ./migration-scripts/tag_firewallrules_from_k8s.sh <cluster-id>
+```
