@@ -1075,7 +1075,7 @@ func (p *awsProvider) ReconcileFirewallRulesDeletion(
 		log.Info("Security group disassociated from network interface", "securityGroupID", securityGroupID, "networkInterfaceID", ni.NetworkInterfaceId)
 	}
 
-	if err := p.deleteSecurityGroup(ctx, securityGroupID); err != nil {
+	if err := p.deleteSecurityGroup(ctx, securityGroupID); err != nil && !provider.IsErrNotFound(err) {
 		return fmt.Errorf("failed to delete security group: %w", err)
 	}
 	log.Info("Security group deleted", "securityGroupID", securityGroupID)
