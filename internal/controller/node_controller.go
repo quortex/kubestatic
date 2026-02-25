@@ -41,6 +41,9 @@ const (
 	externalIPAutoAssignLabel = "kubestatic.quortex.io/externalip-auto-assign"
 	// externalIPLabel is the key for auto externalIP label (the externalIP a pod should have)
 	externalIPLabel = "kubestatic.quortex.io/externalip"
+	// startupTaint is the taint that should be added to nodes before their ExternalIP is attached, to
+	// prevent scheduling of pods that require an ExternalIP on them before they have one.
+	startupTaint = "node.kubestatic.quortex.io/externalip-not-attached"
 )
 
 // NodeReconciler reconciles a Node object
