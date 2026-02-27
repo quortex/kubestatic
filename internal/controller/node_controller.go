@@ -156,7 +156,7 @@ func (r *NodeReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.
 				},
 				client.MatchingFields{nodeNameField: cordonedNode.Name},
 			); err != nil {
-				log.Error(err, "Failed to list Pods", "externalIP", *eip.Status.PublicIPAddress)
+				log.Error(err, "Failed to list Pods", "externalIP", *eip.Status.PublicIPAddress, "nodeName", cordonedNode.Name)
 			}
 
 			if len(podList.Items) > 0 {
