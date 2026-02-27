@@ -74,6 +74,10 @@ Full API documentation is available [here](./docs/api-docs.asciidoc).
 
 If you want to automatically attach an external IP to certain nodes of your cluster, simply add the following label to the nodes concerned `kubestatic.quortex.io/externalip-auto-assign: true`, Kubestatic will deploy an `ExternalIP` automatically for each of these nodes. If a reserved external IP already exists, Kubestatic will reuse the one associated with the highest number of pods, based on the label `kubestatic.quortex.io/externalip`.
 
+> [!NOTE]
+> Cordoned nodes (unschedulable) are ignored by the auto-assign logic. They will not be assigned a new ExternalIP.
+> Furthermore, an ExternalIP attached to a cordoned node is considered available for reuse by other nodes, unless there are pods running on that cordoned node that explicitly require that specific ExternalIP (via the `kubestatic.quortex.io/externalip` label).
+
 Here is a sequence diagram describing how it works:
 
 ```mermaid

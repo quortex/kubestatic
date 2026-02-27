@@ -18,11 +18,13 @@ package controller
 
 import (
 	"context"
+	"slices"
 	"time"
 
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/fields"
 	"k8s.io/apimachinery/pkg/labels"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/selection"
@@ -44,6 +46,8 @@ const (
 	// startupTaint is the taint that should be added to nodes before their ExternalIP is attached, to
 	// prevent scheduling of pods that require an ExternalIP on them before they have one.
 	startupTaint = "node.kubestatic.quortex.io/externalip-not-attached"
+	// nodeNameField is the field used to index pods by their node name
+	nodeNameField = "spec.nodeName"
 )
 
 // NodeReconciler reconciles a Node object
@@ -88,6 +92,14 @@ func (r *NodeReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.
 		return ctrl.Result{}, nil
 	}
 
+	// Do not reconcile cordoned nodes, as they should not receive new ExternalIPs, and any existing
+	// ExternalIP should be considered as orphaned and be reused for other nodes if possible.
+	if node.Spec.Unschedulable {
+		log.V(1).Info("Node is cordoned, stopping reconciliation")
+		delete(r.lastReconciliation, req.Name)
+		return ctrl.Result{}, nil
+	}
+
 	// Store reconciliation time to handle reconciliation interval
 	r.lastReconciliation[req.Name] = time.Now()
 
@@ -102,6 +114,13 @@ func (r *NodeReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.
 		return ctrl.Result{}, err
 	}
 
+	// List all Nodes to check for cordoned nodes for orphaned ExternalIP filtering
+	nodes := &corev1.NodeList{}
+	if err := r.List(ctx, nodes, client.MatchingLabels{externalIPAutoAssignLabel: "true"}); err != nil {
+		log.Error(err, "Unable to list Node resources")
+		return ctrl.Result{}, err
+	}
+
 	// Check for existing eip and filter orphaned ones
 	orphanedEIPs := []v1alpha1.ExternalIP{}
 	for _, eip := range externalIPs.Items {
@@ -110,10 +129,46 @@ func (r *NodeReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.
 			log.V(1).Info("Already associated ExternalIP, aborting")
 			return ctrl.Result{RequeueAfter: r.ReconciliationRequeueInterval}, nil
 		}
+
+		// Only consider auto assigned ExternalIPs for reconciliation, other ExternalIPs may be managed
+		// by users and should not be automatically associated to nodes.
 		if eip.Labels[externalIPAutoAssignLabel] != "true" {
 			continue
 		}
+
+		// ExternalIP not associated to any node, consider it as candidate for reuse.
 		if eip.Spec.NodeName == "" {
+			orphanedEIPs = append(orphanedEIPs, eip)
+			continue
+		}
+
+		// ExternalIP associated to cordoned nodes should also be considered as orphaned if no pod with
+		// the kubestatic.quortex.io/externalip label is running on the node
+		if idx := slices.IndexFunc(nodes.Items, func(node corev1.Node) bool {
+			return node.Labels[externalIPAutoAssignLabel] == "true" && node.Spec.Unschedulable
+		}); idx != -1 {
+			cordonedNode := nodes.Items[idx]
+			sel := fields.SelectorFromSet(fields.Set{nodeNameField: cordonedNode.Name})
+			podList := &corev1.PodList{}
+			if err := r.List(
+				ctx,
+				podList,
+				client.MatchingLabels{
+					externalIPLabel: *eip.Status.PublicIPAddress,
+				},
+				client.MatchingFieldsSelector{Selector: sel},
+			); err != nil {
+				log.Error(err, "Failed to list Pods", "selector", sel, "externalIP", *eip.Status.PublicIPAddress)
+			}
+
+			if len(podList.Items) > 0 {
+				log.V(1).Info(
+					"ExternalIP associated to cordoned node with running pods, not considering it as orphaned",
+					"externalIP", eip.Name,
+					"nodeName", cordonedNode.Name,
+				)
+				continue
+			}
 			orphanedEIPs = append(orphanedEIPs, eip)
 		}
 	}
@@ -179,6 +234,20 @@ func isNodeWithAutoAssign(node *corev1.Node) bool {
 
 // SetupWithManager sets up the controller with the Manager.
 func (r *NodeReconciler) SetupWithManager(mgr ctrl.Manager) error {
+	// Index Pods by their node name to allow efficient filtering using the spec.nodeName field.
+	// This is required for the r.List call in Reconcile to filter pods by node.
+	if err := mgr.GetFieldIndexer().IndexField(
+		context.Background(),
+		&corev1.Pod{},
+		nodeNameField,
+		func(o client.Object) []string {
+			pod := o.(*corev1.Pod)
+			return []string{pod.Spec.NodeName}
+		},
+	); err != nil {
+		return err
+	}
+
 	r.lastReconciliation = map[string]time.Time{}
 	return ctrl.NewControllerManagedBy(mgr).
 		For(&corev1.Node{}, r.nodeReconciliationPredicates()).
