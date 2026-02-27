@@ -24,7 +24,6 @@ import (
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
-	"k8s.io/apimachinery/pkg/fields"
 	"k8s.io/apimachinery/pkg/labels"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/selection"
@@ -148,7 +147,6 @@ func (r *NodeReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.
 			return node.Labels[externalIPAutoAssignLabel] == "true" && node.Spec.Unschedulable
 		}); idx != -1 {
 			cordonedNode := nodes.Items[idx]
-			sel := fields.SelectorFromSet(fields.Set{nodeNameField: cordonedNode.Name})
 			podList := &corev1.PodList{}
 			if err := r.List(
 				ctx,
@@ -156,9 +154,9 @@ func (r *NodeReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.
 				client.MatchingLabels{
 					externalIPLabel: *eip.Status.PublicIPAddress,
 				},
-				client.MatchingFieldsSelector{Selector: sel},
+				client.MatchingFields{nodeNameField: cordonedNode.Name},
 			); err != nil {
-				log.Error(err, "Failed to list Pods", "selector", sel, "externalIP", *eip.Status.PublicIPAddress)
+				log.Error(err, "Failed to list Pods", "externalIP", *eip.Status.PublicIPAddress)
 			}
 
 			if len(podList.Items) > 0 {
