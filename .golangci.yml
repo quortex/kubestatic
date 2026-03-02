@@ -27,6 +27,9 @@ linters:
     dupl:
       # Increased from 150 because this operator contain a lot of boilerplate.
       threshold: 200
+    goconst:
+      ignore-string-values:
+        - "true"
     gocyclo:
       # Increased from 30 because existing reconcile functions are complex.
       min-complexity: 40
