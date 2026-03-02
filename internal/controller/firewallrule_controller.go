@@ -20,6 +20,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"slices"
 
 	"github.com/go-logr/logr"
 	corev1 "k8s.io/api/core/v1"
@@ -33,7 +34,9 @@ import (
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
+	"sigs.k8s.io/controller-runtime/pkg/handler"
 	"sigs.k8s.io/controller-runtime/pkg/log"
+	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 
 	"github.com/quortex/kubestatic/api/v1alpha1"
 	"github.com/quortex/kubestatic/internal/provider"
@@ -87,6 +90,44 @@ func (r *FirewallRuleReconciler) Reconcile(ctx context.Context, req ctrl.Request
 	if firewallRule.Spec.DisableReconciliation {
 		log.Info("Reconciliation disabled")
 		return ctrl.Result{}, nil
+	}
+
+	if ptr.Deref(firewallRule.Spec.PublicIPAddress, "") != "" {
+		log.V(1).Info("Public IP address is set on the FirewallRule, retrieving the ExternalIP to determine the target node")
+		var externalIPs v1alpha1.ExternalIPList
+		if err := r.List(ctx, &externalIPs); err != nil {
+			log.Error(err, "Unable to list ExternalIPs")
+			return ctrl.Result{}, err
+		}
+
+		// Find the ExternalIP that matches the PublicIPAddress
+		if idx := slices.IndexFunc(externalIPs.Items, func(eip v1alpha1.ExternalIP) bool {
+			return ptr.Deref(eip.Status.PublicIPAddress, "") == ptr.Deref(firewallRule.Spec.PublicIPAddress, "")
+		}); idx != -1 {
+			eip := externalIPs.Items[idx]
+
+			// Update the FirewallRule to point to the node where the ExternalIP is currently located.
+			// This ensures the firewall rule follows the public IP.
+			currentFirewallNode := ptr.Deref(firewallRule.Spec.NodeName, "")
+			desiredNode := eip.Spec.NodeName
+
+			if currentFirewallNode != desiredNode {
+				log.Info("Updating FirewallRule with the node name retrieved from the ExternalIP", "nodeName", desiredNode)
+
+				if desiredNode == "" {
+					firewallRule.Spec.NodeName = nil
+				} else {
+					firewallRule.Spec.NodeName = new(desiredNode)
+				}
+
+				if err := r.Update(ctx, firewallRule); err != nil {
+					log.Error(err, "Failed to update FirewallRule with the node name")
+					return ctrl.Result{}, err
+				}
+				log.Info("Successfully updated FirewallRule with the node name")
+				return ctrl.Result{Requeue: true}, nil
+			}
+		}
 	}
 
 	if firewallRule.Spec.NodeName == nil {
@@ -336,5 +377,32 @@ func (r *FirewallRuleReconciler) SetupWithManager(mgr ctrl.Manager) error {
 
 	return ctrl.NewControllerManagedBy(mgr).
 		For(&v1alpha1.FirewallRule{}).
+		Watches(&v1alpha1.ExternalIP{}, handler.EnqueueRequestsFromMapFunc(func(ctx context.Context, a client.Object) []reconcile.Request {
+			log := mgr.GetLogger().WithName("firewallrule-mapper").WithValues("event", "ExternalIP")
+			eip := a.(*v1alpha1.ExternalIP)
+			if ptr.Deref(eip.Status.PublicIPAddress, "") == "" {
+				log.V(1).Info("ExternalIP has no public IP address set, skipping")
+				return nil
+			}
+
+			var firewallRules v1alpha1.FirewallRuleList
+			if err := r.List(ctx, &firewallRules); err != nil {
+				log.Error(err, "Unable to list FirewallRules")
+				return nil
+			}
+
+			var requests []reconcile.Request
+			for i := range firewallRules.Items {
+				fr := firewallRules.Items[i]
+				if ptr.Deref(fr.Spec.PublicIPAddress, "") == ptr.Deref(eip.Status.PublicIPAddress, "") {
+					requests = append(requests, reconcile.Request{
+						NamespacedName: types.NamespacedName{
+							Name: fr.Name,
+						},
+					})
+				}
+			}
+			return requests
+		})).
 		Complete(r)
 }

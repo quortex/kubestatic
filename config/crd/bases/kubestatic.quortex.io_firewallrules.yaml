@@ -101,6 +101,14 @@ spec:
                   (http://www.iana.org/assignments/protocol-numbers/protocol-numbers.xhtml)).
                   Use -1 to specify all protocols.
                 type: string
+              publicIPAddress:
+                description: |-
+                  The public IP address of the node to which the firewall rule must be attached.
+                  Set either this or nodeName. If both are set, publicIPAddress takes precedence.
+                  Using publicAddress is useful when the FirewallRule must be attached to a node with ExternalIP auto-assign.
+                  In this case, the ExternalIP may be attached to several nodes during the cluster lifecycle,
+                  setting this ensure that the FirewallRule is always attached to the right node.
+                type: string
               toPort:
                 description: The end of port range for the TCP and UDP protocols,
                   or an ICMP/ICMPv6 code.
