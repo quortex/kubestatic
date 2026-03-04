@@ -43,6 +43,14 @@ type IPRange struct {
 
 // FirewallRuleSpec defines the desired state of FirewallRule
 type FirewallRuleSpec struct {
+	// The public IP address of the node to which the firewall rule must be attached.
+	// Set either this or nodeName. If both are set, publicIPAddress takes precedence.
+	// Using publicAddress is useful when the FirewallRule must be attached to a node with ExternalIP auto-assign.
+	// In this case, the ExternalIP may be attached to several nodes during the cluster lifecycle,
+	// setting this ensure that the FirewallRule is always attached to the right node.
+	// +optional
+	PublicIPAddress *string `json:"publicIPAddress,omitempty"`
+
 	// NodeName is the node's instance on which the firewall rule must be attached
 	// +optional
 	NodeName *string `json:"nodeName,omitempty"`

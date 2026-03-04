@@ -106,6 +106,11 @@ FirewallRuleSpec defines the desired state of FirewallRule
 [cols="25a,75a", options="header"]
 |===
 | Field | Description
+| *`publicIPAddress`* __string__ | The public IP address of the node to which the firewall rule must be attached.
+Set either this or nodeName. If both are set, publicIPAddress takes precedence.
+Using publicAddress is useful when the FirewallRule must be attached to a node with ExternalIP auto-assign.
+In this case, the ExternalIP may be attached to several nodes during the cluster lifecycle,
+setting this ensure that the FirewallRule is always attached to the right node.
 | *`nodeName`* __string__ | NodeName is the node's instance on which the firewall rule must be attached
 | *`description`* __string__ | A description for the firewall rule. This is informational only.
 | *`direction`* __xref:{anchor_prefix}-github-com-quortex-kubestatic-api-v1alpha1-direction[$$Direction$$]__ | The traffic direction. Ingress applies to incoming traffic. Egress applies to outbound traffic.
