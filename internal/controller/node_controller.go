@@ -144,7 +144,7 @@ func (r *NodeReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.
 		// ExternalIP associated to cordoned nodes should also be considered as orphaned if no pod with
 		// the kubestatic.quortex.io/externalip label is running on the node
 		if idx := slices.IndexFunc(nodes.Items, func(node corev1.Node) bool {
-			return node.Labels[externalIPAutoAssignLabel] == "true" && node.Spec.Unschedulable
+			return node.Labels[externalIPAutoAssignLabel] == "true" && node.Spec.Unschedulable && node.Name == eip.Spec.NodeName
 		}); idx != -1 {
 			cordonedNode := nodes.Items[idx]
 			podList := &corev1.PodList{}
@@ -199,6 +199,7 @@ func (r *NodeReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.
 		externalIP.Spec.NodeName = req.Name
 		log.V(1).Info("Associating ExternalIP to node", "externalIP", externalIP.Name)
 		if err := r.Update(ctx, externalIP); err != nil {
+			log.Error(err, "Failed to associate ExternalIP to node", "externalIP", externalIP.Name)
 			return ctrl.Result{}, err
 		}
 		return ctrl.Result{RequeueAfter: r.ReconciliationRequeueInterval}, nil
