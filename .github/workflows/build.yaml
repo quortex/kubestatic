@@ -38,7 +38,7 @@ jobs:
         uses: docker/setup-qemu-action@v3
 
       - name: Set up Docker Buildx
-        uses: docker/setup-buildx-action@v3
+        uses: docker/setup-buildx-action@v4
 
       # Login if the event is a push or a tag to be able to push
       - id: auth
