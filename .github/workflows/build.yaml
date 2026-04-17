@@ -62,7 +62,7 @@ jobs:
         run: sed -e '1 s/\(^FROM\)/FROM --platform=${BUILDPLATFORM}/; t' -e ' 1,// s//FROM --platform=${BUILDPLATFORM}/' Dockerfile > Dockerfile.cross
 
       - name: Build and push
-        uses: docker/build-push-action@v6
+        uses: docker/build-push-action@v7
         with:
           context: .
           file: Dockerfile.cross
